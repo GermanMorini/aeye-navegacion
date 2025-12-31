@@ -17,9 +17,7 @@ services:
       - ROS_LOCALHOST_ONLY=0
       - ROS_DISTRO=humble
     volumes:
-      - ./src:/ros2_ws/src/cuatri-evasion-obstaculos/src:rw
-      - ./logs:/ros2_ws/log:rw
-      - ./tools:/ros2_ws/tools:rw
+      - ./:/ros2_ws/src/navegacion_gps:rw
 
       # X11 para GUI (RViz, etc.)
       - /tmp/.X11-unix:/tmp/.X11-unix:rw

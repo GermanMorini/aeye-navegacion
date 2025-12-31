@@ -33,7 +33,7 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     sim_dir = get_package_share_directory("nav2_minimal_tb3_sim")
-    tutorial_dir = get_package_share_directory("nav2_gps_waypoint_follower_demo")
+    tutorial_dir = get_package_share_directory("navegacion_gps")
 
     # Create the launch configuration variables
     use_sim_time = LaunchConfiguration("use_sim_time")
