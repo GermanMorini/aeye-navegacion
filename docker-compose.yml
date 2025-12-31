@@ -1,0 +1,34 @@
+services:
+  cuatri_navigation:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cuatri-navigation:humble
+    container_name: cuatri_navigation
+    hostname: cuatri_nav
+    network_mode: host
+    privileged: true
+    stdin_open: true
+    tty: true
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - ROS_DOMAIN_ID=0
+      - ROS_LOCALHOST_ONLY=0
+      - ROS_DISTRO=humble
+    volumes:
+      - ./src:/ros2_ws/src/cuatri-evasion-obstaculos/src:rw
+      - ./logs:/ros2_ws/log:rw
+      - ./tools:/ros2_ws/tools:rw
+
+      # X11 para GUI (RViz, etc.)
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${HOME}/.Xauthority:/root/.Xauthority:rw
+
+      # Dispositivos de hardware (si se conecta físicamente)
+      - /dev:/dev:rw
+    devices:
+      # Permitir acceso a dispositivos USB (LIDAR, GPS, etc.)
+      - /dev/bus/usb:/dev/bus/usb
+    command: bash
+    restart: unless-stopped
