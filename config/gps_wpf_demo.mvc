@@ -40,7 +40,7 @@ displays:
     config:
       visible: true
       collapsed: false
-      frame: base_link
+      frame: base_footprint
       color: "#00ff00"
       draw_style: arrows
       position_tolerance: 0

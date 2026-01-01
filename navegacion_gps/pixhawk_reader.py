@@ -27,7 +27,7 @@ class PixhawkReader(Node):
         self.declare_parameter('frame_id_gps', 'gps')
         self.declare_parameter('odom_topic', '/odom')
         self.declare_parameter('odom_frame', 'odom')
-        self.declare_parameter('base_link_frame', 'base_link')
+        self.declare_parameter('base_link_frame', 'base_footprint')
 
         serial_port = self.get_parameter('serial_port').value
         baudrate = self.get_parameter('baudrate').value

@@ -66,6 +66,13 @@ def generate_launch_description():
             launch_ros.actions.Node(
                 package="tf2_ros",
                 executable="static_transform_publisher",
+                name="base_footprint_to_base_link_tf",
+                arguments=["0.0", "0.0", "0.0", "0.0", "0.0", "0.0", "base_footprint", "base_link"],
+                output="screen",
+            ),
+            launch_ros.actions.Node(
+                package="tf2_ros",
+                executable="static_transform_publisher",
                 name="base_to_laser_tf",
                 arguments=["0.37", "0.41", "0.92", "0.0", "0.0", "0.0", "base_link", "laser"],
                 output="screen",
