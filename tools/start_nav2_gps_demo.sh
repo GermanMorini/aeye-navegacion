@@ -25,7 +25,7 @@ WS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 MODE="${1:-none}"
 FILE_ARG="${2:-}"
 
-CONTAINER="${CONTAINER:-cuatri_navigation}"
+CONTAINER="${CONTAINER:-ros2_humble}"
 WS_IN_CONTAINER="${WS_IN_CONTAINER:-/ros2_ws}"
 
 use_container=false

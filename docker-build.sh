@@ -27,7 +27,7 @@ xhost +local:docker || echo "Warning: xhost falló, RViz puede no funcionar"
 
 # Construir imagen
 echo -e "${YELLOW}Construyendo imagen Docker...${NC}"
-docker compose build cuatri_navigation
+docker compose build ros2_humble
 
 echo -e "${GREEN}✓ Imagen construida exitosamente${NC}"
 echo ""

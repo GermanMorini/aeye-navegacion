@@ -67,7 +67,7 @@ print('Flask, Matplotlib, websockets y numpy', numpy.__version__, 'instalados co
 PY
 
 # Copiar código fuente del proyecto
-COPY . /ros2_ws/src/cuatri-evasion-obstaculos/
+COPY . /ros2_ws/src/navegacion_gps
 
 # Instalar dependencias de rosdep
 RUN /bin/bash -c "source /opt/ros/${ROS_DISTRO}/setup.bash && \
@@ -80,7 +80,7 @@ RUN /bin/bash -c "source /opt/ros/${ROS_DISTRO}/setup.bash && \
 # Compilar el workspace
 RUN /bin/bash -c "source /opt/ros/${ROS_DISTRO}/setup.bash && \
     cd /ros2_ws && \
-    colcon build --packages-select cuatri_navigation"
+    colcon build --symlink-install"
 
 # Configurar entrypoint
 COPY docker-entrypoint.sh /ros2_ws/docker-entrypoint.sh

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Compila uno o varios paquetes dentro del contenedor cuatri_navigation ya levantado.
+# Compila uno o varios paquetes dentro del contenedor ros2_humble ya levantado.
 # Uso:
 #   ./compile-ros.sh                  # compila todo el workspace
 #   ./compile-ros.sh pkg1 pkg2 ...    # compila solo esos paquetes
 
-CONTAINER="cuatri_navigation"
+CONTAINER="ros2_humble"
 WS="/ros2_ws"
 
 if [[ $# -gt 0 ]]; then

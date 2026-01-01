@@ -1,10 +1,10 @@
 services:
-  cuatri_navigation:
+  ros2_humble:
     build:
       context: .
       dockerfile: Dockerfile
-    image: cuatri-navigation:humble
-    container_name: cuatri_navigation
+    image: ros2-humble:humble
+    container_name: ros2_humble
     hostname: cuatri_nav
     network_mode: host
     privileged: true
