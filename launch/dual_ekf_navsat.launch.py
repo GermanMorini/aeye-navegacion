@@ -48,7 +48,6 @@ def generate_launch_description():
                 name="ekf_filter_node_map",
                 output="screen",
                 parameters=[rl_params_file, {"use_sim_time": True}],
-                remappings=[("odometry/filtered", "odometry/global")],
             ),
             launch_ros.actions.Node(
                 package="robot_localization",
@@ -61,8 +60,22 @@ def generate_launch_description():
                     ("gps/fix", "gps/fix"),
                     ("gps/filtered", "gps/filtered"),
                     ("odometry/gps", "odometry/gps"),
-                    ("odometry/filtered", "odometry/global"),
+                    ("odometry/filtered", "odometry/local"),
                 ],
+            ),
+            launch_ros.actions.Node(
+                package="tf2_ros",
+                executable="static_transform_publisher",
+                name="base_to_laser_tf",
+                arguments=["0.37", "0.41", "0.92", "0.0", "0.0", "0.0", "base_link", "laser"],
+                output="screen",
+            ),
+            launch_ros.actions.Node(
+                package="tf2_ros",
+                executable="static_transform_publisher",
+                name="base_to_gps_tf",
+                arguments=["0.0", "0.0", "0.5", "0.0", "0.0", "0.0", "base_link", "gps"],
+                output="screen",
             ),
         ]
     )

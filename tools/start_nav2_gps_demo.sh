@@ -24,6 +24,8 @@ WS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 MODE="${1:-none}"
 FILE_ARG="${2:-}"
+PIXHAWK_SERIAL="${PIXHAWK_SERIAL:-/dev/ttyACM0}"
+PIXHAWK_BAUD="${PIXHAWK_BAUD:-921600}"
 
 CONTAINER="${CONTAINER:-ros2_humble}"
 WS_IN_CONTAINER="${WS_IN_CONTAINER:-/ros2_ws}"
@@ -66,11 +68,18 @@ else
   exit 1
 fi
 
+ros2 run navegacion_gps pixhawk_reader --ros-args \
+  -p serial_port:=__PIXHAWK_SERIAL__ -p baudrate:=__PIXHAWK_BAUD__ &
+PIXHAWK_PID=$!
+
 ros2 launch navegacion_gps gps_waypoint_follower.launch.py \
   use_rviz:=True use_mapviz:=True &
 LAUNCH_PID=$!
 
 cleanup() {
+  if kill -0 "${PIXHAWK_PID}" 2>/dev/null; then
+    kill "${PIXHAWK_PID}"
+  fi
   if kill -0 "${LAUNCH_PID}" 2>/dev/null; then
     kill "${LAUNCH_PID}"
   fi
@@ -110,5 +119,7 @@ EOS
 COMMANDS="${COMMANDS//__WS_DIR__/${SETUP_PREFIX}}"
 COMMANDS="${COMMANDS//__MODE__/${MODE}}"
 COMMANDS="${COMMANDS//__FILE_ARG__/${FILE_ARG}}"
+COMMANDS="${COMMANDS//__PIXHAWK_SERIAL__/${PIXHAWK_SERIAL}}"
+COMMANDS="${COMMANDS//__PIXHAWK_BAUD__/${PIXHAWK_BAUD}}"
 
 run_in_context "${COMMANDS}"
