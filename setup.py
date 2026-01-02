@@ -31,7 +31,6 @@ setup(
             'logged_waypoint_follower = navegacion_gps.logged_waypoint_follower:main',
             'interactive_waypoint_follower = navegacion_gps.interactive_waypoint_follower:main',
             'gps_waypoint_logger = navegacion_gps.gps_waypoint_logger:main',
-            'pixhawk_reader = navegacion_gps.pixhawk_reader:main',
         ],
     },
 )

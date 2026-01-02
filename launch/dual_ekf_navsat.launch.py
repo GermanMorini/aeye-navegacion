@@ -13,8 +13,7 @@
 
 from launch import LaunchDescription
 from ament_index_python.packages import get_package_share_directory
-from launch.actions import IncludeLaunchDescription
-from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 import launch_ros.actions
 import os
 import launch.actions
@@ -25,9 +24,13 @@ def generate_launch_description():
         "navegacion_gps")
     rl_params_file = os.path.join(
         gps_wpf_dir, "config", "dual_ekf_navsat_params.yaml")
+    use_sim_time = LaunchConfiguration("use_sim_time")
 
     return LaunchDescription(
         [
+            launch.actions.DeclareLaunchArgument(
+                "use_sim_time", default_value="True"
+            ),
             launch.actions.DeclareLaunchArgument(
                 "output_final_position", default_value="false"
             ),
@@ -39,7 +42,7 @@ def generate_launch_description():
                 executable="ekf_node",
                 name="ekf_filter_node_odom",
                 output="screen",
-                parameters=[rl_params_file, {"use_sim_time": True}],
+                parameters=[rl_params_file, {"use_sim_time": use_sim_time}],
                 remappings=[("odometry/filtered", "odometry/local")],
             ),
             launch_ros.actions.Node(
@@ -47,14 +50,14 @@ def generate_launch_description():
                 executable="ekf_node",
                 name="ekf_filter_node_map",
                 output="screen",
-                parameters=[rl_params_file, {"use_sim_time": True}],
+                parameters=[rl_params_file, {"use_sim_time": use_sim_time}],
             ),
             launch_ros.actions.Node(
                 package="robot_localization",
                 executable="navsat_transform_node",
                 name="navsat_transform",
                 output="screen",
-                parameters=[rl_params_file, {"use_sim_time": True}],
+                parameters=[rl_params_file, {"use_sim_time": use_sim_time}],
                 remappings=[
                     ("imu/data", "imu/data"),
                     ("gps/fix", "gps/fix"),

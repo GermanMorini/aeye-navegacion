@@ -68,7 +68,7 @@ else
   exit 1
 fi
 
-ros2 run navegacion_gps pixhawk_reader --ros-args \
+ros2 run pixhawk_driver pixhawk_driver --ros-args \
   -p serial_port:=__PIXHAWK_SERIAL__ -p baudrate:=__PIXHAWK_BAUD__ &
 PIXHAWK_PID=$!
 
