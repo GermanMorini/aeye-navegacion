@@ -6,14 +6,14 @@ Demo de navegacion GPS con ROS 2 + Nav2. Usa robot_localization (EKF + navsat_tr
 - ROS 2 Humble (o compatible).
 - Paquetes ROS 2: `navigation2`, `nav2_bringup`, `robot_localization`, `mapviz`, `mapviz_plugins`, `tile_map`, `ros_gz_sim`, `nav2_minimal_tb3_sim`.
 - Simulacion: `gz sim` (Gazebo).
-- Python: `python3-yaml`, `tkinter` (para el logger GUI). `pymavlink` se usa en `pixhawk_driver`.
+- Python: `python3-yaml`, `tkinter` (para el logger GUI). `pymavlink` se usa en `sensores`.
 
 ### Estructura del proyecto
 - `navegacion_gps/`: nodos Python.
   - `logged_waypoint_follower.py`: sigue waypoints desde YAML.
   - `interactive_waypoint_follower.py`: sigue waypoints clickeados en Mapviz.
   - `gps_waypoint_logger.py`: GUI para registrar waypoints GPS.
-  - `pixhawk_driver.py`: lee Pixhawk via MAVLink y publica `/imu/data`, `/gps/fix`, `/velocity`, `/odom` (en `pixhawk_driver`).
+  - `pixhawk_driver.py`: lee Pixhawk via MAVLink y publica `/imu/data`, `/gps/fix`, `/velocity`, `/odom` (en `sensores`).
   - `utils/gps_utils.py`: conversiones GeoPose y quaternion.
 - `launch/`: lanzadores principales.
   - `gps_waypoint_follower.launch.py`: stack completo (sim + EKF + Nav2 + RViz/Mapviz).
@@ -93,7 +93,7 @@ Verifica que tu nodo publique:
 - `Imu` en `/imu` con orientacion valida.
 Si queres usar el lector de Pixhawk:
 ```bash
-ros2 run pixhawk_driver pixhawk_driver --ros-args \
+ros2 run sensores sensores --ros-args \
   -p serial_port:=/dev/ttyACM0 -p baudrate:=921600
 ```
 O lanzar todo junto (driver + localization + nav2):

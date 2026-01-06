@@ -60,9 +60,9 @@ def generate_launch_description():
         description='Pixhawk baudrate')
 
     pixhawk_cmd = Node(
-        package='pixhawk_driver',
-        executable='pixhawk_driver',
-        name='pixhawk_driver',
+        package='sensores',
+        executable='sensores',
+        name='sensores',
         output='screen',
         parameters=[{
             'serial_port': serial_port,

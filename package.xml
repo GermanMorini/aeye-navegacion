@@ -13,11 +13,15 @@
   <depend>mapviz_plugins</depend>
   <depend>tile_map</depend>
   <depend>rclpy</depend>
+  <depend>gazebo_ros</depend>
   <depend>sensor_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>std_msgs</depend>
-  <exec_depend>pixhawk_driver</exec_depend>
+  <depend>turtlebot3_description</depend>
+  <depend>turtlebot3_gazebo</depend>
+  <depend>xacro</depend>
+  <exec_depend>sensores</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>
