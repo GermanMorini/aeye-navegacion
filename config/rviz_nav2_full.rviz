@@ -1,0 +1,111 @@
+Panels:
+- Class: rviz_common/Displays
+  Name: Displays
+- Class: rviz_common/Selection
+  Name: Selection
+- Class: rviz_common/Tool Properties
+  Name: Tool Properties
+- Class: rviz_common/Views
+  Name: Views
+Visualization Manager:
+  Class: ""
+  Displays:
+  - Alpha: 0.4
+    Cell Size: 1
+    Class: rviz_default_plugins/Grid
+    Color: 160; 160; 160
+    Name: Grid
+    Enabled: true
+  - Class: rviz_default_plugins/TF
+    Frame Timeout: 10
+    Name: TF
+    Enabled: true
+    Show Axes: false
+    Show Names: false
+  - Class: rviz_default_plugins/RobotModel
+    Name: RobotModel
+    Enabled: true
+    Robot Description: robot_description
+  - Class: rviz_default_plugins/Map
+    Name: Map
+    Topic: /map
+    Enabled: true
+  - Class: rviz_default_plugins/PointCloud2
+    Name: Lidar Points
+    Enabled: true
+    Size (m): 0.03
+    Topic: /lidar/points
+  - Class: rviz_default_plugins/PointCloud2
+    Name: Cost Cloud
+    Enabled: true
+    Size (m): 0.03
+    Topic: /cost_cloud
+  - Class: rviz_default_plugins/LaserScan
+    Name: LaserScan
+    Size (m): 0.03
+    Topic: /scan
+    Enabled: true
+  - Class: rviz_default_plugins/Image
+    Name: Camera
+    Enabled: true
+    Normalize Range: true
+    Topic: /camera/image_raw
+  - Class: rviz_default_plugins/Map
+    Name: Local Costmap
+    Enabled: true
+    Topic: /local_costmap/costmap
+  - Class: rviz_default_plugins/Map
+    Name: Global Costmap
+    Enabled: true
+    Topic: /global_costmap/costmap
+  - Class: rviz_default_plugins/Polygon
+    Name: Local Footprint
+    Enabled: true
+    Topic: /local_costmap/published_footprint
+  - Class: rviz_default_plugins/Polygon
+    Name: Global Footprint
+    Enabled: true
+    Topic: /global_costmap/published_footprint
+  - Class: rviz_default_plugins/Path
+    Name: Plan
+    Enabled: true
+    Topic: /plan
+  - Class: rviz_default_plugins/Path
+    Name: Global Plan
+    Enabled: true
+    Topic: /global_plan
+  - Class: rviz_default_plugins/Path
+    Name: Local Plan
+    Enabled: true
+    Topic: /local_plan
+  - Class: rviz_default_plugins/Pose
+    Name: Goal Pose
+    Enabled: true
+    Topic: /goal_pose
+  - Class: rviz_default_plugins/Odometry
+    Name: Odometry
+    Topic: /odom
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: odom
+  Tools:
+  - Class: rviz_default_plugins/Interact
+  - Class: rviz_default_plugins/MoveCamera
+  - Class: rviz_default_plugins/Select
+  - Class: rviz_default_plugins/Measure
+  - Class: rviz_default_plugins/SetInitialPose
+    Topic: /initialpose
+  - Class: rviz_default_plugins/SetGoal
+    Topic: /goal_pose
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 8
+      Focal Point: 0; 0; 0
+      Pitch: 0.4
+      Yaw: 0.8
+Window Geometry:
+  Height: 900
+  Width: 1440
+  X: 60
+  Y: 60

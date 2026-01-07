@@ -14,6 +14,7 @@
 from launch import LaunchDescription
 from ament_index_python.packages import get_package_share_directory
 from launch.substitutions import LaunchConfiguration
+from launch_ros.parameter_descriptions import ParameterValue
 import launch_ros.actions
 import os
 import launch.actions
@@ -42,7 +43,10 @@ def generate_launch_description():
                 executable="ekf_node",
                 name="ekf_filter_node_odom",
                 output="screen",
-                parameters=[rl_params_file, {"use_sim_time": use_sim_time}],
+                parameters=[
+                    rl_params_file,
+                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+                ],
                 remappings=[("odometry/filtered", "odometry/local")],
             ),
             launch_ros.actions.Node(
@@ -50,14 +54,20 @@ def generate_launch_description():
                 executable="ekf_node",
                 name="ekf_filter_node_map",
                 output="screen",
-                parameters=[rl_params_file, {"use_sim_time": use_sim_time}],
+                parameters=[
+                    rl_params_file,
+                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+                ],
             ),
             launch_ros.actions.Node(
                 package="robot_localization",
                 executable="navsat_transform_node",
                 name="navsat_transform",
                 output="screen",
-                parameters=[rl_params_file, {"use_sim_time": use_sim_time}],
+                parameters=[
+                    rl_params_file,
+                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+                ],
                 remappings=[
                     ("imu/data", "imu/data"),
                     ("gps/fix", "gps/fix"),

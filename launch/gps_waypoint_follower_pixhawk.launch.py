@@ -38,16 +38,28 @@ def generate_launch_description():
     use_mapviz = LaunchConfiguration('use_mapviz')
     serial_port = LaunchConfiguration('serial_port')
     baudrate = LaunchConfiguration('baudrate')
+    use_ackermann_converter = LaunchConfiguration('use_ackermann_converter')
+    rviz_config = LaunchConfiguration('rviz_config')
 
     declare_use_rviz_cmd = DeclareLaunchArgument(
         'use_rviz',
         default_value='False',
         description='Whether to start RVIZ')
 
+    declare_rviz_config_cmd = DeclareLaunchArgument(
+        'rviz_config',
+        default_value=os.path.join(params_dir, 'rviz_nav2_full.rviz'),
+        description='Path to the RViz config file')
+
     declare_use_mapviz_cmd = DeclareLaunchArgument(
         'use_mapviz',
         default_value='False',
         description='Whether to start mapviz')
+
+    declare_use_ackermann_converter_cmd = DeclareLaunchArgument(
+        'use_ackermann_converter',
+        default_value='True',
+        description='Whether to convert /cmd_vel Twist to Ackermann commands')
 
     declare_serial_port_cmd = DeclareLaunchArgument(
         'serial_port',
@@ -70,6 +82,20 @@ def generate_launch_description():
         }],
     )
 
+    ackermann_converter_cmd = Node(
+        package='navegacion_gps',
+        executable='twist_to_ackermann',
+        name='twist_to_ackermann',
+        output='screen',
+        parameters=[{
+            'input_topic': '/cmd_vel',
+            'output_topic': '/ackermann_cmd',
+            'wheelbase': 0.60,
+            'steering_limit': 0.5235987756,
+        }],
+        condition=IfCondition(use_ackermann_converter),
+    )
+
     robot_localization_cmd = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(launch_dir, 'dual_ekf_navsat.launch.py')),
@@ -89,10 +115,14 @@ def generate_launch_description():
         }.items(),
     )
 
-    rviz_cmd = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(bringup_dir, "launch", 'rviz_launch.py')),
-        condition=IfCondition(use_rviz)
+    rviz_cmd = Node(
+        package='rviz2',
+        executable='rviz2',
+        name='rviz2',
+        output='screen',
+        arguments=['-d', rviz_config],
+        parameters=[{'use_sim_time': False}],
+        condition=IfCondition(use_rviz),
     )
 
     mapviz_cmd = IncludeLaunchDescription(
@@ -104,12 +134,15 @@ def generate_launch_description():
     ld = LaunchDescription()
     ld.add_action(declare_serial_port_cmd)
     ld.add_action(declare_baudrate_cmd)
+    ld.add_action(declare_use_ackermann_converter_cmd)
     ld.add_action(pixhawk_cmd)
     ld.add_action(robot_localization_cmd)
     ld.add_action(navigation2_cmd)
     ld.add_action(declare_use_rviz_cmd)
+    ld.add_action(declare_rviz_config_cmd)
     ld.add_action(rviz_cmd)
     ld.add_action(declare_use_mapviz_cmd)
     ld.add_action(mapviz_cmd)
+    ld.add_action(ackermann_converter_cmd)
 
     return ld

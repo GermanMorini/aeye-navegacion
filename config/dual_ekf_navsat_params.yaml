@@ -146,12 +146,16 @@ ekf_filter_node_map:
 
 navsat_transform:
   ros__parameters:
+    base_link_frame: base_footprint
+    gps_frame: gps_link
+    imu_frame: imu_link
     frequency: 30.0
     delay: 3.0
     magnetic_declination_radians: 0.0
     yaw_offset: 0.0
     zero_altitude: true
-    broadcast_utm_transform: true
+    broadcast_utm_transform: false
+    broadcast_cartesian_transform: true
     publish_filtered_gps: true
     use_odometry_yaw: false
     wait_for_datum: false
