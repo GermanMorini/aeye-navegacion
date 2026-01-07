@@ -195,7 +195,7 @@
     <origin xyz="0.30 0.28 0.15" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
     <dynamics damping="5.0" friction="0.0"/>
-    <limit lower="-0.5235987756" upper="0.5235987756" effort="50" velocity="2.0"/>
+    <limit lower="-0.5235987756" upper="0.5235987756" effort="50" velocity="5.0"/>
   </joint>
 
   <!-- Front Left wheel -->
@@ -248,7 +248,7 @@
     <origin xyz="0.30 -0.28 0.15" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
     <dynamics damping="5.0" friction="0.0"/>
-    <limit lower="-0.5235987756" upper="0.5235987756" effort="50" velocity="2.0"/>
+    <limit lower="-0.5235987756" upper="0.5235987756" effort="50" velocity="5.0"/>
   </joint>
 
   <!-- Front Right wheel -->
@@ -302,9 +302,9 @@
       <steering_limit>0.5235987756</steering_limit>
       <max_steer>0.5235987756</max_steer>
       <max_speed>2.0</max_speed>
-      <left_steering_pid_gain>300 0 1</left_steering_pid_gain>
+      <left_steering_pid_gain>3000 0 1</left_steering_pid_gain>
+      <right_steering_pid_gain>3000 0 1</right_steering_pid_gain>
       <left_steering_i_range>0 0</left_steering_i_range>
-      <right_steering_pid_gain>300 0 1</right_steering_pid_gain>
       <right_steering_i_range>0 0</right_steering_i_range>
       <linear_velocity_pid_gain>1000 0 1</linear_velocity_pid_gain>
       <linear_velocity_i_range>0 0</linear_velocity_i_range>

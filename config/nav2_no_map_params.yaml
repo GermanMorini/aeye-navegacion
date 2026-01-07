@@ -26,13 +26,13 @@ planner_server:
       max_planning_time: 2.0
 
       motion_model_for_search: "REEDS_SHEPP"
-      minimum_turning_radius: 1.0      # AJUSTAR A TU VEHÍCULO
+      minimum_turning_radius: 0.9370394869      # AJUSTAR A TU VEHÍCULO
       angle_quantization_bins: 72
 
-      reverse_penalty: 2.0
+      reverse_penalty: 0.5
       change_penalty: 1.0
-      non_straight_penalty: 1.2
-      cost_penalty: 1.5
+      non_straight_penalty: 0.8
+      cost_penalty: 1.2
 
       smooth_path: true
       debug_visualizations: false
@@ -70,29 +70,36 @@ controller_server:
       batch_size: 2000
       iteration_count: 1
 
-      vx_max: 0.26
-      vx_min: -0.26          # REVERSA
+      vx_max: 3.0
+      vx_min: -3.0          # REVERSA
       vy_max: 0.0
-      wz_max: 1.0
-      wz_min: -1.0
+      wz_max: 10.0
+      wz_min: -10.0
 
       vx_std: 0.1
-      wz_std: 0.3
+      wz_std: 0.6
 
       AckermannConstraints:
-        min_turning_r: 1.0  # IGUAL AL PLANNER
+        min_turning_r: 0.9370394869  # Permite giros mas cerrados
 
       critics:
         [
           "ConstraintCritic",
-          "GoalCritic",
-          "GoalAngleCritic",
-          "PathFollowCritic",
-          "PreferForwardCritic"
+          "CostCritic",
+          "GoalCritic"
         ]
 
-      PreferForwardCritic:
-        cost_weight: 5.0
+      ConstraintCritic:
+        enabled: true
+        cost_weight: 2.0   # BAJO
+
+      CostCritic:
+        enabled: true
+        cost_weight: 2.0
+
+      GoalCritic:
+        enabled: true
+        cost_weight: 3.0
 
 # ================================
 # LOCAL COSTMAP (rolling)
@@ -195,11 +202,11 @@ velocity_smoother:
     feedback: "CLOSED_LOOP"
     odom_topic: /odom
 
-    max_velocity: [0.26, 0.0, 1.0]
-    min_velocity: [-0.26, 0.0, -1.0]
+    max_velocity: [3.0, 0.0, 1.0]
+    min_velocity: [-3.0, 0.0, -1.0]
 
-    max_accel: [1.0, 0.0, 1.5]
-    max_decel: [-1.2, 0.0, -1.8]
+    max_accel: [2.0, 0.0, 1.5]
+    max_decel: [-3.0, 0.0, -1.8]
 
     deadband_velocity: [0.01, 0.0, 0.0]
     velocity_timeout: 0.5

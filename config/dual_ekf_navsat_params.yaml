@@ -2,7 +2,7 @@
 
 ekf_filter_node_odom:
   ros__parameters:
-    use_sim_time: false
+    use_sim_time: true
     frequency: 30.0
     sensor_timeout: 0.1
     two_d_mode: true
@@ -69,7 +69,7 @@ ekf_filter_node_odom:
 
 ekf_filter_node_map:
   ros__parameters:
-    use_sim_time: false
+    use_sim_time: true
     frequency: 30.0
     sensor_timeout: 0.1
     two_d_mode: true

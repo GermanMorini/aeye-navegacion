@@ -13,6 +13,7 @@ Teleop teclado (WASD)
 ---------------------------
 W/X : adelante/atras
 A/D : girar izquierda/derecha
+Q/E/Z/C (Shift) : diagonales (avanzar/retroceder y girar)
 Q/Z : subir/bajar velocidad lineal
 E/C : subir/bajar velocidad angular
 S o espacio : stop
@@ -24,6 +25,10 @@ MOVE_BINDINGS = {
     'x': (-1.0, 0.0),
     'a': (0.0, 1.0),
     'd': (0.0, -1.0),
+    'Q': (1.0, 1.0),
+    'E': (1.0, -1.0),
+    'Z': (-1.0, 1.0),
+    'C': (-1.0, -1.0),
     's': (0.0, 0.0),
     ' ': (0.0, 0.0),
 }
