@@ -405,4 +405,97 @@
     </sensor>
   </gazebo>
 
+  <!-- <gazebo reference="rear_center_ultrasound">
+    <sensor type="ray" name="rear_center_sensor">
+      <always_on>true</always_on>
+      <update_rate>10</update_rate>
+      <visualize>true</visualize>
+      <ray>
+        <scan>
+          <horizontal>
+            <samples>5</samples>
+            <resolution>1</resolution>
+            <min_angle>-0.15</min_angle>
+            <max_angle>0.15</max_angle>
+          </horizontal>
+        </scan>
+        <range>
+          <min>0.05</min>
+          <max>2.0</max>
+          <resolution>0.01</resolution>
+        </range>
+      </ray>
+      <plugin name="gazebo_ros_range" filename="libgazebo_ros_range.so">
+        <ros>
+          <remapping>~/out:=ultrasound/rear_center</remapping>
+        </ros>
+        <output_type>sensor_msgs/Range</output_type>
+        <radiation_type>ultrasound</radiation_type>
+        <frame_name>rear_center_ultrasound</frame_name>
+      </plugin>
+    </sensor>
+  </gazebo>
+
+  <gazebo reference="rear_right_ultrasound">
+    <sensor type="ray" name="rear_right_sensor">
+      <always_on>true</always_on>
+      <update_rate>10</update_rate>
+      <visualize>true</visualize>
+      <ray>
+        <scan>
+          <horizontal>
+            <samples>5</samples>
+            <resolution>1</resolution>
+            <min_angle>-0.15</min_angle>
+            <max_angle>0.15</max_angle>
+          </horizontal>
+        </scan>
+        <range>
+          <min>0.05</min>
+          <max>2.0</max>
+          <resolution>0.01</resolution>
+        </range>
+      </ray>
+      <plugin name="gazebo_ros_range" filename="libgazebo_ros_range.so">
+        <ros>
+          <remapping>~/out:=ultrasound/rear_center</remapping>
+        </ros>
+        <output_type>sensor_msgs/Range</output_type>
+        <radiation_type>ultrasound</radiation_type>
+        <frame_name>rear_center_ultrasound</frame_name>
+      </plugin>
+    </sensor>
+  </gazebo>
+
+  <gazebo reference="rear_left_ultrasound">
+    <sensor type="ray" name="rear_left_sensor">
+      <always_on>true</always_on>
+      <update_rate>10</update_rate>
+      <visualize>true</visualize>
+      <ray>
+        <scan>
+          <horizontal>
+            <samples>5</samples>
+            <resolution>1</resolution>
+            <min_angle>-0.15</min_angle>
+            <max_angle>0.15</max_angle>
+          </horizontal>
+        </scan>
+        <range>
+          <min>0.05</min>
+          <max>2.0</max>
+          <resolution>0.01</resolution>
+        </range>
+      </ray>
+      <plugin name="gazebo_ros_range" filename="libgazebo_ros_range.so">
+        <ros>
+          <remapping>~/out:=ultrasound/rear_center</remapping>
+        </ros>
+        <output_type>sensor_msgs/Range</output_type>
+        <radiation_type>ultrasound</radiation_type>
+        <frame_name>rear_center_ultrasound</frame_name>
+      </plugin>
+    </sensor>
+  </gazebo> -->
+
 </robot>

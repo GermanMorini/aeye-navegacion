@@ -67,10 +67,10 @@ planner_server:
       minimum_turning_radius: 1.645448267      # RADIO DE GIRO
       angle_quantization_bins: 72
 
-      allow_reversing: false      # PERMITIR REVERSA
-      reverse_penalty: 2.0
+      allow_reversing: true      # PERMITIR REVERSA
+      reverse_penalty: 0.5
       change_penalty: 1.0
-      non_straight_penalty: 0.5
+      non_straight_penalty: 0.3
       cost_penalty: 2.0
 
       smooth_path: true
@@ -111,7 +111,7 @@ controller_server:
       iteration_count: 1
 
       vx_max: 3.0
-      vx_min: 0.0          # REVERSA
+      vx_min: -3.0          # REVERSA
       wz_max: 2.0       # VELOCIDAD DE GIRO
       wz_min: -2.0
       vy_max: 0.0       # NO TOCAR
