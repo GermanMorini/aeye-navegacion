@@ -100,10 +100,16 @@ def generate_launch_description():
     bt_xml = os.path.join(
         params_dir, "navigate_to_pose_w_replanning_and_recovery_no_spin.xml"
     )
+    bt_through_poses_xml = os.path.join(
+        params_dir, "navigate_through_poses_w_replanning_and_recovery_no_spin.xml"
+    )
     configured_params = RewrittenYaml(
         source_file=nav2_params,
         root_key="",
-        param_rewrites={"default_nav_to_pose_bt_xml": bt_xml},
+        param_rewrites={
+            "default_nav_to_pose_bt_xml": bt_xml,
+            "default_nav_through_poses_bt_xml": bt_through_poses_xml,
+        },
         convert_types=True,
     )
 
