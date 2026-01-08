@@ -391,11 +391,12 @@
 
   <gazebo reference="imu_link">
     <sensor type="imu" name="imu_sensor">
+      <always_on>true</always_on>
       <update_rate>100</update_rate>
       <plugin name="gazebo_ros_imu" filename="libgazebo_ros_imu_sensor.so">
         <ros>
           <namespace>/</namespace>
-          <remapping>imu:=/imu/data</remapping>
+          <remapping>~/out:=/imu/data</remapping>
         </ros>
         <frame_name>imu_link</frame_name>
       </plugin>
@@ -404,6 +405,7 @@
 
   <gazebo reference="gps_link">
     <sensor type="gps" name="gps_sensor">
+      <always_on>true</always_on>
       <update_rate>5</update_rate>
       <!-- OJO: este filename depende de tu instalación.
            Si no existe, Gazebo lo va a decir en consola. -->

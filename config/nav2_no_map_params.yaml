@@ -5,7 +5,7 @@ bt_navigator:
   ros__parameters:
     use_sim_time: true
     global_frame: map
-    robot_base_frame: base_footprint
+    robot_base_frame: base_link
     odom_topic: /odom
     navigators: ["navigate_to_pose"]
     navigate_to_pose:
@@ -165,7 +165,7 @@ local_costmap:
       update_frequency: 5.0
       publish_frequency: 2.0
       global_frame: odom
-      robot_base_frame: base_footprint
+      robot_base_frame: base_link
       rolling_window: true
       width: 10
       height: 10
@@ -215,7 +215,7 @@ global_costmap:
       update_frequency: 1.0
       publish_frequency: 1.0
       global_frame: map
-      robot_base_frame: base_footprint
+      robot_base_frame: base_link
       footprint: "[[0.72,0.46],[0.72,-0.46],[-0.72,-0.46],[-0.72,0.46]]"
       footprint_padding: 0.15
       rolling_window: true
