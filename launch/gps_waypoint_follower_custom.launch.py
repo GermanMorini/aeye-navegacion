@@ -66,7 +66,7 @@ def _launch_gazebo(context):
             "-file",
             custom_urdf,
             "-x",
-            "-10.0",
+            "-12.0",
             "-y",
             "0",
             "-z",
@@ -149,7 +149,7 @@ def generate_launch_description():
                 "input_topic": "/cmd_vel",
                 "output_topic": "/cmd_vel_steer",
                 "output_type": "twist",
-                "wheelbase": 0.60,
+                "wheelbase": 0.94,
                 "steering_limit": 0.5235987756,
                 "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
             }

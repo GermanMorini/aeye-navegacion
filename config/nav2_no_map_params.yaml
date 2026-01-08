@@ -11,6 +11,39 @@ bt_navigator:
     navigate_to_pose:
       plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
 
+behavior_server:
+  ros__parameters:
+    use_sim_time: true
+    local_frame: odom
+    global_frame: map
+    robot_base_frame: base_link # Asegúrate que coincida con tu URDF
+    transform_tolerance: 0.1
+    
+    # Solo habilitamos comportamientos que un coche puede hacer
+    behavior_plugins: ["backup", "drive_on_heading", "wait"]
+    
+    # 1. Comportamiento de Retroceso (Back up)
+    backup:
+      plugin: "nav2_behaviors/BackUp"
+    
+    # 2. Comportamiento de Avance (Drive on Heading)
+    drive_on_heading:
+      plugin: "nav2_behaviors/DriveOnHeading"
+    
+    # 3. Comportamiento de Espera (Wait)
+    wait:
+      plugin: "nav2_behaviors/Wait"
+
+    # LIMITES DE ACELERACIÓN (Esto quita el mensaje de INFO que viste)
+    # Ajustados para un robot tipo coche de tamaño medio
+    max_acceleration: 0.2     # m/s^2 (suave para no patinar en Gazebo)
+    max_deceleration: 0.5     # m/s^2
+    max_angular_acceleration: 0.1 # rad/s^2
+    max_angular_deceleration: 0.1 # rad/s^2
+
+    # Parámetros específicos de las maniobras
+    simulate_ahead_time: 2.0
+  
 # ================================
 # PLANNER (Hybrid A* con reversa)
 # ================================
@@ -20,20 +53,22 @@ planner_server:
     planner_plugins: ["GridBased"]
     GridBased:
       plugin: "nav2_smac_planner/SmacPlannerHybrid"
+      optimizer_costmap_weight: 15.0
 
       tolerance: 0.5
       allow_unknown: true
       max_planning_time: 2.0
+      max_iterations: 1000000
 
       motion_model_for_search: "REEDS_SHEPP"
-      minimum_turning_radius: 1.5      # AJUSTAR A TU VEHÍCULO
+      minimum_turning_radius: 1.645448267      # RADIO DE GIRO
       angle_quantization_bins: 72
 
-      allow_reversing: false
-      reverse_penalty: 0.5
+      allow_reversing: false      # PERMITIR REVERSA
+      reverse_penalty: 2.0
       change_penalty: 1.0
-      non_straight_penalty: 0.8
-      cost_penalty: 1.0
+      non_straight_penalty: 1.5
+      cost_penalty: 2.0
 
       smooth_path: true
       debug_visualizations: false
@@ -73,16 +108,16 @@ controller_server:
       iteration_count: 1
 
       vx_max: 3.0
-      vx_min: -3.0          # REVERSA
-      vy_max: 0.0
-      wz_max: 10.0
-      wz_min: -10.0
+      vx_min: 0.0          # REVERSA
+      wz_max: 2.0       # VELOCIDAD DE GIRO
+      wz_min: -2.0
+      vy_max: 0.0       # NO TOCAR
 
       vx_std: 0.1
       wz_std: 0.6
 
       AckermannConstraints:
-        min_turning_r: 1.5  # Permite giros mas cerrados
+        min_turning_r: 1.645448267  # RADIO DE GIRO
 
       critics:
         [
@@ -171,14 +206,14 @@ local_costmap:
       height: 10
       resolution: 0.1
       transform_tolerance: 1.0
-      footprint: "[[0.72,0.46],[0.72,-0.46],[-0.72,-0.46],[-0.72,0.46]]"
+      footprint: "[[1.19,0.46],[1.19,-0.46],[-0.25,-0.46],[-0.25,0.46]]"
       footprint_padding: 0.15
       plugins: ["voxel_layer", "inflation_layer"]
 
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        inflation_radius: 1.5
-        cost_scaling_factor: 2.5
+        inflation_radius: 3.0
+        cost_scaling_factor: 1.5
       voxel_layer:
         plugin: "nav2_costmap_2d::VoxelLayer"
         enabled: True
@@ -216,7 +251,7 @@ global_costmap:
       publish_frequency: 1.0
       global_frame: map
       robot_base_frame: base_link
-      footprint: "[[0.72,0.46],[0.72,-0.46],[-0.72,-0.46],[-0.72,0.46]]"
+      footprint: "[[1.19,0.46],[1.19,-0.46],[-0.25,-0.46],[-0.25,0.46]]"
       footprint_padding: 0.15
       rolling_window: true
       width: 40
@@ -224,6 +259,7 @@ global_costmap:
       resolution: 0.05
       transform_tolerance: 1.0
       track_unknown_space: true
+      use_maximum_static_value: true
       plugins: ["obstacle_layer", "inflation_layer"]
 
       obstacle_layer:
