@@ -8,7 +8,7 @@
   <BehaviorTree ID="MainTree">
     <RecoveryNode number_of_retries="6" name="NavigateRecovery">
       <PipelineSequence>
-        <RateController hz="1.0" name="RateControllerComputePathToPose">
+        <RateController hz="5.0" name="RateControllerComputePathToPose">
           <RecoveryNode number_of_retries="1" name="RecoveryComputePathToPose">
             <Fallback name="FallbackComputePathToPose">
               <ReactiveSequence name="CheckIfNewPathNeeded">
@@ -39,7 +39,7 @@
               service_name="global_costmap/clear_entirely_global_costmap" />
           </Sequence>
           <Wait name="WaitRecovery" wait_duration="5" />
-          <BackUp name="BackUpRecovery" backup_dist="0.30" backup_speed="0.18" />
+          <BackUp name="BackUpRecovery" backup_dist="1.0" backup_speed="0.2" />
         </RoundRobin>
       </ReactiveFallback>
     </RecoveryNode>

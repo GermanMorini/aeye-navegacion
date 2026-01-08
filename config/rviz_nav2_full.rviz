@@ -49,7 +49,7 @@ Visualization Manager:
     Name: Camera
     Enabled: true
     Normalize Range: true
-    Topic: /camera/image_raw
+    Topic: /front_camera/image_raw
   - Class: rviz_default_plugins/Map
     Name: Local Costmap
     Enabled: true

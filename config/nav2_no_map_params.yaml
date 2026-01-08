@@ -64,13 +64,13 @@ planner_server:
       max_iterations: 1000000
 
       motion_model_for_search: "REEDS_SHEPP"
-      minimum_turning_radius: 1.645448267      # RADIO DE GIRO
+      minimum_turning_radius: 1.75      # RADIO DE GIRO
       angle_quantization_bins: 72
 
       allow_reversing: true      # PERMITIR REVERSA
-      reverse_penalty: 0.5
+      reverse_penalty: 10.0
       change_penalty: 1.0
-      non_straight_penalty: 0.3
+      non_straight_penalty: 2.5
       cost_penalty: 2.0
 
       smooth_path: true
@@ -110,17 +110,19 @@ controller_server:
       batch_size: 800
       iteration_count: 1
 
-      vx_max: 3.0
-      vx_min: -3.0          # REVERSA
+      # VELOCIDADES
+      regulated_linear_velocity_scaling_factor: 0.8 # mas alto -> mas frena en curvas
+      vx_max: 2.0
+      vx_min: -1.0          # REVERSA
       wz_max: 2.0       # VELOCIDAD DE GIRO
       wz_min: -2.0
       vy_max: 0.0       # NO TOCAR
 
-      vx_std: 0.1
-      wz_std: 0.6
+      vx_std: 0.2
+      wz_std: 0.4
 
       AckermannConstraints:
-        min_turning_r: 1.645448267  # RADIO DE GIRO
+        min_turning_r: 1.75  # RADIO DE GIRO
 
       critics:
         [
@@ -131,18 +133,19 @@ controller_server:
           "PathAlignCritic",
           "PathFollowCritic",
           "PathAngleCritic",
-          "PreferForwardCritic"
+          "PreferForwardCritic",
+          "ObstaclesCritic"
         ]
 
       ConstraintCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 2.0   # BAJO
+        cost_weight: 2.0
 
       CostCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 8.0
+        cost_weight: 5.0
         critical_cost: 250.0
         consider_footprint: true
         collision_cost: 1000000.0
@@ -152,13 +155,14 @@ controller_server:
       GoalCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 3.0
-        threshold_to_consider: 1.4
+        cost_weight: 15.0
+        threshold_to_consider: 1.5
+        trajectory_point_step: 1
 
       GoalAngleCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 3.0
+        cost_weight: 10.0
         threshold_to_consider: 0.5
 
       PreferForwardCritic:
@@ -170,7 +174,7 @@ controller_server:
       PathAlignCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 14.0
+        cost_weight: 3.0
         max_path_occupancy_ratio: 0.05
         trajectory_point_step: 4
         threshold_to_consider: 0.5
@@ -180,7 +184,8 @@ controller_server:
       PathFollowCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 5.0
+        cost_weight: 7.0
+        offset_from_path: true
         offset_from_furthest: 5
         threshold_to_consider: 1.4
 
@@ -192,6 +197,11 @@ controller_server:
         threshold_to_consider: 0.5
         max_angle_to_furthest: 1.0
         mode: 0
+
+      ObstaclesCritic:
+        enabled: true
+        cost_weight: 6.0
+        consider_footprint: true
 
 # ================================
 # LOCAL COSTMAP (rolling)
@@ -205,18 +215,19 @@ local_costmap:
       global_frame: odom
       robot_base_frame: base_link
       rolling_window: true
-      width: 10
-      height: 10
+      width: 20
+      height: 20
       resolution: 0.1
       transform_tolerance: 1.0
       footprint: "[[1.19,0.46],[1.19,-0.46],[-0.25,-0.46],[-0.25,0.46]]"
       footprint_padding: 0.15
       plugins: ["voxel_layer", "inflation_layer"]
+      track_unknown_space: false
 
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         inflation_radius: 3.0
-        cost_scaling_factor: 1.5
+        cost_scaling_factor: 2.0
       voxel_layer:
         plugin: "nav2_costmap_2d::VoxelLayer"
         enabled: True
@@ -261,7 +272,7 @@ global_costmap:
       height: 40
       resolution: 0.05
       transform_tolerance: 1.0
-      track_unknown_space: true
+      track_unknown_space: false
       use_maximum_static_value: true
       plugins: ["obstacle_layer", "inflation_layer"]
 
@@ -278,13 +289,13 @@ global_costmap:
           data_type: "PointCloud2"
           raytrace_max_range: 20.0
           raytrace_min_range: 0.0
-          obstacle_max_range: 20.0
+          obstacle_max_range: 10.0
           obstacle_min_range: 0.0
 
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        inflation_radius: 1.2
-        cost_scaling_factor: 2.0
+        inflation_radius: 0.5
+        cost_scaling_factor: 10.0
       always_send_full_costmap: true
 
 # ================================
@@ -297,13 +308,14 @@ velocity_smoother:
     feedback: "CLOSED_LOOP"
     odom_topic: /odom
 
-    max_velocity: [3.0, 0.0, 1.0]
-    min_velocity: [-3.0, 0.0, -1.0]
+    max_velocity: [2.0, 0.0, 3.0]
+    min_velocity: [-1.0, 0.0, -3.0]
 
-    max_accel: [2.0, 0.0, 1.5]
-    max_decel: [-3.0, 0.0, -1.8]
+    max_accel: [1.0, 0.0, 3.0]
+    max_decel: [-5.0, 0.0, -3.0]
 
-    deadband_velocity: [0.01, 0.0, 0.0]
+    # si la velocidad calculada es menor a esto se envía 0 a los motores
+    deadband_velocity: [0.05, 0.0, 0.05]
     velocity_timeout: 0.5
 
 # ================================

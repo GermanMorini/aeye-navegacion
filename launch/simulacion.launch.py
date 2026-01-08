@@ -127,12 +127,12 @@ def generate_launch_description():
     )
     declare_custom_urdf_cmd = DeclareLaunchArgument(
         "custom_urdf",
-        default_value=os.path.join(gps_wpf_dir, "urdf", "modelo.urdf"),
+        default_value=os.path.join(gps_wpf_dir, "urdf", "cuatri.urdf"),
         description="Path to custom URDF to spawn in Gazebo",
     )
     declare_use_rviz_cmd = DeclareLaunchArgument(
         "use_rviz",
-        default_value="False",
+        default_value="True",
         description="Whether to start RVIZ",
     )
     declare_rviz_config_cmd = DeclareLaunchArgument(
@@ -147,7 +147,7 @@ def generate_launch_description():
     )
     declare_use_ackermann_converter_cmd = DeclareLaunchArgument(
         "use_ackermann_converter",
-        default_value="False",
+        default_value="True",
         description="Whether to convert /cmd_vel Twist to Ackermann commands",
     )
 
