@@ -168,7 +168,8 @@ def generate_launch_description():
         parameters=[
             {
                 "input_topic": "/cmd_vel",
-                "output_topic": "/ackermann_cmd",
+                "output_topic": "/cmd_vel_steer",
+                "output_type": "twist",
                 "wheelbase": 1.0,
                 "steering_limit": 0.6,
             }

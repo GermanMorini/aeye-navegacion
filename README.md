@@ -81,9 +81,9 @@ Nota: el modelo Ackermann no gira en el sitio; manten velocidad lineal (W/X)
 y cambia direccion con A/D. Asegurate de tener `twist_to_ackermann` activo
 (o `use_ackermann_converter:=True` en los launch).
 
-Ackermann (Twist -> Ackermann):
-- El modelo Ackermann espera `/ackermann_cmd`. El nodo `twist_to_ackermann` convierte `/cmd_vel` (Twist)
-  a `ackermann_msgs/AckermannDriveStamped` y se lanza por defecto en los launch principales.
+Ackermann (Twist -> steering):
+- El modelo Ackermann usa `/cmd_vel_steer` (Twist con `angular.z` como angulo de giro).
+- `twist_to_ackermann` convierte `/cmd_vel` (yaw rate) a `/cmd_vel_steer` y se lanza por defecto en los launch principales.
 
 ### Uso con el script de tools
 El script detecta si el contenedor esta corriendo y entra con `docker exec`.

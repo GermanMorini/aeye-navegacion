@@ -284,6 +284,7 @@
   <gazebo>
     <plugin name="ackermann_drive" filename="libgazebo_ros_ackermann_drive.so">
       <ros>
+        <remapping>cmd_vel:=/cmd_vel_steer</remapping>
         <remapping>odom:=/odom</remapping>
       </ros>
       <left_steering_joint>front_left_steer_joint</left_steering_joint>
