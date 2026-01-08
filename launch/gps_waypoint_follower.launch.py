@@ -22,6 +22,7 @@ from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.conditions import IfCondition
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from nav2_common.launch import RewrittenYaml
 
 
@@ -40,7 +41,13 @@ def generate_launch_description():
     use_rviz = LaunchConfiguration('use_rviz')
     use_mapviz = LaunchConfiguration('use_mapviz')
     use_ackermann_converter = LaunchConfiguration('use_ackermann_converter')
+    use_sim_time = LaunchConfiguration('use_sim_time')
     rviz_config = LaunchConfiguration('rviz_config')
+
+    declare_use_sim_time_cmd = DeclareLaunchArgument(
+        'use_sim_time',
+        default_value='True',
+        description='Use simulation (Gazebo) clock if true')
 
     declare_use_rviz_cmd = DeclareLaunchArgument(
         'use_rviz',
@@ -73,18 +80,21 @@ def generate_launch_description():
             'output_type': 'twist',
             'wheelbase': 0.60,
             'steering_limit': 0.5235987756,
+            'use_sim_time': ParameterValue(use_sim_time, value_type=bool),
         }],
         condition=IfCondition(use_ackermann_converter),
     )
 
     gazebo_cmd = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(launch_dir, 'gazebo_gps_world.launch.py'))
+            os.path.join(launch_dir, 'gazebo_gps_world.launch.py')),
+        launch_arguments={"use_sim_time": use_sim_time}.items(),
     )
 
     robot_localization_cmd = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(launch_dir, 'dual_ekf_navsat.launch.py'))
+            os.path.join(launch_dir, 'dual_ekf_navsat.launch.py')),
+        launch_arguments={"use_sim_time": use_sim_time}.items(),
     )
 
     navigation2_cmd = IncludeLaunchDescription(
@@ -92,7 +102,7 @@ def generate_launch_description():
             os.path.join(bringup_dir, "launch", "navigation_launch.py")
         ),
         launch_arguments={
-            "use_sim_time": "True",
+            "use_sim_time": use_sim_time,
             "params_file": configured_params,
             "autostart": "True",
         }.items(),
@@ -104,14 +114,15 @@ def generate_launch_description():
         name='rviz2',
         output='screen',
         arguments=['-d', rviz_config],
-        parameters=[{'use_sim_time': True}],
+        parameters=[{'use_sim_time': ParameterValue(use_sim_time, value_type=bool)}],
         condition=IfCondition(use_rviz),
     )
 
     mapviz_cmd = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(launch_dir, 'mapviz.launch.py')),
-        condition=IfCondition(use_mapviz)
+        condition=IfCondition(use_mapviz),
+        launch_arguments={"use_sim_time": use_sim_time}.items(),
     )
 
     # Create the launch description and populate
@@ -127,6 +138,7 @@ def generate_launch_description():
     ld.add_action(navigation2_cmd)
 
     # viz launch
+    ld.add_action(declare_use_sim_time_cmd)
     ld.add_action(declare_use_rviz_cmd)
     ld.add_action(declare_rviz_config_cmd)
     ld.add_action(rviz_cmd)

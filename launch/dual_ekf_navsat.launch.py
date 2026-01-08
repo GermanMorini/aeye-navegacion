@@ -82,6 +82,9 @@ def generate_launch_description():
                 name="base_footprint_to_base_link_tf",
                 arguments=["0.0", "0.0", "0.0", "0.0", "0.0", "0.0", "base_footprint", "base_link"],
                 output="screen",
+                parameters=[
+                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+                ],
             ),
             launch_ros.actions.Node(
                 package="tf2_ros",
@@ -89,6 +92,9 @@ def generate_launch_description():
                 name="base_to_laser_tf",
                 arguments=["0.37", "0.41", "0.92", "0.0", "0.0", "0.0", "base_link", "laser"],
                 output="screen",
+                parameters=[
+                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+                ],
             ),
             launch_ros.actions.Node(
                 package="tf2_ros",
@@ -96,6 +102,9 @@ def generate_launch_description():
                 name="base_to_gps_tf",
                 arguments=["0.0", "0.0", "0.5", "0.0", "0.0", "0.0", "base_link", "gps"],
                 output="screen",
+                parameters=[
+                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+                ],
             ),
         ]
     )

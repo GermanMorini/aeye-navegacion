@@ -35,6 +35,7 @@ def _read_file(path):
 def _launch_gazebo(context):
     use_sim_time = LaunchConfiguration("use_sim_time").perform(context)
     custom_urdf = LaunchConfiguration("custom_urdf").perform(context)
+    use_sim_time_bool = use_sim_time == "True"
 
     tb3_gazebo_dir = get_package_share_directory("turtlebot3_gazebo")
     world_path = os.path.join(tb3_gazebo_dir, "worlds", "turtlebot3_world.world")
@@ -65,12 +66,13 @@ def _launch_gazebo(context):
             "-file",
             custom_urdf,
             "-x",
-            "-4.0",
+            "-10.0",
             "-y",
             "0",
             "-z",
             "0.2",
         ],
+        parameters=[{"use_sim_time": use_sim_time_bool}],
     )
 
     robot_state_publisher = Node(
@@ -80,7 +82,7 @@ def _launch_gazebo(context):
         output="screen",
         parameters=[
             {
-                "use_sim_time": use_sim_time == "True",
+                "use_sim_time": use_sim_time_bool,
                 "robot_description": robot_description,
             }
         ],
@@ -149,6 +151,7 @@ def generate_launch_description():
                 "output_type": "twist",
                 "wheelbase": 0.60,
                 "steering_limit": 0.5235987756,
+                "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
             }
         ],
         condition=IfCondition(use_ackermann_converter),
@@ -189,6 +192,7 @@ def generate_launch_description():
             os.path.join(launch_dir, "mapviz.launch.py")
         ),
         condition=IfCondition(use_mapviz),
+        launch_arguments={"use_sim_time": use_sim_time}.items(),
     )
 
     ld = LaunchDescription()

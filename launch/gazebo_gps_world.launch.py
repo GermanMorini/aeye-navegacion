@@ -31,6 +31,7 @@ def _render_xacro(xacro_path, mappings):
 def _launch_setup(context):
     use_sim_time = LaunchConfiguration("use_sim_time").perform(context)
     tb3_model = LaunchConfiguration("tb3_model").perform(context)
+    use_sim_time_bool = use_sim_time == "True"
 
     tb3_gazebo_dir = get_package_share_directory("turtlebot3_gazebo")
     tb3_desc_dir = get_package_share_directory("turtlebot3_description")
@@ -74,6 +75,7 @@ def _launch_setup(context):
             "-z",
             "0.2",
         ],
+        parameters=[{"use_sim_time": use_sim_time_bool}],
     )
 
     robot_state_publisher = Node(
@@ -83,7 +85,7 @@ def _launch_setup(context):
         output="screen",
         parameters=[
             {
-                "use_sim_time": use_sim_time == "True",
+                "use_sim_time": use_sim_time_bool,
                 "robot_description": robot_description,
             }
         ],
