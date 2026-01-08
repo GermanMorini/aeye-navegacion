@@ -90,6 +90,9 @@ def generate_launch_description():
     default_urdf = os.path.join(pkg_share, "urdf", "my_robot.urdf")
     default_rviz = os.path.join(pkg_share, "config", "rviz_nav2_full.rviz")
     default_params = os.path.join(pkg_share, "config", "nav2_no_map_params.yaml")
+    bt_xml = os.path.join(
+        pkg_share, "config", "navigate_to_pose_w_replanning_and_recovery_no_spin.xml"
+    )
     default_world = os.path.join(gazebo_share, "worlds", "empty.world")
 
     use_sim_time = LaunchConfiguration("use_sim_time")
@@ -98,7 +101,10 @@ def generate_launch_description():
     use_ackermann_converter = LaunchConfiguration("use_ackermann_converter")
 
     configured_params = RewrittenYaml(
-        source_file=params_file, root_key="", param_rewrites="", convert_types=True
+        source_file=params_file,
+        root_key="",
+        param_rewrites={"default_nav_to_pose_bt_xml": bt_xml},
+        convert_types=True,
     )
 
     declare_use_sim_time_cmd = DeclareLaunchArgument(
