@@ -1,0 +1,25 @@
+fixed_frame: map
+target_frame: map
+
+plugins:
+  - type: mapviz_plugins/tile_map
+    name: Google Satellite
+    source_type: 0
+    base_url: https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={level}
+    min_zoom: 0
+    max_zoom: 20
+    draw_under: true
+  - type: mapviz_plugins/navsat
+    name: GPS
+    topic: /gps/filtered
+    color: [0, 255, 0]
+    draw_style: 1
+    position_tolerance: 0.0
+    use_latest_offset: true
+  - type: mapviz_plugins/tf_frame
+    name: TF Base
+    frame: base_link
+  - type: mapviz_plugins/point_click_publisher
+    name: Click Goal
+    topic: /clicked_point
+    frame_id: map

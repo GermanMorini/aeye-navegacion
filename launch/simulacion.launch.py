@@ -37,8 +37,8 @@ def _launch_gazebo(context):
     custom_urdf = LaunchConfiguration("custom_urdf").perform(context)
     use_sim_time_bool = use_sim_time == "True"
 
-    tb3_gazebo_dir = get_package_share_directory("turtlebot3_gazebo")
-    world_path = os.path.join(tb3_gazebo_dir, "worlds", "turtlebot3_world.world")
+    gps_wpf_dir = get_package_share_directory("navegacion_gps")
+    world_path = os.path.join(gps_wpf_dir, "worlds", "pasillos_obstaculos.world")
     robot_description = _read_file(custom_urdf)
 
     gazebo_server = ExecuteProcess(
@@ -66,7 +66,7 @@ def _launch_gazebo(context):
             "-file",
             custom_urdf,
             "-x",
-            "-12.0",
+            "0.0",
             "-y",
             "0",
             "-z",
