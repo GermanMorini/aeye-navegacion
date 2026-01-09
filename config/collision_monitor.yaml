@@ -1,0 +1,27 @@
+collision_monitor:
+  ros__parameters:
+    use_sim_time: true
+    base_frame_id: base_footprint
+    odom_frame_id: odom
+    cmd_vel_in_topic: /cmd_vel
+    cmd_vel_out_topic: /cmd_vel_safe
+    state_topic: /collision_monitor_state
+    transform_tolerance: 0.2
+    polygons: ["footprint", "stop_zone"]
+    footprint:
+      type: polygon
+      action_type: stop
+      min_points: 3
+      points: [1.19, 0.46, 1.19, -0.46, -0.25, -0.46, -0.25, 0.46]
+    stop_zone:
+      type: polygon
+      action_type: stop
+      min_points: 3
+      points: [3.0, 0.8, 3.0, -0.8, 1.2, -0.8, 1.2, 0.8]
+    observation_sources: ["lidar"]
+    lidar:
+      type: pointcloud
+      topic: /lidar/points
+      min_height: 0.11
+      max_height: 1.60
+      enabled: true

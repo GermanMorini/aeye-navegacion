@@ -18,7 +18,7 @@ plugins:
     use_latest_offset: true
   - type: mapviz_plugins/tf_frame
     name: TF Base
-    frame: base_link
+    frame: base_footprint
   - type: mapviz_plugins/point_click_publisher
     name: Click Goal
     topic: /clicked_point

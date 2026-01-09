@@ -66,6 +66,10 @@ Visualization Manager:
     Name: Global Footprint
     Enabled: true
     Topic: /global_costmap/published_footprint
+  - Class: rviz_default_plugins/MarkerArray
+    Name: Collision Monitor
+    Enabled: true
+    Topic: /collision_monitor/polygons
   - Class: rviz_default_plugins/Path
     Name: Plan
     Enabled: true

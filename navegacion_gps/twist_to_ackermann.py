@@ -15,7 +15,7 @@ class TwistToAckermann(Node):
         self.declare_parameter('wheelbase', 0.60)
         self.declare_parameter('steering_limit', 0.5235987756)
         self.declare_parameter('min_speed_for_steering', 0.05)
-        self.declare_parameter('frame_id', 'base_link')
+        self.declare_parameter('frame_id', 'base_footprint')
 
         input_topic = self.get_parameter('input_topic').get_parameter_value().string_value
         output_topic = self.get_parameter('output_topic').get_parameter_value().string_value

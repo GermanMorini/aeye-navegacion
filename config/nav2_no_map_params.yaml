@@ -6,7 +6,7 @@ bt_navigator:
     use_sim_time: true
     global_frame: map
     local_frame: odom
-    robot_base_frame: base_link
+    robot_base_frame: base_footprint
     odom_topic: /odom
     navigators: ["navigate_to_pose"]
     navigate_to_pose:
@@ -22,9 +22,11 @@ behavior_server:
     robot_base_frame: base_link # Asegúrate que coincida con tu URDF
     transform_tolerance: 0.1
     
-    behavior_plugins: ["spin", "backup", "drive_on_heading", "wait"]
-    spin:
-      plugin: "nav2_behaviors/Spin"
+    behavior_plugins: [
+      "backup",
+      "drive_on_heading",
+      "wait"
+    ]
 
     backup:
       plugin: "nav2_behaviors/BackUp"
@@ -45,7 +47,6 @@ behavior_server:
     max_angular_acceleration: 0.1 # rad/s^2
     max_angular_deceleration: 0.1 # rad/s^2
 
-    # Parámetros específicos de las maniobras
     simulate_ahead_time: 2.0
   
 # ================================
@@ -55,6 +56,7 @@ planner_server:
   ros__parameters:
     use_sim_time: true
     planner_plugins: ["GridBased"]
+    robot_base_frame: base_footprint
     GridBased:
       plugin: "nav2_smac_planner/SmacPlannerHybrid"
       optimizer_costmap_weight: 15.0
@@ -85,6 +87,7 @@ controller_server:
     use_sim_time: true
     controller_frequency: 10.0
     odom_topic: /odom
+    robot_base_frame: base_footprint
     progress_checker_plugins: ["progress_checker"]
     goal_checker_plugins: ["general_goal_checker"]
     current_goal_checker: "general_goal_checker"
@@ -113,10 +116,12 @@ controller_server:
 
       # VELOCIDADES
       regulated_linear_velocity_scaling_factor: 0.8 # mas alto -> mas frena en curvas
-      vx_max: 2.0
-      vx_min: -1.0          # REVERSA
+      vx_max: 0.5
+      vx_min: -0.2         # REVERSA
       wz_max: 2.0       # VELOCIDAD DE GIRO
       wz_min: -2.0
+      max_accel: 0.4
+      max_decel: -1.0
       vy_max: 0.0       # NO TOCAR
 
       vx_std: 0.2
@@ -220,7 +225,7 @@ local_costmap:
       update_frequency: 5.0
       publish_frequency: 2.0
       global_frame: odom
-      robot_base_frame: base_link
+      robot_base_frame: base_footprint
       rolling_window: true
       width: 20
       height: 20
@@ -271,13 +276,13 @@ global_costmap:
       update_frequency: 1.0
       publish_frequency: 1.0
       global_frame: map
-      robot_base_frame: base_link
+      robot_base_frame: base_footprint
       footprint: "[[1.19,0.46],[1.19,-0.46],[-0.25,-0.46],[-0.25,0.46]]"
       footprint_padding: 0.0
       rolling_window: true
-      width: 100
-      height: 100
-      resolution: 0.05
+      width: 40
+      height: 40
+      resolution: 0.1
       transform_tolerance: 1.0
       track_unknown_space: false
       use_maximum_static_value: true
@@ -311,45 +316,20 @@ global_costmap:
 velocity_smoother:
   ros__parameters:
     use_sim_time: true
-    smoothing_frequency: 30.0
+    smoothing_frequency: 15.0
     feedback: "CLOSED_LOOP"
     odom_topic: /odom
+    robot_base_frame: base_footprint
 
-    max_velocity: [2.0, 0.0, 3.0]
-    min_velocity: [-1.0, 0.0, -3.0]
+    max_velocity: [1.0, 0.0, 3.0]
+    min_velocity: [-0.7, 0.0, -3.0]
 
     max_accel: [1.0, 0.0, 3.0]
-    max_decel: [-5.0, 0.0, -3.0]
+    max_decel: [-2.0, 0.0, -3.0]
 
     # si la velocidad calculada es menor a esto se envía 0 a los motores
     deadband_velocity: [0.05, 0.0, 0.05]
     velocity_timeout: 0.5
-
-# ================================
-# BEHAVIOR SERVER (no Spin)
-# ================================
-behavior_server:
-  ros__parameters:
-    use_sim_time: true
-    local_costmap_topic: local_costmap/costmap_raw
-    global_costmap_topic: global_costmap/costmap_raw
-    local_footprint_topic: local_costmap/published_footprint
-    global_footprint_topic: global_costmap/published_footprint
-    cycle_frequency: 10.0
-    behavior_plugins: ["backup", "drive_on_heading", "assisted_teleop", "wait"]
-    backup:
-      plugin: "nav2_behaviors/BackUp"
-    drive_on_heading:
-      plugin: "nav2_behaviors/DriveOnHeading"
-    wait:
-      plugin: "nav2_behaviors/Wait"
-    assisted_teleop:
-      plugin: "nav2_behaviors/AssistedTeleop"
-    local_frame: odom
-    global_frame: map
-    robot_base_frame: base_link
-    transform_tolerance: 0.1
-    simulate_ahead_time: 2.0
 
 # ================================
 # LIFECYCLE
@@ -363,3 +343,4 @@ lifecycle_manager_navigation:
       - controller_server
       - bt_navigator
       - behavior_server
+      - collision_monitor

@@ -97,6 +97,7 @@ def generate_launch_description():
     launch_dir = os.path.join(gps_wpf_dir, "launch")
     params_dir = os.path.join(gps_wpf_dir, "config")
     nav2_params = os.path.join(params_dir, "nav2_no_map_params.yaml")
+    collision_monitor_params = os.path.join(params_dir, "collision_monitor.yaml")
     bt_xml = os.path.join(
         params_dir, "navigate_to_pose_w_replanning_and_recovery_no_spin.xml"
     )
@@ -118,6 +119,7 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
     custom_urdf = LaunchConfiguration("custom_urdf")
     use_ackermann_converter = LaunchConfiguration("use_ackermann_converter")
+    use_collision_monitor = LaunchConfiguration("use_collision_monitor")
     rviz_config = LaunchConfiguration("rviz_config")
 
     declare_use_sim_time_cmd = DeclareLaunchArgument(
@@ -149,6 +151,11 @@ def generate_launch_description():
         "use_ackermann_converter",
         default_value="True",
         description="Whether to convert /cmd_vel Twist to Ackermann commands",
+    )
+    declare_use_collision_monitor_cmd = DeclareLaunchArgument(
+        "use_collision_monitor",
+        default_value="False",
+        description="Whether to start collision monitor",
     )
 
     ackermann_converter_cmd = Node(
@@ -207,6 +214,32 @@ def generate_launch_description():
         launch_arguments={"use_sim_time": use_sim_time}.items(),
     )
 
+    collision_monitor_cmd = Node(
+        package="nav2_collision_monitor",
+        executable="collision_monitor",
+        name="collision_monitor",
+        output="screen",
+        parameters=[
+            collision_monitor_params,
+            {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+        ],
+        condition=IfCondition(use_collision_monitor),
+    )
+    collision_monitor_lifecycle_cmd = Node(
+        package="nav2_lifecycle_manager",
+        executable="lifecycle_manager",
+        name="collision_monitor_lifecycle_manager",
+        output="screen",
+        parameters=[
+            {
+                "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
+                "autostart": True,
+                "node_names": ["collision_monitor"],
+            }
+        ],
+        condition=IfCondition(use_collision_monitor),
+    )
+
     ld = LaunchDescription()
     ld.add_action(declare_use_sim_time_cmd)
     ld.add_action(declare_custom_urdf_cmd)
@@ -214,11 +247,14 @@ def generate_launch_description():
     ld.add_action(declare_use_mapviz_cmd)
     ld.add_action(declare_rviz_config_cmd)
     ld.add_action(declare_use_ackermann_converter_cmd)
+    ld.add_action(declare_use_collision_monitor_cmd)
     ld.add_action(OpaqueFunction(function=_launch_gazebo))
     ld.add_action(robot_localization_cmd)
     ld.add_action(navigation2_cmd)
     ld.add_action(rviz_cmd)
     ld.add_action(mapviz_cmd)
     ld.add_action(ackermann_converter_cmd)
+    ld.add_action(collision_monitor_cmd)
+    ld.add_action(collision_monitor_lifecycle_cmd)
 
     return ld
