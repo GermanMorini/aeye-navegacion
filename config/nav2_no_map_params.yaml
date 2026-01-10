@@ -21,6 +21,8 @@ behavior_server:
     global_frame: map
     robot_base_frame: base_link # Asegúrate que coincida con tu URDF
     transform_tolerance: 0.1
+    simulate_ahead_time: 3.0
+    expansion_factor: 1.0
     
     behavior_plugins: [
       "backup",
@@ -47,7 +49,6 @@ behavior_server:
     max_angular_acceleration: 0.1 # rad/s^2
     max_angular_deceleration: 0.1 # rad/s^2
 
-    simulate_ahead_time: 2.0
   
 # ================================
 # PLANNER (Hybrid A* con reversa)
@@ -75,6 +76,7 @@ planner_server:
       change_penalty: 1.0
       non_straight_penalty: 2.5
       cost_penalty: 2.0
+      cost_travel_multiplier: 0.1  # castigo por distancia extra
 
       smooth_path: true
       debug_visualizations: false
@@ -109,11 +111,13 @@ controller_server:
       use_cuda: false
 
       motion_model: "Ackermann"
-      time_steps: 20
+      time_steps: 50
       model_dt: 0.1
       batch_size: 800
       iteration_count: 1
       angle_quantization_bins: 72
+      noise_stddev: [0.25, 0.0, 0.2] # Baja el último valor si zigzaguea mucho
+      noise_filter_tau: 0.35
 
       # VELOCIDADES
       regulated_linear_velocity_scaling_factor: 0.8 # mas alto -> mas frena en curvas
@@ -177,7 +181,7 @@ controller_server:
       GoalAngleCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 10.0
+        cost_weight: 50.0
         threshold_to_consider: 0.5
 
       PreferForwardCritic:
@@ -189,19 +193,19 @@ controller_server:
       PathAlignCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 3.0
+        cost_weight: 10.0
         max_path_occupancy_ratio: 0.05
         trajectory_point_step: 4
-        threshold_to_consider: 0.5
+        threshold_to_consider: 0.7
         offset_from_furthest: 20
         use_path_orientations: false
 
       PathFollowCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 7.0
+        cost_weight: 10.0
         offset_from_path: true
-        offset_from_furthest: 5
+        offset_from_furthest: 25
         threshold_to_consider: 1.4
 
       PathAngleCritic:
