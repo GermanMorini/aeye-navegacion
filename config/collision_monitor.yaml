@@ -3,11 +3,14 @@ collision_monitor:
     use_sim_time: true
     base_frame_id: base_footprint
     odom_frame_id: odom
-    cmd_vel_in_topic: /cmd_vel
+    cmd_vel_in_topic: /cmd_vel_smooth
     cmd_vel_out_topic: /cmd_vel_safe
     state_topic: /collision_monitor_state
     transform_tolerance: 0.2
-    polygons: ["footprint", "stop_zone"]
+    state_update_rate: 10.0
+    source_timeout: 1.0
+    stop_pub_timeout: 0.5
+    polygons: ["footprint", "stop_zone", "slowdown"]
     footprint:
       type: polygon
       action_type: stop
@@ -18,6 +21,12 @@ collision_monitor:
       action_type: stop
       min_points: 3
       points: [3.0, 0.8, 3.0, -0.8, 1.2, -0.8, 1.2, 0.8]
+    slowdown:
+      type: "polygon"
+      points: [1.2, 0.8, 1.2, -0.8, -1.0, -0.8, -1.0, 0.8] # Área más grande
+      action_type: "slowdown"
+      slowdown_ratio: 0.3
+      enabled: true
     observation_sources: ["lidar"]
     lidar:
       type: pointcloud

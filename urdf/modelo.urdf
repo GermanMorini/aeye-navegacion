@@ -302,7 +302,7 @@
       <wheel_diameter>0.30</wheel_diameter>
       <steering_limit>0.5235987756</steering_limit>
       <max_steer>0.5235987756</max_steer>
-      <max_speed>2.0</max_speed>
+      <max_speed>1.0</max_speed>
       <left_steering_pid_gain>3000 0 1</left_steering_pid_gain>
       <right_steering_pid_gain>3000 0 1</right_steering_pid_gain>
       <left_steering_i_range>0 0</left_steering_i_range>

@@ -119,6 +119,7 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
     custom_urdf = LaunchConfiguration("custom_urdf")
     use_ackermann_converter = LaunchConfiguration("use_ackermann_converter")
+    use_navsat = LaunchConfiguration("use_navsat")
     use_collision_monitor = LaunchConfiguration("use_collision_monitor")
     rviz_config = LaunchConfiguration("rviz_config")
 
@@ -152,6 +153,11 @@ def generate_launch_description():
         default_value="True",
         description="Whether to convert /cmd_vel Twist to Ackermann commands",
     )
+    declare_use_navsat_cmd = DeclareLaunchArgument(
+        "use_navsat",
+        default_value="True",
+        description="Whether to start navsat_transform_node",
+    )
     declare_use_collision_monitor_cmd = DeclareLaunchArgument(
         "use_collision_monitor",
         default_value="False",
@@ -182,6 +188,7 @@ def generate_launch_description():
         ),
         launch_arguments={
             "use_sim_time": use_sim_time,
+            "use_navsat": use_navsat,
         }.items(),
     )
 
@@ -247,6 +254,7 @@ def generate_launch_description():
     ld.add_action(declare_use_mapviz_cmd)
     ld.add_action(declare_rviz_config_cmd)
     ld.add_action(declare_use_ackermann_converter_cmd)
+    ld.add_action(declare_use_navsat_cmd)
     ld.add_action(declare_use_collision_monitor_cmd)
     ld.add_action(OpaqueFunction(function=_launch_gazebo))
     ld.add_action(robot_localization_cmd)

@@ -101,8 +101,8 @@ controller_server:
     general_goal_checker:
       plugin: "nav2_controller::SimpleGoalChecker"
       stateful: true
-      xy_goal_tolerance: 0.25
-      yaw_goal_tolerance: 0.25
+      xy_goal_tolerance: 0.5
+      yaw_goal_tolerance: 1.0
 
     FollowPath:
       plugin: "nav2_mppi_controller::MPPIController"
@@ -113,13 +113,16 @@ controller_server:
       model_dt: 0.1
       batch_size: 800
       iteration_count: 1
+      angle_quantization_bins: 72
 
       # VELOCIDADES
       regulated_linear_velocity_scaling_factor: 0.8 # mas alto -> mas frena en curvas
       vx_max: 0.5
-      vx_min: -0.2         # REVERSA
-      wz_max: 2.0       # VELOCIDAD DE GIRO
-      wz_min: -2.0
+      vx_min: -0.3         # REVERSA
+      min_theta_velocity: 0.0        # VELOCIDAD DE GIRO
+      max_theta_velocity: 0.35
+      wz_max: 0.28571  # velocidad angular
+      wz_min: -0.28571
       max_accel: 0.4
       max_decel: -1.0
       vy_max: 0.0       # NO TOCAR
@@ -147,7 +150,7 @@ controller_server:
       TwirlingCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 4.0
+        cost_weight: 1.0
 
       ConstraintCritic:
         enabled: true
@@ -238,8 +241,8 @@ local_costmap:
 
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        inflation_radius: 3.0
-        cost_scaling_factor: 2.0
+        inflation_radius: 1.2
+        cost_scaling_factor: 3.0
       voxel_layer:
         plugin: "nav2_costmap_2d::VoxelLayer"
         enabled: True
@@ -321,11 +324,11 @@ velocity_smoother:
     odom_topic: /odom
     robot_base_frame: base_footprint
 
-    max_velocity: [1.0, 0.0, 3.0]
-    min_velocity: [-0.7, 0.0, -3.0]
+    max_velocity: [1.0, 0.0, 1.0]
+    min_velocity: [-0.7, 0.0, -1.0]
 
-    max_accel: [1.0, 0.0, 3.0]
-    max_decel: [-2.0, 0.0, -3.0]
+    max_accel: [1.0, 0.0, 1.0]
+    max_decel: [-2.0, 0.0, -1.0]
 
     # si la velocidad calculada es menor a esto se envía 0 a los motores
     deadband_velocity: [0.05, 0.0, 0.05]

@@ -292,19 +292,19 @@
       <wheel_diameter>0.48</wheel_diameter>
       <steering_limit>0.5235987756</steering_limit>
       <max_steer>0.5235987756</max_steer>
-      <max_speed>2.0</max_speed>
-      <left_steering_pid_gain>3000 0 1</left_steering_pid_gain>
-      <right_steering_pid_gain>3000 0 1</right_steering_pid_gain>
+      <max_speed>1.0</max_speed>
+      <left_steering_pid_gain>300 0 1</left_steering_pid_gain>
+      <right_steering_pid_gain>300 0 1</right_steering_pid_gain>
       <left_steering_i_range>0 0</left_steering_i_range>
       <right_steering_i_range>0 0</right_steering_i_range>
-      <linear_velocity_pid_gain>1000 0 1</linear_velocity_pid_gain>
+      <linear_velocity_pid_gain>100 0 1</linear_velocity_pid_gain>
       <linear_velocity_i_range>0 0</linear_velocity_i_range>
       <publish_odom>true</publish_odom>
-      <publish_odom_tf>true</publish_odom_tf>
+      <publish_odom_tf>false</publish_odom_tf>
       <publish_wheel_tf>true</publish_wheel_tf>
       <publish_distance>false</publish_distance>
       <publish_steerangle>false</publish_steerangle>
-      <publish_tf>true</publish_tf>
+      <publish_tf>false</publish_tf>
       <odom_frame>odom</odom_frame>
       <odometry_topic>odom</odometry_topic>
       <odometry_frame>odom</odometry_frame>
@@ -400,6 +400,7 @@
           <remapping>~/out:=/gps/fix</remapping>
         </ros>
         <frame_name>gps_link</frame_name>
+        <gaussianNoise>0.5</gaussianNoise>
         <initial_orientation_as_reference>false</initial_orientation_as_reference>
       </plugin>
     </sensor>

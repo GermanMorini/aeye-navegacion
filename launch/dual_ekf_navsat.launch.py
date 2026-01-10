@@ -14,6 +14,7 @@
 from launch import LaunchDescription
 from ament_index_python.packages import get_package_share_directory
 from launch.substitutions import LaunchConfiguration
+from launch.conditions import IfCondition
 from launch_ros.parameter_descriptions import ParameterValue
 import launch_ros.actions
 import os
@@ -26,11 +27,15 @@ def generate_launch_description():
     rl_params_file = os.path.join(
         gps_wpf_dir, "config", "dual_ekf_navsat_params.yaml")
     use_sim_time = LaunchConfiguration("use_sim_time")
+    use_navsat = LaunchConfiguration("use_navsat")
 
     return LaunchDescription(
         [
             launch.actions.DeclareLaunchArgument(
                 "use_sim_time", default_value="True"
+            ),
+            launch.actions.DeclareLaunchArgument(
+                "use_navsat", default_value="True"
             ),
             launch.actions.DeclareLaunchArgument(
                 "output_final_position", default_value="false"
@@ -75,6 +80,7 @@ def generate_launch_description():
                     ("odometry/gps", "odometry/gps"),
                     ("odometry/filtered", "odometry/local"),
                 ],
+                condition=IfCondition(use_navsat),
             ),
             launch_ros.actions.Node(
                 package="tf2_ros",

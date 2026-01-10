@@ -12,7 +12,7 @@ class TwistToAckermann(Node):
         self.declare_parameter('input_topic', '/cmd_vel')
         self.declare_parameter('output_topic', '/ackermann_cmd')
         self.declare_parameter('output_type', 'ackermann')
-        self.declare_parameter('wheelbase', 0.60)
+        self.declare_parameter('wheelbase', 0.94)
         self.declare_parameter('steering_limit', 0.5235987756)
         self.declare_parameter('min_speed_for_steering', 0.05)
         self.declare_parameter('frame_id', 'base_footprint')
