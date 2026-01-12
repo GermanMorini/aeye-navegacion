@@ -20,7 +20,7 @@ behavior_server:
     local_frame: odom
     global_frame: map
     robot_base_frame: base_footprint
-    transform_tolerance: 0.1
+    transform_tolerance: 0.5
     simulate_ahead_time: 5.0
     expansion_factor: 1.0
     
@@ -56,6 +56,7 @@ behavior_server:
 planner_server:
   ros__parameters:
     use_sim_time: true
+    transform_tolerance: 0.5
     planner_plugins: ["GridBased"]
     robot_base_frame: base_footprint
     GridBased:
@@ -88,6 +89,7 @@ controller_server:
   ros__parameters:
     use_sim_time: true
     controller_frequency: 10.0
+    transform_tolerance: 1.0 # segundos
     odom_topic: /odometry/local
     robot_base_frame: base_footprint
     progress_checker_plugins: ["progress_checker"]
@@ -120,15 +122,13 @@ controller_server:
       noise_filter_tau: 0.35
 
       # VELOCIDADES
-      regulated_linear_velocity_scaling_factor: 0.8 # mas alto -> mas frena en curvas
-      vx_max: 0.5
-      vx_min: -0.3         # REVERSA
-      max_theta_velocity: 0.5
-      min_theta_velocity: 0.0        # VELOCIDAD DE GIRO
-      wz_max: 0.5  # velocidad angular
-      wz_min: -0.5
-      max_accel: 0.4
-      max_decel: -1.0
+      regulated_linear_velocity_scaling_factor: 0.5 # mas alto -> mas frena en curvas
+      vx_max: 2.77
+      vx_min: -1.0         # REVERSA
+      wz_max: 1.7  # velocidad angular
+      wz_min: -0.61
+      max_accel: 1.0
+      max_decel: -2.0
       vy_max: 0.0       # NO TOCAR
 
       vx_std: 0.2
@@ -226,6 +226,27 @@ controller_server:
         consider_footprint: true
 
 # ================================
+# VELOCITY SMOOTHER
+# ================================
+velocity_smoother:
+  ros__parameters:
+    use_sim_time: true
+    smoothing_frequency: 15.0
+    feedback: "CLOSED_LOOP"
+    odom_topic: /odometry/local
+    robot_base_frame: base_footprint
+
+    max_velocity: [2.77, 0.0, 1.7]
+    min_velocity: [-1.0, 0.0, -0.61]
+
+    max_accel: [1.0, 0.0, 3.0]
+    max_decel: [-2.0, 0.0, -3.0]
+
+    # si la velocidad calculada es menor a esto se envía 0 a los motores
+    deadband_velocity: [0.05, 0.0, 0.05]
+    velocity_timeout: 0.5
+
+# ================================
 # LOCAL COSTMAP (rolling)
 # ================================
 local_costmap:
@@ -319,27 +340,6 @@ global_costmap:
         inflation_radius: 0.5
         cost_scaling_factor: 10.0
       always_send_full_costmap: true
-
-# ================================
-# VELOCITY SMOOTHER
-# ================================
-velocity_smoother:
-  ros__parameters:
-    use_sim_time: true
-    smoothing_frequency: 15.0
-    feedback: "CLOSED_LOOP"
-    odom_topic: /odometry/local
-    robot_base_frame: base_footprint
-
-    max_velocity: [1.0, 0.0, 1.0]
-    min_velocity: [-0.7, 0.0, -1.0]
-
-    max_accel: [1.0, 0.0, 1.0]
-    max_decel: [-2.0, 0.0, -1.0]
-
-    # si la velocidad calculada es menor a esto se envía 0 a los motores
-    deadband_velocity: [0.05, 0.0, 0.05]
-    velocity_timeout: 0.5
 
 # ================================
 # LIFECYCLE

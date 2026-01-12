@@ -1,3 +1,9 @@
+# [ 0,  1,  2,    <- POSICIÓN ABSOLUTA (X, Y, Z) - (Usar para GPS)
+#   3,  4,  5,    <- ORIENTACIÓN EULER (Roll, Pitch, Yaw) - (Usar para IMU Absoluta)
+#   6,  7,  8,    <- VELOCIDAD LINEAL (V-X, V-Y, V-Z) - (Usar para Encoders/Odometría)
+#   9, 10, 11,    <- VELOCIDAD ANGULAR (V-Roll, V-Pitch, V-Yaw) - (Usar para Giróscopo IMU)
+#  12, 13, 14 ]   <- ACELERACIÓN LINEAL (A-X, A-Y, A-Z) - (Usar para Acelerómetro)
+
 ekf_filter_node_odom:
   ros__parameters:
     use_sim_time: true
@@ -6,6 +12,8 @@ ekf_filter_node_odom:
     two_d_mode: true
     publish_tf: true
     publish_acceleration: false
+    smooth_lagged_data: true
+    history_length: 1.0  # Guarda 1 segundo de historia para suavizar la fusión
 
     map_frame: map
     odom_frame: odom
@@ -13,7 +21,7 @@ ekf_filter_node_odom:
     world_frame: odom
 
     odom0: /odom
-    odom0_config: [true, true, false,
+    odom0_config: [false, false, false,
                    false, false, false,
                    true,  false,  false,
                    false, false, true,
@@ -24,10 +32,10 @@ ekf_filter_node_odom:
 
     imu0: /imu/data
     imu0_config: [false, false, false,
-                  false, false, false,
+                  false, false, true,
                   false, false, false,
                   false, false, true,
-                  false, false,  false]
+                  false, false, true]
     imu0_differential: false
     imu0_relative: false
     imu0_queue_size: 10
@@ -68,7 +76,7 @@ ekf_filter_node_odom:
 ekf_filter_node_map:
   ros__parameters:
     use_sim_time: true
-    frequency: 20.0
+    frequency: 50.0
     sensor_timeout: 0.1
     two_d_mode: true
     publish_tf: true
@@ -82,8 +90,8 @@ ekf_filter_node_map:
     world_frame: map
 
     odom0: /odometry/local
-    odom0_config: [true, true, false,
-                   false, false, true,
+    odom0_config: [false, false, false,
+                   false, false, false,
                    true,  false,  false,
                    false, false, true,
                    false, false, false]
@@ -92,7 +100,7 @@ ekf_filter_node_map:
     odom0_queue_size: 10
 
     odom1: /odometry/gps
-    odom1_config: [true,  true,  false,
+    odom1_config: [false, false, false,
                    false, false, false,
                    false, false, false,
                    false, false, false,
@@ -100,7 +108,7 @@ ekf_filter_node_map:
     odom1_differential: false
     odom1_relative: false
     odom1_queue_size: 10
-    odom1_pose_rejection_threshold: 2.0
+    odom1_pose_rejection_threshold: 1.0
     dynamic_process_noise_covariance: true
 
     imu0: /imu/data
@@ -108,18 +116,18 @@ ekf_filter_node_map:
                   false, false, true,
                   false, false, false,
                   false, false, true,
-                  false, false,  false]
+                  false, false, true]
     imu0_differential: false
     imu0_relative: false
     imu0_queue_size: 10
     imu0_remove_gravitational_acceleration: true
 
-    process_noise_covariance: [0.05, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-                               0.0,  0.05, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-                               0.0,  0.0,  0.06, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+    process_noise_covariance: [0.5,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.5, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.5, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
                                0.0,  0.0,  0.0,  0.03, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
                                0.0,  0.0,  0.0,  0.0,  0.03, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-                               0.0,  0.0,  0.0,  0.0,  0.0,  0.06, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                               0.0,  0.0,  0.0,  0.0,  0.0,  0.6, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
                                0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.025,0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
                                0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.025,0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
                                0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.04, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
@@ -130,21 +138,21 @@ ekf_filter_node_map:
                                0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.01, 0.0,
                                0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.015]
 
-    initial_estimate_covariance: [1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-                                  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-                                  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-                                  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-                                  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-                                  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-                                  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-                                  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-                                  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-                                  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,
-                                  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,
-                                  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,
-                                  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,
-                                  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,
-                                  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9]
+    initial_estimate_covariance: [0.1, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                  0.0,  0.1, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                  0.0,  0.0,  0.1, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                  0.0,  0.0,  0.0,  0.1, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                  0.0,  0.0,  0.0,  0.0,  0.1, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                  0.0,  0.0,  0.0,  0.0,  0.0,  0.1, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.1, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.1, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.1, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+                                  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.1, 0.0,  0.0,  0.0,  0.0,  0.0,
+                                  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.1, 0.0,  0.0,  0.0,  0.0,
+                                  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.1, 0.0,  0.0,  0.0,
+                                  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.1, 0.0,  0.0,
+                                  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.1, 0.0,
+                                  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.1]
 
 navsat_transform:
   ros__parameters:
@@ -154,14 +162,16 @@ navsat_transform:
     base_link_frame: base_footprint
     gps_frame: gps_link
     imu_frame: imu_link
-    frequency: 30.0
+    gps_variance: 0.1
+    frequency: 10.0
     delay: 0.0
     magnetic_declination_radians: 0.0
     yaw_offset: 0.0
     zero_altitude: true
     broadcast_cartesian_transform: false
     broadcast_cartesian_transform_as_parent_frame: false
-    use_odometry_yaw: true
+    # usar yaw de la odometria (y no de la IMU)
+    use_odometry_yaw: false
     
     wait_for_datum: true
     datum: [-31.421914, -64.102516, 0.0] # Ejemplo: CIT, Córdoba, Argentina

@@ -42,6 +42,12 @@ Frames tipicos:
 - `map` -> `odom` -> `base_link`
 - `base_footprint` se usa en `dual_ekf_navsat_params.yaml` (ajustar si tu robot usa otro frame).
 
+### Dimensiones del robot (urdf/cuatri.urdf)
+- Distancia entre ejes (wheelbase): 0.94 m.
+- Separacion entre ruedas traseras (track): 0.75 m.
+- Radio de rueda: 0.24 m.
+- Cuerpo (base_link) visual: 1.20 x 0.60 x 0.25 m.
+
 ### Formato de waypoints
 Archivo YAML como `config/demo_waypoints.yaml`:
 ```yaml
