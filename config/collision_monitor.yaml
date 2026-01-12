@@ -30,7 +30,7 @@ collision_monitor:
     observation_sources: ["lidar"]
     lidar:
       type: pointcloud
-      topic: /lidar/points
+      topic: /scan_3d
       min_height: 0.11
       max_height: 1.60
       enabled: true

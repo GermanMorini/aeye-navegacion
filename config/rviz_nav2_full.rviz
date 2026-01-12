@@ -34,7 +34,7 @@ Visualization Manager:
     Name: Lidar Points
     Enabled: true
     Size (m): 0.03
-    Topic: /lidar/points
+    Topic: /scan_3d
   - Class: rviz_default_plugins/PointCloud2
     Name: Cost Cloud
     Enabled: true
@@ -45,11 +45,6 @@ Visualization Manager:
     Size (m): 0.03
     Topic: /scan
     Enabled: true
-  - Class: rviz_default_plugins/Image
-    Name: Camera
-    Enabled: true
-    Normalize Range: true
-    Topic: /front_camera/image_raw
   - Class: rviz_default_plugins/Map
     Name: Local Costmap
     Enabled: true
@@ -88,7 +83,7 @@ Visualization Manager:
     Topic: /goal_pose
   - Class: rviz_default_plugins/Odometry
     Name: Odometry
-    Topic: /odom
+    Topic: /odometry/local
   Global Options:
     Background Color: 48; 48; 48
     Fixed Frame: odom

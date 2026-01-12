@@ -17,9 +17,8 @@ import os
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
-from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.conditions import IfCondition
 from launch_ros.actions import Node
@@ -32,48 +31,13 @@ def _read_file(path):
         return file_handle.read()
 
 
-def _launch_gazebo(context):
+def _spawn_robot(context):
     use_sim_time = LaunchConfiguration("use_sim_time").perform(context)
     custom_urdf = LaunchConfiguration("custom_urdf").perform(context)
+    model_name = LaunchConfiguration("model_name").perform(context)
     use_sim_time_bool = use_sim_time == "True"
 
-    gps_wpf_dir = get_package_share_directory("navegacion_gps")
-    world_path = os.path.join(gps_wpf_dir, "worlds", "pasillos_obstaculos.world")
     robot_description = _read_file(custom_urdf)
-
-    gazebo_server = ExecuteProcess(
-        cmd=[
-            "gzserver",
-            world_path,
-            "-slibgazebo_ros_init.so",
-            "-slibgazebo_ros_factory.so",
-        ],
-        output="screen",
-    )
-
-    gazebo_client = ExecuteProcess(
-        cmd=["gzclient"],
-        output="screen",
-    )
-
-    spawn_custom = Node(
-        package="gazebo_ros",
-        executable="spawn_entity.py",
-        output="screen",
-        arguments=[
-            "-entity",
-            "custom_robot",
-            "-file",
-            custom_urdf,
-            "-x",
-            "0.0",
-            "-y",
-            "0",
-            "-z",
-            "0.2",
-        ],
-        parameters=[{"use_sim_time": use_sim_time_bool}],
-    )
 
     robot_state_publisher = Node(
         package="robot_state_publisher",
@@ -88,16 +52,68 @@ def _launch_gazebo(context):
         ],
     )
 
-    return [gazebo_server, gazebo_client, spawn_custom, robot_state_publisher]
+    spawn_custom = Node(
+        package="ros_gz_sim",
+        executable="create",
+        output="screen",
+        arguments=[
+            "-name",
+            model_name,
+            "-file",
+            custom_urdf,
+            "-x",
+            "0.0",
+            "-y",
+            "0",
+            "-z",
+            "0.2",
+        ],
+    )
+
+    return [robot_state_publisher, spawn_custom]
+
+
+def _build_gz_bridge(context, *, bridge_config):
+    bridge_cmd = Node(
+        package="ros_gz_bridge",
+        executable="parameter_bridge",
+        output="screen",
+        parameters=[{"config_file": bridge_config}],
+    )
+    return [bridge_cmd]
+
+
+def _build_joint_state_bridge(context):
+    use_joint_state_bridge = LaunchConfiguration("use_joint_state_bridge").perform(context)
+    if use_joint_state_bridge.lower() != "true":
+        return []
+
+    world_name = LaunchConfiguration("world_name").perform(context)
+    model_name = LaunchConfiguration("model_name").perform(context)
+    joint_state_topic = (
+        f"/world/{world_name}/model/{model_name}/joint_state"
+        "@sensor_msgs/msg/JointState[gz.msgs.Model"
+    )
+
+    joint_state_bridge_cmd = Node(
+        package="ros_gz_bridge",
+        executable="parameter_bridge",
+        output="screen",
+        arguments=[joint_state_topic],
+    )
+    return [joint_state_bridge_cmd]
 
 
 def generate_launch_description():
     bringup_dir = get_package_share_directory("nav2_bringup")
     gps_wpf_dir = get_package_share_directory("navegacion_gps")
+    ros_gz_sim_dir = get_package_share_directory("ros_gz_sim")
     launch_dir = os.path.join(gps_wpf_dir, "launch")
     params_dir = os.path.join(gps_wpf_dir, "config")
+    world_path = os.path.join(gps_wpf_dir, "worlds", "pasillos_obstaculos.world")
     nav2_params = os.path.join(params_dir, "nav2_no_map_params.yaml")
     collision_monitor_params = os.path.join(params_dir, "collision_monitor.yaml")
+    bridge_config = os.path.join(params_dir, "bridge_config.yaml")
     bt_xml = os.path.join(
         params_dir, "navigate_to_pose_w_replanning_and_recovery_no_spin.xml"
     )
@@ -117,11 +133,13 @@ def generate_launch_description():
     use_rviz = LaunchConfiguration("use_rviz")
     use_mapviz = LaunchConfiguration("use_mapviz")
     use_sim_time = LaunchConfiguration("use_sim_time")
-    custom_urdf = LaunchConfiguration("custom_urdf")
     use_ackermann_converter = LaunchConfiguration("use_ackermann_converter")
     use_navsat = LaunchConfiguration("use_navsat")
     use_collision_monitor = LaunchConfiguration("use_collision_monitor")
     rviz_config = LaunchConfiguration("rviz_config")
+    use_joint_state_bridge = LaunchConfiguration("use_joint_state_bridge")
+    world_name = LaunchConfiguration("world_name")
+    model_name = LaunchConfiguration("model_name")
 
     declare_use_sim_time_cmd = DeclareLaunchArgument(
         "use_sim_time",
@@ -131,7 +149,7 @@ def generate_launch_description():
     declare_custom_urdf_cmd = DeclareLaunchArgument(
         "custom_urdf",
         default_value=os.path.join(gps_wpf_dir, "urdf", "cuatri.urdf"),
-        description="Path to custom URDF to spawn in Gazebo",
+        description="Path to custom URDF to spawn in Gazebo Sim",
     )
     declare_use_rviz_cmd = DeclareLaunchArgument(
         "use_rviz",
@@ -162,6 +180,21 @@ def generate_launch_description():
         "use_collision_monitor",
         default_value="False",
         description="Whether to start collision monitor",
+    )
+    declare_use_joint_state_bridge_cmd = DeclareLaunchArgument(
+        "use_joint_state_bridge",
+        default_value="False",
+        description="Whether to bridge Gazebo joint_state into ROS",
+    )
+    declare_world_name_cmd = DeclareLaunchArgument(
+        "world_name",
+        default_value="pasillos_obstaculos",
+        description="Gazebo world name for joint_state bridge",
+    )
+    declare_model_name_cmd = DeclareLaunchArgument(
+        "model_name",
+        default_value="quad_ackermann_viewer_safe",
+        description="Gazebo model name for TF/joint_state topics",
     )
 
     ackermann_converter_cmd = Node(
@@ -203,6 +236,12 @@ def generate_launch_description():
         }.items(),
     )
 
+    gz_sim_cmd = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(ros_gz_sim_dir, "launch", "gz_sim.launch.py")
+        ),
+        launch_arguments={"gz_args": f"-r {world_path}"}.items(),
+    )
     rviz_cmd = Node(
         package="rviz2",
         executable="rviz2",
@@ -256,7 +295,13 @@ def generate_launch_description():
     ld.add_action(declare_use_ackermann_converter_cmd)
     ld.add_action(declare_use_navsat_cmd)
     ld.add_action(declare_use_collision_monitor_cmd)
-    ld.add_action(OpaqueFunction(function=_launch_gazebo))
+    ld.add_action(declare_use_joint_state_bridge_cmd)
+    ld.add_action(declare_world_name_cmd)
+    ld.add_action(declare_model_name_cmd)
+    ld.add_action(gz_sim_cmd)
+    ld.add_action(OpaqueFunction(function=_build_gz_bridge, kwargs={"bridge_config": bridge_config}))
+    ld.add_action(OpaqueFunction(function=_build_joint_state_bridge))
+    ld.add_action(OpaqueFunction(function=_spawn_robot))
     ld.add_action(robot_localization_cmd)
     ld.add_action(navigation2_cmd)
     ld.add_action(rviz_cmd)
