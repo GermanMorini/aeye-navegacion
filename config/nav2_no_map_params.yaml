@@ -280,7 +280,7 @@ global_costmap:
   global_costmap:
     ros__parameters:
       use_sim_time: true
-      update_frequency: 1.0
+      update_frequency: 5.0
       publish_frequency: 1.0
       global_frame: map
       robot_base_frame: base_footprint
@@ -350,5 +350,5 @@ lifecycle_manager_navigation:
       - controller_server
       - bt_navigator
       - behavior_server
-      # - waypoint_follower
+      - waypoint_follower
       - collision_monitor

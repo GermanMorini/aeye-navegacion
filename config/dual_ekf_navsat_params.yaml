@@ -28,7 +28,7 @@ ekf_filter_node_odom:
                   false, false, false,
                   false, false, true,
                   false, false,  false]
-    imu0_differential: true
+    imu0_differential: false
     imu0_relative: false
     imu0_queue_size: 10
     imu0_remove_gravitational_acceleration: true
@@ -96,7 +96,7 @@ ekf_filter_node_map:
                    false, false, false,
                    false, false, false,
                    false, false, false]
-    odom1_differential: true
+    odom1_differential: false
     odom1_relative: false
     odom1_queue_size: 10
 
@@ -158,7 +158,7 @@ navsat_transform:
     zero_altitude: true
     broadcast_cartesian_transform: false
     broadcast_cartesian_transform_as_parent_frame: false
-    use_odometry_yaw: false
+    use_odometry_yaw: true
     
     wait_for_datum: true
     datum: [-31.421914, -64.102516, 0.0] # Ejemplo: CIT, Córdoba, Argentina

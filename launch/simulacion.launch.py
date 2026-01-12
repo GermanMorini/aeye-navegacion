@@ -136,6 +136,7 @@ def generate_launch_description():
     use_ackermann_converter = LaunchConfiguration("use_ackermann_converter")
     use_navsat = LaunchConfiguration("use_navsat")
     use_collision_monitor = LaunchConfiguration("use_collision_monitor")
+    use_frame_id_stripper = LaunchConfiguration("use_frame_id_stripper")
     rviz_config = LaunchConfiguration("rviz_config")
     use_joint_state_bridge = LaunchConfiguration("use_joint_state_bridge")
     world_name = LaunchConfiguration("world_name")
@@ -180,6 +181,11 @@ def generate_launch_description():
         "use_collision_monitor",
         default_value="False",
         description="Whether to start collision monitor",
+    )
+    declare_use_frame_id_stripper_cmd = DeclareLaunchArgument(
+        "use_frame_id_stripper",
+        default_value="True",
+        description="Whether to strip model prefixes from sensor and odom frame_ids",
     )
     declare_use_joint_state_bridge_cmd = DeclareLaunchArgument(
         "use_joint_state_bridge",
@@ -271,6 +277,25 @@ def generate_launch_description():
         ],
         condition=IfCondition(use_collision_monitor),
     )
+    frame_id_stripper_cmd = Node(
+        package="navegacion_gps",
+        executable="frame_id_stripper",
+        name="frame_id_stripper",
+        output="screen",
+        parameters=[
+            {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+            {"imu_in_topic": "/imu/data_raw", "imu_out_topic": "/imu/data"},
+            {"gps_in_topic": "/gps/fix_raw", "gps_out_topic": "/gps/fix"},
+            {"lidar_in_topic": "/scan_3d_raw", "lidar_out_topic": "/scan_3d"},
+            {"odom_in_topic": "/odom_raw", "odom_out_topic": "/odom"},
+            {"imu_frame_id": "imu_link"},
+            {"gps_frame_id": "gps_link"},
+            {"lidar_frame_id": "lidar_link"},
+            {"odom_frame_id": "odom"},
+            {"base_link_frame_id": "base_footprint"},
+        ],
+        condition=IfCondition(use_frame_id_stripper),
+    )
     collision_monitor_lifecycle_cmd = Node(
         package="nav2_lifecycle_manager",
         executable="lifecycle_manager",
@@ -295,6 +320,7 @@ def generate_launch_description():
     ld.add_action(declare_use_ackermann_converter_cmd)
     ld.add_action(declare_use_navsat_cmd)
     ld.add_action(declare_use_collision_monitor_cmd)
+    ld.add_action(declare_use_frame_id_stripper_cmd)
     ld.add_action(declare_use_joint_state_bridge_cmd)
     ld.add_action(declare_world_name_cmd)
     ld.add_action(declare_model_name_cmd)
@@ -308,6 +334,7 @@ def generate_launch_description():
     ld.add_action(mapviz_cmd)
     ld.add_action(ackermann_converter_cmd)
     ld.add_action(collision_monitor_cmd)
+    ld.add_action(frame_id_stripper_cmd)
     ld.add_action(collision_monitor_lifecycle_cmd)
 
     return ld
