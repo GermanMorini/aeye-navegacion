@@ -21,7 +21,7 @@ Visualization Manager:
     Name: TF
     Enabled: true
     Show Axes: false
-    Show Names: false
+    Show Names: true
   - Class: rviz_default_plugins/RobotModel
     Name: RobotModel
     Enabled: true

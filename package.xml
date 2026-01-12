@@ -8,8 +8,11 @@
   <maintainer email="todo@example.com">TODO</maintainer>
 
   <depend>navigation2</depend>
+  <depend>nav2_simple_commander</depend>
   <depend>nav2_collision_monitor</depend>
+  <depend>nav2_msgs</depend>
   <depend>robot_localization</depend>
+  <depend>geographic_msgs</depend>
   <depend>mapviz</depend>
   <depend>mapviz_plugins</depend>
   <depend>tile_map</depend>

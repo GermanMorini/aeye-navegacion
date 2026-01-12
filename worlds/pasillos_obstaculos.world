@@ -229,7 +229,7 @@
     </model>
     <model name="lane2_box_3">
       <static>true</static>
-      <pose>2 0 0.5 0 0 1.5708</pose>
+      <pose>5 0 0.5 0 0 1.5708</pose>
       <link name="link">
         <collision name="collision">
           <geometry>
