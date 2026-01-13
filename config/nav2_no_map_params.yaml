@@ -118,7 +118,7 @@ controller_server:
       batch_size: 800
       iteration_count: 1
       angle_quantization_bins: 72
-      noise_stddev: [0.25, 0.0, 0.05] # Baja el último valor si zigzaguea mucho
+      noise_stddev: [0.25, 0.0, 0.01] # Baja el último valor si zigzaguea mucho
       noise_filter_tau: 0.35
 
       # VELOCIDADES

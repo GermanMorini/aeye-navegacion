@@ -174,4 +174,4 @@ navsat_transform:
     use_odometry_yaw: false
     
     wait_for_datum: true
-    datum: [-31.421914, -64.102516, 0.0] # Ejemplo: CIT, Córdoba, Argentina
+    datum: [-31.421785, -64.102448, 0.0] # Ejemplo: CIT, Córdoba, Argentina

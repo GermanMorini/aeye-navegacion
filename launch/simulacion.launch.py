@@ -133,7 +133,6 @@ def generate_launch_description():
     use_rviz = LaunchConfiguration("use_rviz")
     use_mapviz = LaunchConfiguration("use_mapviz")
     use_sim_time = LaunchConfiguration("use_sim_time")
-    use_ackermann_converter = LaunchConfiguration("use_ackermann_converter")
     use_navsat = LaunchConfiguration("use_navsat")
     use_collision_monitor = LaunchConfiguration("use_collision_monitor")
     use_frame_id_stripper = LaunchConfiguration("use_frame_id_stripper")
@@ -167,11 +166,6 @@ def generate_launch_description():
         default_value="False",
         description="Whether to start mapviz",
     )
-    declare_use_ackermann_converter_cmd = DeclareLaunchArgument(
-        "use_ackermann_converter",
-        default_value="True",
-        description="Whether to convert /cmd_vel Twist to Ackermann commands",
-    )
     declare_use_navsat_cmd = DeclareLaunchArgument(
         "use_navsat",
         default_value="True",
@@ -179,7 +173,7 @@ def generate_launch_description():
     )
     declare_use_collision_monitor_cmd = DeclareLaunchArgument(
         "use_collision_monitor",
-        default_value="False",
+        default_value="True",
         description="Whether to start collision monitor",
     )
     declare_use_frame_id_stripper_cmd = DeclareLaunchArgument(
@@ -201,24 +195,6 @@ def generate_launch_description():
         "model_name",
         default_value="quad_ackermann_viewer_safe",
         description="Gazebo model name for TF/joint_state topics",
-    )
-
-    ackermann_converter_cmd = Node(
-        package="navegacion_gps",
-        executable="twist_to_ackermann",
-        name="twist_to_ackermann",
-        output="screen",
-        parameters=[
-            {
-                "input_topic": "/cmd_vel",
-                "output_topic": "/cmd_vel_steer",
-                "output_type": "twist",
-                "wheelbase": 0.94,
-                "steering_limit": 0.5235987756,
-                "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
-            }
-        ],
-        condition=IfCondition(use_ackermann_converter),
     )
 
     robot_localization_cmd = IncludeLaunchDescription(
@@ -317,7 +293,6 @@ def generate_launch_description():
     ld.add_action(declare_use_rviz_cmd)
     ld.add_action(declare_use_mapviz_cmd)
     ld.add_action(declare_rviz_config_cmd)
-    ld.add_action(declare_use_ackermann_converter_cmd)
     ld.add_action(declare_use_navsat_cmd)
     ld.add_action(declare_use_collision_monitor_cmd)
     ld.add_action(declare_use_frame_id_stripper_cmd)
@@ -332,7 +307,6 @@ def generate_launch_description():
     ld.add_action(navigation2_cmd)
     ld.add_action(rviz_cmd)
     ld.add_action(mapviz_cmd)
-    ld.add_action(ackermann_converter_cmd)
     ld.add_action(collision_monitor_cmd)
     ld.add_action(frame_id_stripper_cmd)
     ld.add_action(collision_monitor_lifecycle_cmd)

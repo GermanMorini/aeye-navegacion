@@ -32,7 +32,6 @@ setup(
             'interactive_waypoint_follower = navegacion_gps.interactive_waypoint_follower:main',
             'gps_waypoint_logger = navegacion_gps.gps_waypoint_logger:main',
             'teleop = navegacion_gps.teleop:main',
-            'twist_to_ackermann = navegacion_gps.twist_to_ackermann:main',
             'frame_id_stripper = navegacion_gps.frame_id_stripper:main',
             'yaml_waypoints_from_ll = navegacion_gps.yaml_waypoints_from_ll:main',
         ],

@@ -277,6 +277,34 @@
     </plugin>
   </gazebo>
 
+  <gazebo reference="rear_left_wheel_link">
+    <mu1>2.0</mu1>
+    <mu2>2.0</mu2>
+    <kp>1000000.0</kp>
+    <kd>10.0</kd>
+  </gazebo>
+
+  <gazebo reference="rear_right_wheel_link">
+    <mu1>2.0</mu1>
+    <mu2>2.0</mu2>
+    <kp>1000000.0</kp>
+    <kd>10.0</kd>
+  </gazebo>
+
+  <gazebo reference="front_left_wheel_link">
+    <mu1>2.0</mu1>
+    <mu2>2.0</mu2>
+    <kp>1000000.0</kp>
+    <kd>10.0</kd>
+  </gazebo>
+
+  <gazebo reference="front_right_wheel_link">
+    <mu1>2.0</mu1>
+    <mu2>2.0</mu2>
+    <kp>1000000.0</kp>
+    <kd>10.0</kd>
+  </gazebo>
+
   <!-- Lidar (Gazebo Sim) -->
   <gazebo reference="lidar_link">
     <sensor type="gpu_lidar" name="lidar_3d">
