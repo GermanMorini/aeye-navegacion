@@ -59,11 +59,8 @@ class YamlWaypointsFromLL(Node):
             pose.pose.position.x = response.map_point.x
             pose.pose.position.y = response.map_point.y
             pose.pose.position.z = response.map_point.z
-            qx, qy, qz, qw = self._yaw_to_quaternion(yaw)
-            pose.pose.orientation.x = qx
-            pose.pose.orientation.y = qy
-            pose.pose.orientation.z = qz
-            pose.pose.orientation.w = qw
+            # Ignore waypoint yaw; keep neutral orientation.
+            pose.pose.orientation.w = 1.0
             poses.append(pose)
         return poses
 

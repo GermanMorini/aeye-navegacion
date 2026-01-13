@@ -5,13 +5,13 @@ plugins:
   - type: mapviz_plugins/tile_map
     name: Google Satellite
     source_type: 0
-    base_url: https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={level}
+    base_url: "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={level}"
     min_zoom: 0
     max_zoom: 20
     draw_under: true
   - type: mapviz_plugins/navsat
     name: GPS
-    topic: /gps/filtered
+    topic: /gps/fix
     color: [0, 255, 0]
     draw_style: 1
     position_tolerance: 0.0
@@ -23,3 +23,8 @@ plugins:
     name: Click Goal
     topic: /clicked_point
     frame_id: map
+  - type: mapviz_plugins/odometry
+    name: Odometry
+    topic: /odometry/local
+    color: [255, 255, 0]
+    draw_style: 1

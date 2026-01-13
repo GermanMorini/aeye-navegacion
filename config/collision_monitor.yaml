@@ -11,36 +11,34 @@ collision_monitor:
     state_update_rate: 10.0
     source_timeout: 1.0
     stop_pub_timeout: 0.5
-    polygons: ["obstacle_monitor", "footprint", "stop_zone", "slowdown"]
-    obstacle_monitor:
+    polygons: ["footprint", "stop_zone", "slowdown"] # Eliminamos obstacle_monitor por redundancia
+    
+    footprint:
       type: "polygon"
-      points: [0.5, 0.3, 0.5, -0.3, -0.5, -0.3, -0.5, 0.3]
-      time_allowance: 0.5
       action_type: "stop"
       min_points: 3
-      enabled: true
-      visualize: true
-    footprint:
-      type: polygon
-      action_type: stop
-      min_points: 3
-      points: [1.19, 0.46, 1.19, -0.46, -0.25, -0.46, -0.25, 0.46]
+      points: [1.19, 0.46, 1.19, -0.46, -0.10, -0.46, -0.10, 0.46] 
       visualize: true
       enabled: true
+
     stop_zone:
-      type: polygon
-      action_type: stop
+      type: "polygon"
+      action_type: "approach"
       min_points: 3
-      points: [1.8, 0.5, 1.8, -0.5, 0.9, -0.5, 0.9, 0.5]
+      points: [1.3, 0.4, 1.3, -0.4, 0.8, -0.4, 0.8, 0.4]
+      time_allowance: 0.5
+      approach_velocity: 0.3
       visualize: true
       enabled: true
+
     slowdown:
       type: "polygon"
-      points: [1.2, 0.8, 1.2, -0.8, -1.0, -0.8, -1.0, 0.8] # Área más grande
+      points: [2.0, 0.7, 2.0, -0.7, 1.0, -0.7, 1.0, 0.7]
       action_type: "slowdown"
-      slowdown_ratio: 0.3
+      slowdown_ratio: 0.85
       enabled: true
       visualize: true
+
     observation_sources: ["lidar"]
     lidar:
       type: pointcloud

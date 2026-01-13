@@ -253,6 +253,20 @@ def generate_launch_description():
         ],
         condition=IfCondition(use_collision_monitor),
     )
+    collision_monitor_lifecycle_cmd = Node(
+        package="nav2_lifecycle_manager",
+        executable="lifecycle_manager",
+        name="collision_monitor_lifecycle_manager",
+        output="screen",
+        parameters=[
+            {
+                "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
+                "autostart": True,
+                "node_names": ["collision_monitor"],
+            }
+        ],
+        condition=IfCondition(use_collision_monitor),
+    )
     frame_id_stripper_cmd = Node(
         package="navegacion_gps",
         executable="frame_id_stripper",
@@ -272,21 +286,6 @@ def generate_launch_description():
         ],
         condition=IfCondition(use_frame_id_stripper),
     )
-    collision_monitor_lifecycle_cmd = Node(
-        package="nav2_lifecycle_manager",
-        executable="lifecycle_manager",
-        name="collision_monitor_lifecycle_manager",
-        output="screen",
-        parameters=[
-            {
-                "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
-                "autostart": True,
-                "node_names": ["collision_monitor"],
-            }
-        ],
-        condition=IfCondition(use_collision_monitor),
-    )
-
     ld = LaunchDescription()
     ld.add_action(declare_use_sim_time_cmd)
     ld.add_action(declare_custom_urdf_cmd)

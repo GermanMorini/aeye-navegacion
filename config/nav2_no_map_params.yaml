@@ -69,7 +69,7 @@ planner_server:
       max_iterations: 1000000
 
       motion_model_for_search: "REEDS_SHEPP"
-      minimum_turning_radius: 1.75      # RADIO DE GIRO
+      minimum_turning_radius: 3.0      # RADIO DE GIRO
       angle_quantization_bins: 72
 
       allow_reversing: true      # PERMITIR REVERSA
@@ -135,7 +135,7 @@ controller_server:
       wz_std: 0.4
 
       AckermannConstraints:
-        min_turning_r: 1.75  # RADIO DE GIRO
+        min_turning_r: 3.0  # RADIO DE GIRO
 
       critics:
         [
@@ -311,8 +311,8 @@ global_costmap:
       footprint: "[[1.19,0.46],[1.19,-0.46],[-0.25,-0.46],[-0.25,0.46]]"
       footprint_padding: 0.0
       rolling_window: true
-      width: 40
-      height: 40
+      width: 100
+      height: 100
       resolution: 0.1
       transform_tolerance: 1.0
       track_unknown_space: false
@@ -348,10 +348,12 @@ lifecycle_manager_navigation:
   ros__parameters:
     use_sim_time: true
     autostart: true
+    bond_timeout: 4.0
     node_names:
       - planner_server
       - controller_server
+      - smoother_server
       - bt_navigator
       - behavior_server
       - waypoint_follower
-      - collision_monitor
+      - velocity_smoother

@@ -6,6 +6,7 @@ import os
 import sys
 import tkinter as tk
 from tkinter import messagebox
+from ament_index_python.packages import get_package_share_directory
 from navegacion_gps.utils.gps_utils import euler_from_quaternion
 
 
@@ -108,7 +109,9 @@ def main(args=None):
     rclpy.init(args=args)
 
     # allow to pass the logging path as an argument
-    default_yaml_file_path = os.path.expanduser("~/gps_waypoints.yaml")
+    default_yaml_file_path = os.path.join(
+        get_package_share_directory("navegacion_gps"), "config", "default-waypoints.yaml"
+    )
     if len(sys.argv) > 1:
         yaml_file_path = sys.argv[1]
     else:

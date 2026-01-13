@@ -9,7 +9,7 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.parameter_descriptions import ParameterValue
 
 gps_wpf_dir = get_package_share_directory("navegacion_gps")
-mapviz_config_file = os.path.join(gps_wpf_dir, "config", "gps_wpf_demo.mvc")
+mapviz_config_file = os.path.join(gps_wpf_dir, "config", "mapviz_gps.mvc")
 
 
 def generate_launch_description():
@@ -26,10 +26,17 @@ def generate_launch_description():
             package="mapviz",
             executable="mapviz",
             name="mapviz",
+            arguments=["-d", mapviz_config_file],
             parameters=[
-                {"config": mapviz_config_file},
                 {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
             ],
+        ),
+        launch_ros.actions.Node(
+            package="navegacion_gps",
+            executable="interactive_waypoint_follower",
+            name="interactive_waypoint_follower",
+            output="screen",
+            parameters=[{"use_sim_time": ParameterValue(use_sim_time, value_type=bool)}],
         ),
         launch_ros.actions.Node(
             package="swri_transform_util",
