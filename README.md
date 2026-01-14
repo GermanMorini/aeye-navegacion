@@ -17,6 +17,7 @@ Demo de navegacion GPS con ROS 2 + Nav2. Usa robot_localization (EKF + navsat_tr
   - `utils/gps_utils.py`: conversiones GeoPose y quaternion.
 - `launch/`: lanzadores principales.
   - `simulacion.launch.py`: stack completo (Gazebo + EKF + Nav2 + RViz/Mapviz).
+  - `navegacion.launch.py`: stack Nav2 sin simulacion (EKF + Nav2 + RViz/Mapviz).
   - `dual_ekf_navsat.launch.py`: EKF + navsat_transform (robot_localization).
   - `mapviz.launch.py`: Mapviz + initialize_origin (usa `config/mapviz_gps.mvc`).
 - `config/`: parametros Nav2 y robot_localization.
@@ -67,6 +68,10 @@ colcon build --symlink-install
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 ros2 launch navegacion_gps simulacion.launch.py use_rviz:=True use_mapviz:=True
+```
+Sin simulacion:
+```bash
+ros2 launch navegacion_gps navegacion.launch.py use_rviz:=True use_mapviz:=True
 ```
 Por defecto el `collision_monitor` se lanza (`use_collision_monitor:=True`); para desactivarlo:
 ```bash
