@@ -69,7 +69,7 @@ planner_server:
       max_iterations: 1000000
 
       motion_model_for_search: "REEDS_SHEPP"
-      minimum_turning_radius: 3.0      # RADIO DE GIRO
+      minimum_turning_radius: 2.5      # RADIO DE GIRO
       angle_quantization_bins: 72
 
       allow_reversing: true      # PERMITIR REVERSA
@@ -122,11 +122,11 @@ controller_server:
       noise_filter_tau: 0.35
 
       # VELOCIDADES
-      regulated_linear_velocity_scaling_factor: 0.5 # mas alto -> mas frena en curvas
+      regulated_linear_velocity_scaling_factor: 0.7 # mas alto -> mas frena en curvas
       vx_max: 2.77
       vx_min: -1.0         # REVERSA
-      wz_max: 1.7  # velocidad angular
-      wz_min: -0.61
+      wz_max: 2.5  # velocidad angular
+      wz_min: -2.5
       max_accel: 1.0
       max_decel: -2.0
       vy_max: 0.0       # NO TOCAR
@@ -135,7 +135,7 @@ controller_server:
       wz_std: 0.4
 
       AckermannConstraints:
-        min_turning_r: 3.0  # RADIO DE GIRO
+        min_turning_r: 1.3  # RADIO DE GIRO
 
       critics:
         [
@@ -181,13 +181,13 @@ controller_server:
       GoalAngleCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 10.0
+        cost_weight: 5.0
         threshold_to_consider: 0.5
 
       PreferForwardCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 5.0
+        cost_weight: 2.0
         threshold_to_consider: 0.5
 
       # prioridad en seguir el centro del path
@@ -198,7 +198,7 @@ controller_server:
         max_path_occupancy_ratio: 0.05
         trajectory_point_step: 4
         threshold_to_consider: 0.7
-        offset_from_furthest: 60
+        offset_from_furthest: 20
         use_path_orientations: true
 
       PathFollowCritic:
@@ -206,14 +206,14 @@ controller_server:
         cost_power: 1
         cost_weight: 10.0
         offset_from_path: true
-        offset_from_furthest: 60
-        threshold_to_consider: 1.4
+        offset_from_furthest: 20
+        threshold_to_consider: 2.0
         trajectory_point_step: 2
 
       PathAngleCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 2.0
+        cost_weight: 1.0
         offset_from_furthest: 4
         threshold_to_consider: 0.5
         max_angle_to_furthest: 1.0
@@ -236,8 +236,8 @@ velocity_smoother:
     odom_topic: /odometry/local
     robot_base_frame: base_footprint
 
-    max_velocity: [2.77, 0.0, 1.7]
-    min_velocity: [-1.0, 0.0, -0.61]
+    max_velocity: [2.77, 0.0, 5.0]
+    min_velocity: [-1.0, 0.0, -5.0]
 
     max_accel: [1.0, 0.0, 3.0]
     max_decel: [-2.0, 0.0, -3.0]
