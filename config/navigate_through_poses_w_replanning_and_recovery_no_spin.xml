@@ -1,6 +1,6 @@
 <root main_tree_to_execute="MainTree">
   <BehaviorTree ID="MainTree">
-    <RecoveryNode number_of_retries="6" name="NavigateRecovery">
+    <RecoveryNode number_of_retries="3" name="NavigateRecovery">
       <PipelineSequence name="NavigateWithReplanning">
         <RateController hz="1.0" name="RateController">
           <RecoveryNode number_of_retries="2" name="ComputePath">
@@ -18,18 +18,11 @@
       </PipelineSequence>
       <ReactiveFallback name="RecoveryFallback">
         <GoalUpdated/>
-        <Sequence name="AckermannRecovery">
-          <!-- Limpiar costmaps -->
+        <Sequence name="WaitAndReplan">
+          <Wait wait_duration="5"/>
           <ClearEntireCostmap service_name="local_costmap/clear_entirely_local_costmap"/>
           <ClearEntireCostmap service_name="global_costmap/clear_entirely_global_costmap"/>
-          <Wait wait_duration="2"/>
-          
-          <!-- Reversa más larga -->
-          <BackUp backup_dist="3.0" backup_speed="0.3"/>
-          <Wait wait_duration="1"/>
-          
-          <!-- Intentar avanzar un poco -->
-          <DriveOnHeading dist_to_travel="1.0" speed="0.2" time_allowance="10"/>
+          <ComputePathThroughPoses goals="{goals}" path="{path}" planner_id="GridBased"/>
         </Sequence>
       </ReactiveFallback>
     </RecoveryNode>

@@ -8,6 +8,7 @@ from ament_index_python.packages import get_package_share_directory
 from geographic_msgs.msg import GeoPoint
 from geometry_msgs.msg import PoseStamped
 from nav2_msgs.action import FollowWaypoints
+from nav2_msgs.srv import GetCostmap
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from robot_localization.srv import FromLL
@@ -16,11 +17,29 @@ from robot_localization.srv import FromLL
 class YamlWaypointsFromLL(Node):
     def __init__(self, waypoints_file: str, service_name: str, map_frame: str):
         super().__init__("yaml_waypoints_from_ll")
+        for name, default in (
+            ("costmap_service", "/global_costmap/get_costmap"),
+            ("reject_outside_global_costmap", True),
+            ("clamp_outside_global_costmap", False),
+            ("costmap_timeout", 2.0),
+        ):
+            if not self.has_parameter(name):
+                self.declare_parameter(name, default)
         self._waypoints_file = waypoints_file
         self._service_name = service_name
         self._map_frame = map_frame
         self._client = self.create_client(FromLL, self._service_name)
         self._action_client = ActionClient(self, FollowWaypoints, "follow_waypoints")
+        self._costmap_service = self.get_parameter("costmap_service").value
+        self._reject_outside_global_costmap = self.get_parameter(
+            "reject_outside_global_costmap"
+        ).value
+        self._clamp_outside_global_costmap = self.get_parameter(
+            "clamp_outside_global_costmap"
+        ).value
+        self._costmap_timeout = float(self.get_parameter("costmap_timeout").value)
+        self._costmap_client = self.create_client(GetCostmap, self._costmap_service)
+        self._costmap = None
 
     def _load_waypoints(self):
         with open(self._waypoints_file, "r", encoding="utf-8") as handle:
@@ -37,6 +56,65 @@ class YamlWaypointsFromLL(Node):
         future = self._client.call_async(request)
         rclpy.spin_until_future_complete(self, future)
         return future.result()
+
+    def _get_costmap(self):
+        if self._costmap is not None:
+            return self._costmap
+        if not self._costmap_client.wait_for_service(timeout_sec=self._costmap_timeout):
+            self.get_logger().warning(
+                "Global costmap service not available; skipping bounds check"
+            )
+            return None
+        future = self._costmap_client.call_async(GetCostmap.Request())
+        rclpy.spin_until_future_complete(self, future, timeout_sec=self._costmap_timeout)
+        response = future.result()
+        if response is None:
+            self.get_logger().warning("Failed to get global costmap")
+            return None
+        self._costmap = response.map
+        return self._costmap
+
+    def _costmap_bounds(self):
+        if self._costmap is None:
+            return None
+        info = self._costmap.metadata
+        if info.resolution <= 0.0 or info.size_x == 0 or info.size_y == 0:
+            return None
+        min_x = info.origin.position.x
+        min_y = info.origin.position.y
+        max_x = min_x + (info.size_x * info.resolution)
+        max_y = min_y + (info.size_y * info.resolution)
+        return (min_x, min_y, max_x, max_y, info.resolution)
+
+    def _filter_pose(self, pose: PoseStamped):
+        if not self._reject_outside_global_costmap:
+            return pose
+        self._get_costmap()
+        bounds = self._costmap_bounds()
+        if bounds is None:
+            self.get_logger().warning(
+                "Global costmap not available; skipping waypoint"
+            )
+            return None
+
+        min_x, min_y, max_x, max_y, resolution = bounds
+        x = pose.pose.position.x
+        y = pose.pose.position.y
+        inside = (min_x <= x < max_x) and (min_y <= y < max_y)
+        if inside:
+            return pose
+
+        if self._clamp_outside_global_costmap:
+            eps = resolution * 0.5
+            pose.pose.position.x = min(max(x, min_x + eps), max_x - eps)
+            pose.pose.position.y = min(max(y, min_y + eps), max_y - eps)
+            self.get_logger().warning(
+                "Waypoint outside global costmap, clamping to nearest edge"
+            )
+            return pose
+
+        self.get_logger().warning("Waypoint outside global costmap, skipping")
+        return None
 
     def build_pose_list(self):
         if not self._client.wait_for_service(timeout_sec=5.0):
@@ -61,7 +139,9 @@ class YamlWaypointsFromLL(Node):
             pose.pose.position.z = response.map_point.z
             # Ignore waypoint yaw; keep neutral orientation.
             pose.pose.orientation.w = 1.0
-            poses.append(pose)
+            filtered = self._filter_pose(pose)
+            if filtered is not None:
+                poses.append(filtered)
         return poses
 
     def send_waypoints(self, poses):
@@ -102,6 +182,9 @@ def main():
 
     try:
         poses = node.build_pose_list()
+        if not poses:
+            print("No valid waypoints to send (outside global costmap)")
+            return
         result = node.send_waypoints(poses)
     finally:
         node.destroy_node()

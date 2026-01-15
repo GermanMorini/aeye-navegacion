@@ -1,6 +1,6 @@
 <root main_tree_to_execute="MainTree">
   <BehaviorTree ID="MainTree">
-    <RecoveryNode number_of_retries="15" name="NavigateRecovery">
+    <RecoveryNode number_of_retries="3" name="NavigateRecovery">
       <PipelineSequence>
         <RateController hz="1.0" name="RateControllerComputePathToPose">
           <RecoveryNode number_of_retries="1" name="RecoveryComputePathToPose">
@@ -25,19 +25,14 @@
       </PipelineSequence>
       <ReactiveFallback name="FallbackRecoveries">
         <GoalUpdated />
-        <RoundRobin name="RecoveryActions">
-          <Sequence name="ClearingActions">
-            <ClearEntireCostmap name="ClearLocalCostmap-Subtree"
-              service_name="local_costmap/clear_entirely_local_costmap" />
-            <ClearEntireCostmap name="ClearGlobalCostmap-Subtree"
-              service_name="global_costmap/clear_entirely_global_costmap" />
-          </Sequence>
+        <Sequence name="WaitAndReplan">
           <Wait name="WaitRecovery" wait_duration="5" />
-          <Sequence name="BackUpAndRetry">
-            <BackUp name="BackUpRecovery" backup_dist="2.0" backup_speed="0.25" />
-            <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased" />
-          </Sequence>
-        </RoundRobin>
+          <ClearEntireCostmap name="ClearLocalCostmap-Recovery"
+            service_name="local_costmap/clear_entirely_local_costmap" />
+          <ClearEntireCostmap name="ClearGlobalCostmap-Recovery"
+            service_name="global_costmap/clear_entirely_global_costmap" />
+          <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased" />
+        </Sequence>
       </ReactiveFallback>
     </RecoveryNode>
   </BehaviorTree>

@@ -73,12 +73,13 @@ planner_server:
       angle_quantization_bins: 72
 
       allow_reversing: true      # PERMITIR REVERSA
-      reverse_penalty: 4.0
+      reverse_penalty: 1.5
       change_penalty: 1.0
       non_straight_penalty: 2.5
       cost_penalty: 2.0
       cost_travel_multiplier: 0.1  # castigo por distancia extra
 
+      use_final_approach_orientation: false
       smooth_path: true
       debug_visualizations: false
 
@@ -106,7 +107,7 @@ controller_server:
       plugin: "nav2_controller::SimpleGoalChecker"
       stateful: true
       xy_goal_tolerance: 0.5
-      yaw_goal_tolerance: 1.0
+      yaw_goal_tolerance: 3.1416
 
     FollowPath:
       plugin: "nav2_mppi_controller::MPPIController"
@@ -146,7 +147,6 @@ controller_server:
           "PathAlignCritic",
           "PathFollowCritic",
           "PathAngleCritic",
-          "PreferForwardCritic",
           "ObstaclesCritic",
           "TwirlingCritic"
         ]
@@ -154,7 +154,7 @@ controller_server:
       TwirlingCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 1.0
+        cost_weight: 5.0
 
       ConstraintCritic:
         enabled: true
@@ -182,12 +182,6 @@ controller_server:
         enabled: true
         cost_power: 1
         cost_weight: 5.0
-        threshold_to_consider: 0.5
-
-      PreferForwardCritic:
-        enabled: true
-        cost_power: 1
-        cost_weight: 2.0
         threshold_to_consider: 0.5
 
       # prioridad en seguir el centro del path

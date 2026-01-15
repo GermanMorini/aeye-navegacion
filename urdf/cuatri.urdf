@@ -89,6 +89,7 @@
     <origin xyz="0.47 0.0 0.62" rpy="0 0 0"/>
   </joint>
 
+
   <!-- =========================
        WHEELS
        ========================= -->
@@ -370,19 +371,19 @@
           <horizontal>
             <noise type="gaussian">
               <mean>0.0</mean>
-              <stddev>0.00002</stddev> </noise>
+              <stddev>0.000005</stddev> </noise>
           </horizontal>
           <vertical>
             <noise type="gaussian">
               <mean>0.0</mean>
-              <stddev>0.00005</stddev> </noise>
+              <stddev>0.0000125</stddev> </noise>
           </vertical>
         </position_sensing>
         <velocity_sensing>
           <horizontal>
             <noise type="gaussian">
               <mean>0.0</mean>
-              <stddev>0.00001</stddev>
+              <stddev>0.0000025</stddev>
             </noise>
           </horizontal>
         </velocity_sensing>
