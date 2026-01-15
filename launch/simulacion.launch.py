@@ -113,6 +113,7 @@ def generate_launch_description():
     world_path = os.path.join(gps_wpf_dir, "worlds", "pasillos_obstaculos.world")
     nav2_params = os.path.join(params_dir, "nav2_no_map_params.yaml")
     collision_monitor_params = os.path.join(params_dir, "collision_monitor.yaml")
+    lidar_to_scan_params = os.path.join(params_dir, "pointcloud_to_laserscan.yaml")
     bridge_config = os.path.join(params_dir, "bridge_config.yaml")
     bt_xml = os.path.join(
         params_dir, "navigate_to_pose_w_replanning_and_recovery_no_spin.xml"
@@ -286,6 +287,21 @@ def generate_launch_description():
         ],
         condition=IfCondition(use_frame_id_stripper),
     )
+    lidar_to_scan_cmd = Node(
+        package="pointcloud_to_laserscan",
+        executable="pointcloud_to_laserscan_node",
+        name="pointcloud_to_laserscan",
+        output="screen",
+        parameters=[
+            lidar_to_scan_params,
+            {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+            {"output_qos": "sensor_data"},
+        ],
+        remappings=[
+            ("cloud_in", "/scan_3d"),
+            ("scan", "/scan"),
+        ],
+    )
     ld = LaunchDescription()
     ld.add_action(declare_use_sim_time_cmd)
     ld.add_action(declare_custom_urdf_cmd)
@@ -308,6 +324,7 @@ def generate_launch_description():
     ld.add_action(mapviz_cmd)
     ld.add_action(collision_monitor_cmd)
     ld.add_action(frame_id_stripper_cmd)
+    ld.add_action(lidar_to_scan_cmd)
     ld.add_action(collision_monitor_lifecycle_cmd)
 
     return ld

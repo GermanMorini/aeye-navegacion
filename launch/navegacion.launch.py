@@ -31,6 +31,7 @@ def generate_launch_description():
     launch_dir = os.path.join(gps_wpf_dir, "launch")
     params_dir = os.path.join(gps_wpf_dir, "config")
     collision_monitor_params = os.path.join(params_dir, "collision_monitor.yaml")
+    lidar_to_scan_params = os.path.join(params_dir, "pointcloud_to_laserscan.yaml")
     bt_xml = os.path.join(
         params_dir, "navigate_to_pose_w_replanning_and_recovery_no_spin.xml"
     )
@@ -48,7 +49,7 @@ def generate_launch_description():
 
     declare_use_sim_time_cmd = DeclareLaunchArgument(
         "use_sim_time",
-        default_value="False",
+        default_value="True",
         description="Use simulation clock if true",
     )
     declare_use_navsat_cmd = DeclareLaunchArgument(
@@ -156,6 +157,21 @@ def generate_launch_description():
         ],
         condition=IfCondition(use_collision_monitor),
     )
+    lidar_to_scan_cmd = Node(
+        package="pointcloud_to_laserscan",
+        executable="pointcloud_to_laserscan_node",
+        name="pointcloud_to_laserscan",
+        output="screen",
+        parameters=[
+            lidar_to_scan_params,
+            {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+            {"output_qos": "sensor_data"},
+        ],
+        remappings=[
+            ("cloud_in", "/scan_3d"),
+            ("scan", "/scan"),
+        ],
+    )
 
     ld = LaunchDescription()
     ld.add_action(declare_use_sim_time_cmd)
@@ -170,6 +186,7 @@ def generate_launch_description():
     ld.add_action(rviz_cmd)
     ld.add_action(mapviz_cmd)
     ld.add_action(collision_monitor_cmd)
+    ld.add_action(lidar_to_scan_cmd)
     ld.add_action(collision_monitor_lifecycle_cmd)
 
     return ld
