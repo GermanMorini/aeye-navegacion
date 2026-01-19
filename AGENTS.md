@@ -8,7 +8,7 @@ Repo map (quick)
 - `navegacion_gps/`: Python nodes (waypoint followers, GPS logger, Pixhawk driver, utils).
 - `launch/`: main entrypoints for sim, localization, and Nav2.
 - `config/`: Nav2, robot_localization, RViz, Mapviz, and demo waypoints.
-- `urdf/`, `worlds/`: simulation assets.
+- `models/`, `worlds/`: simulation assets.
 - `tools/`: helper scripts to start the demo (package-local).
 - Workspace root `../../`: Docker files, entrypoint, and container helper scripts.
 
@@ -59,6 +59,6 @@ Testing and validation
 
 Style and safety
 - Prefer `rg` for search and keep edits localized.
-- Avoid changing `worlds/` or `urdf/` unless requested.
+- Avoid changing `worlds/` or `models/` unless requested.
 - Avoid changing `../../Dockerfile` or `../../docker-compose.yml` unless requested.
 - Keep files ASCII-only unless a file already uses non-ASCII.

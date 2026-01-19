@@ -21,7 +21,7 @@ Demo de navegacion GPS con ROS 2 + Nav2. Usa robot_localization (EKF + navsat_tr
   - `dual_ekf_navsat.launch.py`: EKF + navsat_transform (robot_localization).
   - `mapviz.launch.py`: Mapviz + initialize_origin (usa `config/mapviz_gps.mvc`).
 - `config/`: parametros Nav2 y robot_localization.
-- `worlds/`: mundos de simulacion (`pasillos_obstaculos.world`, `default.sdf`, `vacio.world`).
+- `worlds/`: mundos de simulacion (`pasillos_obstaculos.world`, `tugbot_depot.world`, `harmonic_world.world`, `default.sdf`, `vacio.world`).
 - `tools/`: scripts de inicio.
 - `docker-compose.yml`, `Dockerfile`: entorno en contenedor (ver notas abajo).
 
@@ -44,7 +44,7 @@ Frames tipicos:
 - `map` -> `odom` -> `base_footprint` -> `base_link`
 - `base_footprint` se usa en `dual_ekf_navsat_params.yaml` (ajustar si tu robot usa otro frame).
 
-### Dimensiones del robot (urdf/cuatri.urdf)
+### Dimensiones del robot (models/cuatri.urdf)
 - Distancia entre ejes (wheelbase): 0.94 m.
 - Separacion entre ruedas traseras (track): 0.75 m.
 - Radio de rueda: 0.24 m.

@@ -18,7 +18,7 @@ from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, TextSubstitution
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.conditions import IfCondition
 from launch_ros.actions import Node
@@ -140,6 +140,7 @@ def generate_launch_description():
     rviz_config = LaunchConfiguration("rviz_config")
     use_joint_state_bridge = LaunchConfiguration("use_joint_state_bridge")
     world_name = LaunchConfiguration("world_name")
+    world = LaunchConfiguration("world")
     model_name = LaunchConfiguration("model_name")
 
     declare_use_sim_time_cmd = DeclareLaunchArgument(
@@ -149,7 +150,7 @@ def generate_launch_description():
     )
     declare_custom_urdf_cmd = DeclareLaunchArgument(
         "custom_urdf",
-        default_value=os.path.join(gps_wpf_dir, "urdf", "cuatri.urdf"),
+        default_value=os.path.join(gps_wpf_dir, "models", "cuatri.urdf"),
         description="Path to custom URDF to spawn in Gazebo Sim",
     )
     declare_use_rviz_cmd = DeclareLaunchArgument(
@@ -187,6 +188,11 @@ def generate_launch_description():
         default_value="False",
         description="Whether to bridge Gazebo joint_state into ROS",
     )
+    declare_world_cmd = DeclareLaunchArgument(
+        "world",
+        default_value=world_path,
+        description="Path to the Gazebo world file",
+    )
     declare_world_name_cmd = DeclareLaunchArgument(
         "world_name",
         default_value="pasillos_obstaculos",
@@ -223,7 +229,7 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(
             os.path.join(ros_gz_sim_dir, "launch", "gz_sim.launch.py")
         ),
-        launch_arguments={"gz_args": f"-r {world_path}"}.items(),
+        launch_arguments={"gz_args": [TextSubstitution(text="-r "), world]}.items(),
     )
     rviz_cmd = Node(
         package="rviz2",
@@ -312,6 +318,7 @@ def generate_launch_description():
     ld.add_action(declare_use_collision_monitor_cmd)
     ld.add_action(declare_use_frame_id_stripper_cmd)
     ld.add_action(declare_use_joint_state_bridge_cmd)
+    ld.add_action(declare_world_cmd)
     ld.add_action(declare_world_name_cmd)
     ld.add_action(declare_model_name_cmd)
     ld.add_action(gz_sim_cmd)

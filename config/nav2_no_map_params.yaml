@@ -124,8 +124,8 @@ controller_server:
 
       # VELOCIDADES
       regulated_linear_velocity_scaling_factor: 0.7 # mas alto -> mas frena en curvas
-      vx_max: 2.77
-      vx_min: -1.0         # REVERSA
+      vx_max: 4.16
+      vx_min: -2.0         # REVERSA
       wz_max: 2.5  # velocidad angular
       wz_min: -2.5
       max_accel: 1.0
@@ -230,8 +230,8 @@ velocity_smoother:
     odom_topic: /odometry/local
     robot_base_frame: base_footprint
 
-    max_velocity: [2.77, 0.0, 5.0]
-    min_velocity: [-1.0, 0.0, -5.0]
+    max_velocity: [4.16, 0.0, 2.5]
+    min_velocity: [-2.0, 0.0, -2.5]
 
     max_accel: [1.0, 0.0, 3.0]
     max_decel: [-2.0, 0.0, -3.0]
