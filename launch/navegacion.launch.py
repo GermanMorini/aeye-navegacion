@@ -19,7 +19,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from nav2_common.launch import RewrittenYaml
@@ -119,7 +119,13 @@ def generate_launch_description():
         executable="rviz2",
         name="rviz2",
         output="screen",
-        arguments=["-d", rviz_config],
+        arguments=[
+            "-d",
+            rviz_config,
+            "--ros-args",
+            "-p",
+            PythonExpression(["'use_sim_time:=' + str(", use_sim_time, ")"]),
+        ],
         parameters=[{"use_sim_time": ParameterValue(use_sim_time, value_type=bool)}],
         condition=IfCondition(use_rviz),
     )

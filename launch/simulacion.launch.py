@@ -18,7 +18,7 @@ from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
-from launch.substitutions import LaunchConfiguration, TextSubstitution
+from launch.substitutions import LaunchConfiguration, PythonExpression, TextSubstitution
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.conditions import IfCondition
 from launch_ros.actions import Node
@@ -236,7 +236,13 @@ def generate_launch_description():
         executable="rviz2",
         name="rviz2",
         output="screen",
-        arguments=["-d", rviz_config],
+        arguments=[
+            "-d",
+            rviz_config,
+            "--ros-args",
+            "-p",
+            PythonExpression(["'use_sim_time:=' + str(", use_sim_time, ")"]),
+        ],
         parameters=[{"use_sim_time": ParameterValue(use_sim_time, value_type=bool)}],
         condition=IfCondition(use_rviz),
     )
@@ -284,10 +290,35 @@ def generate_launch_description():
             {"imu_in_topic": "/imu/data_raw", "imu_out_topic": "/imu/data"},
             {"gps_in_topic": "/gps/fix_raw", "gps_out_topic": "/gps/fix"},
             {"lidar_in_topic": "/scan_3d_raw", "lidar_out_topic": "/scan_3d"},
+            {
+                "ultrasound_rear_center_in_topic": "/ultrasound/rear_center_raw",
+                "ultrasound_rear_center_out_topic": "/ultrasound/rear_center",
+            },
+            {
+                "ultrasound_rear_left_in_topic": "/ultrasound/rear_left_raw",
+                "ultrasound_rear_left_out_topic": "/ultrasound/rear_left",
+            },
+            {
+                "ultrasound_rear_right_in_topic": "/ultrasound/rear_right_raw",
+                "ultrasound_rear_right_out_topic": "/ultrasound/rear_right",
+            },
+            {
+                "ultrasound_front_left_in_topic": "/ultrasound/front_left_raw",
+                "ultrasound_front_left_out_topic": "/ultrasound/front_left",
+            },
+            {
+                "ultrasound_front_right_in_topic": "/ultrasound/front_right_raw",
+                "ultrasound_front_right_out_topic": "/ultrasound/front_right",
+            },
             {"odom_in_topic": "/odom_raw", "odom_out_topic": "/odom"},
             {"imu_frame_id": "imu_link"},
             {"gps_frame_id": "gps_link"},
             {"lidar_frame_id": "lidar_link"},
+            {"ultrasound_rear_center_frame_id": "rear_center_ultrasound"},
+            {"ultrasound_rear_left_frame_id": "rear_left_ultrasound"},
+            {"ultrasound_rear_right_frame_id": "rear_right_ultrasound"},
+            {"ultrasound_front_left_frame_id": "front_left_ultrasound"},
+            {"ultrasound_front_right_frame_id": "front_right_ultrasound"},
             {"odom_frame_id": "odom"},
             {"base_link_frame_id": "base_footprint"},
         ],

@@ -39,8 +39,28 @@ collision_monitor:
       enabled: true
       visualize: true
 
-    observation_sources: ["scan"]
+    observation_sources: ["scan", "ultrasound_rear_center", "ultrasound_rear_left", "ultrasound_rear_right", "ultrasound_front_left", "ultrasound_front_right"]
     scan:
       type: scan
       topic: /scan
+      enabled: true
+    ultrasound_rear_center:
+      type: scan
+      topic: /ultrasound/rear_center
+      enabled: true
+    ultrasound_rear_left:
+      type: scan
+      topic: /ultrasound/rear_left
+      enabled: true
+    ultrasound_rear_right:
+      type: scan
+      topic: /ultrasound/rear_right
+      enabled: true
+    ultrasound_front_left:
+      type: scan
+      topic: /ultrasound/front_left
+      enabled: true
+    ultrasound_front_right:
+      type: scan
+      topic: /ultrasound/front_right
       enabled: true
