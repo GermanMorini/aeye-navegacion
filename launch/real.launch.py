@@ -79,12 +79,10 @@ def generate_launch_description():
     use_navsat = LaunchConfiguration("use_navsat")
     use_collision_monitor = LaunchConfiguration("use_collision_monitor")
     use_frame_id_stripper = LaunchConfiguration("use_frame_id_stripper")
-    use_robot_state_publisher = LaunchConfiguration("use_robot_state_publisher")
     use_pointcloud_to_laserscan = LaunchConfiguration("use_pointcloud_to_laserscan")
     start_pixhawk = LaunchConfiguration("start_pixhawk")
     start_lidar = LaunchConfiguration("start_lidar")
     launch_web = LaunchConfiguration("launch_web")
-    custom_urdf = LaunchConfiguration("custom_urdf")
     lidar_config_path = LaunchConfiguration("lidar_config_path")
 
     declare_use_sim_time_cmd = DeclareLaunchArgument(
@@ -104,7 +102,7 @@ def generate_launch_description():
     )
     declare_use_rviz_cmd = DeclareLaunchArgument(
         "use_rviz",
-        default_value="True",
+        default_value="False",
         description="Whether to start RVIZ",
     )
     declare_rviz_config_cmd = DeclareLaunchArgument(
