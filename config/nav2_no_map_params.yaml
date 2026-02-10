@@ -125,10 +125,11 @@ controller_server:
 
       # VELOCIDADES
       regulated_linear_velocity_scaling_factor: 0.7 # mas alto -> mas frena en curvas
-      vx_max: 4.16
-      vx_min: -2.0         # REVERSA
-      wz_max: 2.5  # velocidad angular
-      wz_min: -2.5
+      # vx_max: 4.16
+      vx_max: 0.5
+      vx_min: -0.5         # REVERSA
+      wz_max: 0.4  # velocidad angular
+      wz_min: -0.4
       vy_max: 0.0       # NO TOCAR
       
       vx_std: 0.2
@@ -138,10 +139,10 @@ controller_server:
         wheelbase: 0.94
         steering_limit: 0.523598
         max_steering_vel: 2.0
-        max_accel: 1.0
-        max_decel: -2.0
-        max_speed: 4.16
-        min_speed: -2.0
+        # max_accel: 1.0
+        # max_decel: -2.0
+        # max_speed: 4.16
+        # min_speed: -2.0
 
       AckermannConstraints:
         min_turning_r: 1.0  # RADIO DE GIRO
@@ -231,8 +232,9 @@ velocity_smoother:
     odom_topic: /odometry/local
     robot_base_frame: base_footprint
 
-    max_velocity: [4.16, 0.0, 2.5]
-    min_velocity: [-2.0, 0.0, -2.5]
+    # max_velocity: [4.16, 0.0, 2.5]
+    max_velocity: [0.5, 0.0, 0.4]
+    min_velocity: [-0.5, 0.0, -0.4]
 
     max_accel: [1.0, 0.0, 3.0]
     max_decel: [-2.0, 0.0, -3.0]
