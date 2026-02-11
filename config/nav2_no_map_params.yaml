@@ -106,8 +106,8 @@ controller_server:
     general_goal_checker:
       plugin: "nav2_controller::SimpleGoalChecker"
       stateful: true
-      xy_goal_tolerance: 0.5
-      yaw_goal_tolerance: 3.1416
+      xy_goal_tolerance: 0.2
+      yaw_goal_tolerance: 0.35
 
     FollowPath:
       plugin: "nav2_mppi_controller::MPPIController"
@@ -127,7 +127,7 @@ controller_server:
       regulated_linear_velocity_scaling_factor: 0.7 # mas alto -> mas frena en curvas
       # vx_max: 4.16
       vx_max: 0.5
-      vx_min: -0.5         # REVERSA
+      vx_min: -0.15
       wz_max: 0.4  # velocidad angular
       wz_min: -0.4
       vy_max: 0.0       # NO TOCAR
@@ -139,8 +139,8 @@ controller_server:
         wheelbase: 0.94
         steering_limit: 0.523598
         max_steering_vel: 2.0
-        # max_accel: 1.0
-        # max_decel: -2.0
+        max_accel: 0.25
+        max_decel: -0.35
         # max_speed: 4.16
         # min_speed: -2.0
 
@@ -234,7 +234,7 @@ velocity_smoother:
 
     # max_velocity: [4.16, 0.0, 2.5]
     max_velocity: [0.5, 0.0, 0.4]
-    min_velocity: [-0.5, 0.0, -0.4]
+    min_velocity: [-0.15, 0.0, -0.4]
 
     max_accel: [1.0, 0.0, 3.0]
     max_decel: [-2.0, 0.0, -3.0]
