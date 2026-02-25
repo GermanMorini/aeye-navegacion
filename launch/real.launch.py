@@ -97,7 +97,7 @@ def generate_launch_description():
     )
     declare_custom_urdf_cmd = DeclareLaunchArgument(
         "custom_urdf",
-        default_value=os.path.join(gps_wpf_dir, "models", "cuatri.urdf"),
+        default_value=os.path.join(gps_wpf_dir, "models", "cuatri_real.urdf"),
         description="Path to custom URDF for TF tree",
     )
     declare_use_rviz_cmd = DeclareLaunchArgument(
