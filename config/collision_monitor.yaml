@@ -9,8 +9,8 @@ collision_monitor:
     expected_planner_frequency: 10.0
     transform_tolerance: 0.5
     state_update_rate: 10.0
-    source_timeout: 1.0
-    stop_pub_timeout: 0.5
+    source_timeout: 0.3
+    stop_pub_timeout: 0.2
     polygons: ["footprint", "stop_zone", "slowdown"] # Eliminamos obstacle_monitor por redundancia
     
     footprint:
@@ -23,11 +23,9 @@ collision_monitor:
 
     stop_zone:
       type: "polygon"
-      action_type: "approach"
+      action_type: "stop"
       min_points: 3
       points: [1.6, 0.7, 1.6, -0.7, -0.4, -0.7, -0.4, 0.7]
-      time_allowance: 0.5
-      approach_velocity: 0.3
       visualize: true
       enabled: true
 
@@ -35,7 +33,7 @@ collision_monitor:
       type: "polygon"
       points: [2.2, 1.0, 2.2, -1.0, -0.8, -1.0, -0.8, 1.0]
       action_type: "slowdown"
-      slowdown_ratio: 0.85
+      slowdown_ratio: 0.5
       enabled: true
       visualize: true
 
