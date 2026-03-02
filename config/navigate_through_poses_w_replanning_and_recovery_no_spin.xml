@@ -2,7 +2,7 @@
   <BehaviorTree ID="MainTree">
     <RecoveryNode number_of_retries="3" name="NavigateRecovery">
       <PipelineSequence name="NavigateWithReplanning">
-        <RateController hz="1.0" name="RateController">
+        <RateController hz="3.0" name="RateController">
           <RecoveryNode number_of_retries="2" name="ComputePath">
             <ComputePathThroughPoses goals="{goals}" path="{path}" planner_id="GridBased"/>
             <Sequence name="ClearAndWait">
