@@ -11,7 +11,7 @@ collision_monitor:
     state_update_rate: 10.0
     source_timeout: 1.0
     stop_pub_timeout: 0.5
-    polygons: ["footprint", "stop_zone", "slowdown"] # Eliminamos obstacle_monitor por redundancia
+    polygons: ["footprint", "stop_zone"]
     
     footprint:
       type: "polygon"
@@ -30,14 +30,6 @@ collision_monitor:
       approach_velocity: 0.3
       visualize: true
       enabled: true
-
-    slowdown:
-      type: "polygon"
-      points: [2.2, 1.0, 2.2, -1.0, -0.8, -1.0, -0.8, 1.0]
-      action_type: "slowdown"
-      slowdown_ratio: 0.85
-      enabled: true
-      visualize: true
 
     observation_sources: ["scan", "ultrasound_rear_center", "ultrasound_rear_left", "ultrasound_rear_right", "ultrasound_front_left", "ultrasound_front_right"]
     scan:
