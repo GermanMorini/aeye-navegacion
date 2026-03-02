@@ -125,8 +125,8 @@ controller_server:
       # VELOCIDADES
       regulated_linear_velocity_scaling_factor: 0.7 # mas alto -> mas frena en curvas
       # vx_max: 4.16
-      vx_max: 1.5
-      vx_min: 0.75
+      vx_max: 0.5
+      vx_min: 0.0
       wz_max: 0.4  # velocidad angular
       wz_min: -0.4
       vy_max: 0.0       # NO TOCAR
@@ -232,8 +232,8 @@ velocity_smoother:
     robot_base_frame: base_footprint
 
     # max_velocity: [4.16, 0.0, 2.5]
-    max_velocity: [1.5, 0.0, 0.4]
-    min_velocity: [0.75, 0.0, -0.4]
+    max_velocity: [0.5, 0.0, 0.4]
+    min_velocity: [0.0, 0.0, -0.4]
 
     max_accel: [1.0, 0.0, 3.0]
     max_decel: [-2.0, 0.0, -3.0]
