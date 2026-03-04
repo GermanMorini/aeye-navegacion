@@ -133,8 +133,8 @@ controller_server:
       # VELOCIDADES
       regulated_linear_velocity_scaling_factor: 0.55 # mas alto -> mas frena en curvas
       # vx_max: 4.16
-      vx_max: 2.0
-      vx_min: 0.75
+      vx_max: 1.5
+      vx_min: 1.0
       wz_max: 1.23  # velocidad angular
       wz_min: -1.23
       vy_max: 0.0       # NO TOCAR
@@ -147,7 +147,7 @@ controller_server:
         wheelbase: 0.94
         steering_limit: 0.523598
         max_steering_vel: 2.0
-        max_accel: 1.0
+        max_accel: 8.0
         max_decel: -5.0
         # max_speed: 4.16
         # min_speed: -2.0
@@ -237,7 +237,7 @@ velocity_smoother:
     robot_base_frame: base_footprint
 
     # max_velocity: [4.16, 0.0, 2.5]
-    max_velocity: [2.0, 0.0, 3.0]
+    max_velocity: [1.5, 0.0, 3.0]
     min_velocity: [0.0, 0.0, -3.0]
 
     max_accel: [1.0, 0.0, 3.0]
@@ -477,4 +477,3 @@ lifecycle_manager_navigation:
       - bt_navigator
       - behavior_server
       - waypoint_follower
-      - velocity_smoother
