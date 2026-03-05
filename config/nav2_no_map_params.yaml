@@ -156,7 +156,8 @@ velocity_smoother:
 
     # max_velocity: [4.16, 0.0, 2.5]
     max_velocity: [1.5, 0.0, 3.0]
-    min_velocity: [-1.5, 0.0, -3.0]
+    # Limita la velocidad lineal en reversa a 1.0 m/s
+    min_velocity: [-1.0, 0.0, -3.0]
 
     max_accel: [1.0, 0.0, 3.0]
     max_decel: [-2.0, 0.0, -3.0]
