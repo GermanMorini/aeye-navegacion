@@ -44,14 +44,14 @@ behavior_server:
 
     # LIMITES DE ACELERACIÓN (Esto quita el mensaje de INFO que viste)
     # Ajustados para un robot tipo coche de tamaño medio
-    max_acceleration: 0.2     # m/s^2 (suave para no patinar en Gazebo)
-    max_deceleration: 0.5     # m/s^2
-    max_angular_acceleration: 0.1 # rad/s^2
-    max_angular_deceleration: 0.1 # rad/s^2
+    max_acceleration: 2.0     # m/s^2 (suave para no patinar en Gazebo)
+    max_deceleration: 2.0     # m/s^2
+    max_angular_acceleration: 1.0 # rad/s^2
+    max_angular_deceleration: 1.0 # rad/s^2
 
   
 # ================================
-# PLANNER (Hybrid A* con reversa)
+# PLANNER (Hybrid A* solo avance nominal)
 # ================================
 planner_server:
   ros__parameters:
@@ -68,16 +68,16 @@ planner_server:
       max_planning_time: 3.0
       max_iterations: 1000000
 
-      motion_model_for_search: "REEDS_SHEPP"
-      # Rmin = wheelbase / tan(steering_limit) = 0.94 / tan(0.523598) ~= 1.63 m
-      minimum_turning_radius: 1.9
+      motion_model_for_search: "DUBIN"
+      # Radio de giro efectivo más conservador para reducir sobreapertura en curva
+      minimum_turning_radius: 2.4
       angle_quantization_bins: 72
 
-      reverse_penalty: 1.1
-      change_penalty: 0.1
+      reverse_penalty: 2.8
+      change_penalty: 1.8
       non_straight_penalty: 1.3
       cost_penalty: 3.0
-      cost_travel_multiplier: 0.1  # castigo por distancia extra
+      cost_travel_multiplier: 0.4  # castigo por distancia extra
 
       use_final_approach_orientation: false
       smooth_path: true
@@ -111,20 +111,21 @@ controller_server:
     FollowPath:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
 
-      desired_linear_vel: 1.5
+      desired_linear_vel: 1.2
 
-      lookahead_dist: 2.0
-      min_lookahead_dist: 1.2
-      max_lookahead_dist: 3.0
-      lookahead_time: 1.5
+      lookahead_dist: 1.6
+      min_lookahead_dist: 1.0
+      max_lookahead_dist: 2.4
+      lookahead_time: 1.2
       use_velocity_scaled_lookahead_dist: true
 
+      # Restricción operativa: velocidad lineal mínima absoluta 1.0 m/s
       min_approach_linear_velocity: 1.0
       approach_velocity_scaling_dist: 1.0
 
       use_regulated_linear_velocity_scaling: true
       use_cost_regulated_linear_velocity_scaling: true
-      regulated_linear_scaling_min_radius: 1.9
+      regulated_linear_scaling_min_radius: 2.4
       regulated_linear_scaling_min_speed: 1.0
 
       use_collision_detection: true
@@ -132,12 +133,13 @@ controller_server:
 
       use_rotate_to_heading: false
       rotate_to_heading_angular_vel: 1.8
-      allow_reversing: true
+      # En seguimiento nominal no se permite reversa (solo recovery BT)
+      allow_reversing: false
 
       max_angular_accel: 1.2
       transform_tolerance: 0.2
       use_interpolation: false
-      max_robot_pose_search_dist: 10.0
+      max_robot_pose_search_dist: 4.0
 
       cost_scaling_dist: 1.0
       cost_scaling_gain: 1.0
@@ -155,12 +157,12 @@ velocity_smoother:
     robot_base_frame: base_footprint
 
     # max_velocity: [4.16, 0.0, 2.5]
-    max_velocity: [1.5, 0.0, 3.0]
-    # Limita la velocidad lineal en reversa a 1.0 m/s
-    min_velocity: [-1.0, 0.0, -3.0]
+    max_velocity: [1.2, 0.0, 0.6]
+    # Reversa de recoveries alineada con BackUp a 1.0 m/s
+    min_velocity: [-1.0, 0.0, -0.6]
 
-    max_accel: [1.0, 0.0, 3.0]
-    max_decel: [-2.0, 0.0, -3.0]
+    max_accel: [0.8, 0.0, 0.8]
+    max_decel: [-1.5, 0.0, -0.8]
 
     # si la velocidad calculada es menor a esto se envía 0 a los motores
     deadband_velocity: [0.05, 0.0, 0.05]
@@ -196,6 +198,7 @@ local_costmap:
         plugin: "nav2_costmap_2d::VoxelLayer"
         enabled: True
         publish_voxel_map: True
+        footprint_clearing_enabled: True
         origin_z: 0.0
         z_resolution: 0.05
         z_voxels: 16
@@ -204,7 +207,7 @@ local_costmap:
         mark_threshold: 0
         unknown_threshold: 15
         combination_method: 1
-        observation_sources: scan ultrasound_rear_center ultrasound_rear_left ultrasound_rear_right ultrasound_front_left ultrasound_front_right
+        observation_sources: scan
         scan:
           topic: /scan
           max_obstacle_height: 1.60
@@ -213,61 +216,11 @@ local_costmap:
           obstacle_min_range: 0.0
           raytrace_max_range: 20.0
           raytrace_min_range: 0.0
-          clearing: True
-          marking: True
-          data_type: "LaserScan"
-        ultrasound_rear_center:
-          topic: /ultrasound/rear_center
-          max_obstacle_height: 1.60
-          min_obstacle_height: 0.0
-          obstacle_max_range: 2.0
-          obstacle_min_range: 0.05
-          raytrace_max_range: 2.0
-          raytrace_min_range: 0.05
-          clearing: True
-          marking: True
-          data_type: "LaserScan"
-        ultrasound_rear_left:
-          topic: /ultrasound/rear_left
-          max_obstacle_height: 1.60
-          min_obstacle_height: 0.0
-          obstacle_max_range: 2.0
-          obstacle_min_range: 0.05
-          raytrace_max_range: 2.0
-          raytrace_min_range: 0.05
-          clearing: True
-          marking: True
-          data_type: "LaserScan"
-        ultrasound_rear_right:
-          topic: /ultrasound/rear_right
-          max_obstacle_height: 1.60
-          min_obstacle_height: 0.0
-          obstacle_max_range: 2.0
-          obstacle_min_range: 0.05
-          raytrace_max_range: 2.0
-          raytrace_min_range: 0.05
-          clearing: True
-          marking: True
-          data_type: "LaserScan"
-        ultrasound_front_left:
-          topic: /ultrasound/front_left
-          max_obstacle_height: 1.60
-          min_obstacle_height: 0.0
-          obstacle_max_range: 2.0
-          obstacle_min_range: 0.05
-          raytrace_max_range: 2.0
-          raytrace_min_range: 0.05
-          clearing: True
-          marking: True
-          data_type: "LaserScan"
-        ultrasound_front_right:
-          topic: /ultrasound/front_right
-          max_obstacle_height: 1.60
-          min_obstacle_height: 0.0
-          obstacle_max_range: 2.0
-          obstacle_min_range: 0.05
-          raytrace_max_range: 2.0
-          raytrace_min_range: 0.05
+          inf_is_valid: True
+          # Buffer corto para evitar parpadeo por pérdidas puntuales de retorno.
+          observation_persistence: 0.6
+          # Desactiva watchdog estricto de tasa para no invalidar la fuente por jitter.
+          expected_update_rate: 0.0
           clearing: True
           marking: True
           data_type: "LaserScan"
@@ -303,7 +256,8 @@ global_costmap:
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
-        observation_sources: scan ultrasound_rear_center ultrasound_rear_left ultrasound_rear_right ultrasound_front_left ultrasound_front_right
+        footprint_clearing_enabled: True
+        observation_sources: scan
         scan:
           topic: /scan
           max_obstacle_height: 1.60
@@ -315,61 +269,11 @@ global_costmap:
           raytrace_min_range: 0.0
           obstacle_max_range: 10.0
           obstacle_min_range: 0.0
-        ultrasound_rear_center:
-          topic: /ultrasound/rear_center
-          max_obstacle_height: 1.60
-          min_obstacle_height: 0.0
-          clearing: True
-          marking: True
-          data_type: "LaserScan"
-          raytrace_max_range: 2.0
-          raytrace_min_range: 0.05
-          obstacle_max_range: 2.0
-          obstacle_min_range: 0.05
-        ultrasound_rear_left:
-          topic: /ultrasound/rear_left
-          max_obstacle_height: 1.60
-          min_obstacle_height: 0.0
-          clearing: True
-          marking: True
-          data_type: "LaserScan"
-          raytrace_max_range: 2.0
-          raytrace_min_range: 0.05
-          obstacle_max_range: 2.0
-          obstacle_min_range: 0.05
-        ultrasound_rear_right:
-          topic: /ultrasound/rear_right
-          max_obstacle_height: 1.60
-          min_obstacle_height: 0.0
-          clearing: True
-          marking: True
-          data_type: "LaserScan"
-          raytrace_max_range: 2.0
-          raytrace_min_range: 0.05
-          obstacle_max_range: 2.0
-          obstacle_min_range: 0.05
-        ultrasound_front_left:
-          topic: /ultrasound/front_left
-          max_obstacle_height: 1.60
-          min_obstacle_height: 0.0
-          clearing: True
-          marking: True
-          data_type: "LaserScan"
-          raytrace_max_range: 2.0
-          raytrace_min_range: 0.05
-          obstacle_max_range: 2.0
-          obstacle_min_range: 0.05
-        ultrasound_front_right:
-          topic: /ultrasound/front_right
-          max_obstacle_height: 1.60
-          min_obstacle_height: 0.0
-          clearing: True
-          marking: True
-          data_type: "LaserScan"
-          raytrace_max_range: 2.0
-          raytrace_min_range: 0.05
-          obstacle_max_range: 2.0
-          obstacle_min_range: 0.05
+          # En global preferimos no limpiar con +inf para no "borrar" paredes reales.
+          inf_is_valid: False
+          # Mayor memoria para estructuras del entorno sin mapa estático.
+          observation_persistence: 2.0
+          expected_update_rate: 0.0
 
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"

@@ -13,24 +13,19 @@
               </ReactiveSequence>
               <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased" />
             </Fallback>
-            <ClearEntireCostmap name="ClearGlobalCostmap-Context"
-              service_name="global_costmap/clear_entirely_global_costmap" />
+            <Wait name="WaitGlobalRetry-Context" wait_duration="1" />
           </RecoveryNode>
         </RateController>
         <RecoveryNode number_of_retries="1" name="RecoveryFollowPath">
           <FollowPath path="{path}" controller_id="FollowPath" />
-          <ClearEntireCostmap name="ClearLocalCostmap-Context"
-            service_name="local_costmap/clear_entirely_local_costmap" />
+          <Wait name="WaitLocalRetry-Context" wait_duration="1" />
         </RecoveryNode>
       </PipelineSequence>
       <ReactiveFallback name="FallbackRecoveries">
         <GoalUpdated />
         <Sequence name="WaitAndReplan">
+          <BackUp backup_dist="0.4" backup_speed="1.0" />
           <Wait name="WaitRecovery" wait_duration="5" />
-          <ClearEntireCostmap name="ClearLocalCostmap-Recovery"
-            service_name="local_costmap/clear_entirely_local_costmap" />
-          <ClearEntireCostmap name="ClearGlobalCostmap-Recovery"
-            service_name="global_costmap/clear_entirely_global_costmap" />
           <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased" />
         </Sequence>
       </ReactiveFallback>

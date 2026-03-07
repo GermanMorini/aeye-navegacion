@@ -5,23 +5,19 @@
         <RateController hz="1.0" name="RateController">
           <RecoveryNode number_of_retries="2" name="ComputePath">
             <ComputePathThroughPoses goals="{goals}" path="{path}" planner_id="GridBased"/>
-            <Sequence name="ClearAndWait">
-              <ClearEntireCostmap service_name="global_costmap/clear_entirely_global_costmap"/>
-              <Wait wait_duration="2"/>
-            </Sequence>
+            <Wait wait_duration="1"/>
           </RecoveryNode>
         </RateController>
         <RecoveryNode number_of_retries="2" name="FollowPath">
           <FollowPath path="{path}" controller_id="FollowPath"/>
-          <ClearEntireCostmap service_name="local_costmap/clear_entirely_local_costmap"/>
+          <Wait wait_duration="1"/>
         </RecoveryNode>
       </PipelineSequence>
       <ReactiveFallback name="RecoveryFallback">
         <GoalUpdated/>
         <Sequence name="WaitAndReplan">
+          <BackUp backup_dist="0.4" backup_speed="1.0"/>
           <Wait wait_duration="5"/>
-          <ClearEntireCostmap service_name="local_costmap/clear_entirely_local_costmap"/>
-          <ClearEntireCostmap service_name="global_costmap/clear_entirely_global_costmap"/>
           <ComputePathThroughPoses goals="{goals}" path="{path}" planner_id="GridBased"/>
         </Sequence>
       </ReactiveFallback>

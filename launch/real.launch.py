@@ -46,11 +46,12 @@ def _build_robot_state_publisher(context):
 def generate_launch_description():
     bringup_dir = get_package_share_directory("nav2_bringup")
     gps_wpf_dir = get_package_share_directory("navegacion_gps")
+    map_tools_dir = get_package_share_directory("map_tools")
     sensores_dir = get_package_share_directory("sensores")
-    launch_dir = os.path.join(gps_wpf_dir, "launch")
     params_dir = os.path.join(gps_wpf_dir, "config")
 
     nav2_params = os.path.join(params_dir, "nav2_no_map_params.yaml")
+    rl_params_file = os.path.join(params_dir, "dual_ekf_navsat_params.yaml")
     collision_monitor_params = os.path.join(params_dir, "collision_monitor.yaml")
     lidar_to_scan_params = os.path.join(params_dir, "pointcloud_to_laserscan.yaml")
     rviz_default = os.path.join(params_dir, "rviz_nav2_full.rviz")
@@ -84,6 +85,10 @@ def generate_launch_description():
     start_lidar = LaunchConfiguration("start_lidar")
     launch_web = LaunchConfiguration("launch_web")
     lidar_config_path = LaunchConfiguration("lidar_config_path")
+    ws_host = LaunchConfiguration("ws_host")
+    ws_port = LaunchConfiguration("ws_port")
+    gps_topic = LaunchConfiguration("gps_topic")
+    map_frame = LaunchConfiguration("map_frame")
 
     declare_use_sim_time_cmd = DeclareLaunchArgument(
         "use_sim_time",
@@ -155,15 +160,65 @@ def generate_launch_description():
         default_value=lidar_default_config,
         description="Path to rs16 YAML config",
     )
+    declare_ws_host_cmd = DeclareLaunchArgument(
+        "ws_host",
+        default_value="0.0.0.0",
+        description="WebSocket host for map_tools web gateway",
+    )
+    declare_ws_port_cmd = DeclareLaunchArgument(
+        "ws_port",
+        default_value="8766",
+        description="WebSocket port for map_tools web gateway",
+    )
+    declare_gps_topic_cmd = DeclareLaunchArgument(
+        "gps_topic",
+        default_value="/gps/fix",
+        description="GPS topic used by web console backend/gateway",
+    )
+    declare_map_frame_cmd = DeclareLaunchArgument(
+        "map_frame",
+        default_value="map",
+        description="Global map frame for navigation web backend",
+    )
 
-    robot_localization_cmd = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(launch_dir, "dual_ekf_navsat.launch.py")
-        ),
-        launch_arguments={
-            "use_sim_time": use_sim_time,
-            "use_navsat": use_navsat,
-        }.items(),
+    ekf_odom_cmd = Node(
+        package="robot_localization",
+        executable="ekf_node",
+        name="ekf_filter_node_odom",
+        output="screen",
+        parameters=[
+            rl_params_file,
+            {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+        ],
+        remappings=[("odometry/filtered", "odometry/local")],
+    )
+    ekf_map_cmd = Node(
+        package="robot_localization",
+        executable="ekf_node",
+        name="ekf_filter_node_map",
+        output="screen",
+        parameters=[
+            rl_params_file,
+            {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+        ],
+    )
+    navsat_transform_cmd = Node(
+        package="robot_localization",
+        executable="navsat_transform_node",
+        name="navsat_transform",
+        output="screen",
+        parameters=[
+            rl_params_file,
+            {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+        ],
+        remappings=[
+            ("imu/data", "imu/data"),
+            ("gps/fix", "gps/fix"),
+            ("gps/filtered", "gps/filtered"),
+            ("odometry/gps", "odometry/gps"),
+            ("odometry/filtered", "odometry/local"),
+        ],
+        condition=IfCondition(use_navsat),
     )
 
     navigation2_cmd = IncludeLaunchDescription(
@@ -174,6 +229,102 @@ def generate_launch_description():
             "use_sim_time": use_sim_time,
             "params_file": configured_params,
             "autostart": "True",
+        }.items(),
+    )
+    keepout_manager_cmd = Node(
+        package="navegacion_gps",
+        executable="keepout_manager",
+        name="keepout_manager",
+        output="screen",
+        parameters=[
+            {
+                "fromll_service": "/fromLL",
+                "fromll_service_fallback": "/navsat_transform/fromLL",
+                "fromll_wait_timeout_s": 2.0,
+                "global_costmap_service": "/global_costmap/get_costmap",
+                "set_zones_service": "/keepout_manager/set_zones",
+                "get_state_service": "/keepout_manager/get_state",
+                "map_frame": map_frame,
+                "zones_file": "",
+                "mask_topic": "/keepout_filter_mask",
+                "filter_info_topic": "/costmap_filter_info",
+                "degrade_enabled": True,
+                "degrade_radius_m": 2.0,
+                "degrade_edge_cost": 12,
+                "degrade_min_cost": 1,
+                "degrade_use_l2": True,
+                "use_fixed_mask_grid": True,
+                "mask_origin_x": -150.0,
+                "mask_origin_y": -150.0,
+                "mask_width": 3000,
+                "mask_height": 3000,
+                "mask_resolution": 0.1,
+            }
+        ],
+    )
+    nav_command_server_cmd = Node(
+        package="navegacion_gps",
+        executable="nav_command_server",
+        name="nav_command_server",
+        output="screen",
+        parameters=[
+            {
+                "fromll_service": "/fromLL",
+                "fromll_service_fallback": "/navsat_transform/fromLL",
+                "fromll_wait_timeout_s": 2.0,
+                "map_frame": map_frame,
+                "gps_topic": gps_topic,
+                "cmd_vel_safe_topic": "/cmd_vel_safe",
+                "brake_topic": "/cmd_vel_safe",
+                "manual_cmd_topic": "/cmd_vel_safe",
+                "brake_publish_count": 5,
+                "brake_publish_interval_s": 0.1,
+                "manual_cmd_timeout_s": 0.4,
+                "manual_watchdog_hz": 10.0,
+                "nav_telemetry_hz": 5.0,
+                "telemetry_topic": "/nav_command_server/telemetry",
+                "set_goal_service": "/nav_command_server/set_goal_ll",
+                "cancel_goal_service": "/nav_command_server/cancel_goal",
+                "brake_service": "/nav_command_server/brake",
+                "set_manual_mode_service": "/nav_command_server/set_manual_mode",
+                "set_manual_cmd_service": "/nav_command_server/set_manual_cmd",
+                "get_state_service": "/nav_command_server/get_state",
+            }
+        ],
+    )
+    nav_snapshot_server_cmd = Node(
+        package="navegacion_gps",
+        executable="nav_snapshot_server",
+        name="nav_snapshot_server",
+        output="screen",
+        parameters=[
+            {
+                "get_snapshot_service": "/nav_snapshot_server/get_nav_snapshot",
+                "local_costmap_topic": "/local_costmap/costmap",
+                "global_costmap_topic": "/global_costmap/costmap",
+                "keepout_mask_topic": "/keepout_filter_mask",
+                "local_footprint_topic": "/local_costmap/published_footprint",
+                "stop_zone_topic": "/stop_zone",
+                "collision_polygons_topic": "/collision_monitor/polygons",
+                "scan_topic": "/scan",
+                "plan_topic": "/plan",
+                "base_frame": "base_footprint",
+                "snapshot_extent_m": 30.0,
+                "snapshot_size_px": 512,
+                "snapshot_global_inset_px": 160,
+                "snapshot_timeout_ms": 500,
+            }
+        ],
+    )
+    no_go_editor_cmd = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(map_tools_dir, "launch", "no_go_editor.launch.py")
+        ),
+        launch_arguments={
+            "ws_host": ws_host,
+            "ws_port": ws_port,
+            "gps_topic": gps_topic,
+            "map_frame": map_frame,
         }.items(),
     )
 
@@ -193,10 +344,13 @@ def generate_launch_description():
         condition=IfCondition(use_rviz),
     )
 
-    mapviz_cmd = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(launch_dir, "mapviz.launch.py")),
+    mapviz_cmd = Node(
+        package="mapviz",
+        executable="mapviz",
+        name="mapviz",
+        output="screen",
         condition=IfCondition(use_mapviz),
-        launch_arguments={"use_sim_time": use_sim_time}.items(),
+        parameters=[{"use_sim_time": ParameterValue(use_sim_time, value_type=bool)}],
     )
 
     collision_monitor_cmd = Node(
@@ -293,11 +447,21 @@ def generate_launch_description():
     ld.add_action(declare_start_lidar_cmd)
     ld.add_action(declare_launch_web_cmd)
     ld.add_action(declare_lidar_config_path_cmd)
+    ld.add_action(declare_ws_host_cmd)
+    ld.add_action(declare_ws_port_cmd)
+    ld.add_action(declare_gps_topic_cmd)
+    ld.add_action(declare_map_frame_cmd)
     ld.add_action(OpaqueFunction(function=_build_robot_state_publisher))
     ld.add_action(pixhawk_cmd)
     ld.add_action(lidar_cmd)
-    ld.add_action(robot_localization_cmd)
+    ld.add_action(ekf_odom_cmd)
+    ld.add_action(ekf_map_cmd)
+    ld.add_action(navsat_transform_cmd)
     ld.add_action(navigation2_cmd)
+    ld.add_action(keepout_manager_cmd)
+    ld.add_action(nav_command_server_cmd)
+    ld.add_action(nav_snapshot_server_cmd)
+    ld.add_action(no_go_editor_cmd)
     ld.add_action(rviz_cmd)
     ld.add_action(mapviz_cmd)
     ld.add_action(collision_monitor_cmd)

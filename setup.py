@@ -23,7 +23,7 @@ setup(
         (os.path.join('share', package_name, 'models/turtlebot_waffle_gps'),
          regular_files('models/turtlebot_waffle_gps/*')),
     ],
-    install_requires=['setuptools'],
+    install_requires=['setuptools', 'PyYAML', 'numpy'],
     zip_safe=True,
     maintainer='root',
     maintainer_email='pedro.gonzalez@eia.edu.co',
@@ -37,6 +37,9 @@ setup(
             'teleop = navegacion_gps.teleop:main',
             'frame_id_stripper = navegacion_gps.frame_id_stripper:main',
             'yaml_waypoints_from_ll = navegacion_gps.yaml_waypoints_from_ll:main',
+            'keepout_manager = navegacion_gps.keepout_manager:main',
+            'nav_command_server = navegacion_gps.nav_command_server:main',
+            'nav_snapshot_server = navegacion_gps.nav_snapshot_server:main',
         ],
     },
 )

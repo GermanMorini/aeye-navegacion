@@ -24,11 +24,17 @@
   <depend>pointcloud_to_laserscan</depend>
   <depend>nav_msgs</depend>
   <depend>std_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>visualization_msgs</depend>
+  <depend>navegacion_gps_interfaces</depend>
   <depend>turtlebot3_description</depend>
   <depend>turtlebot3_gazebo</depend>
   <depend>ros_gz_sim</depend>
   <depend>ros_gz_bridge</depend>
   <depend>xacro</depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
   <exec_depend>sensores</exec_depend>
   <exec_depend>controller_server</exec_depend>
   <exec_depend>map_tools</exec_depend>
