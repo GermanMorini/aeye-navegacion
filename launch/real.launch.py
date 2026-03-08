@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -14,6 +15,19 @@ from nav2_common.launch import RewrittenYaml
 def _read_file(path):
     with open(path, "r", encoding="utf-8") as file_handle:
         return file_handle.read()
+
+
+def _resolve_zones_file_path(package_share_dir: str) -> str:
+    package_share_path = Path(package_share_dir)
+    default_path = package_share_path / "config" / "no_go_zones.yaml"
+    try:
+        workspace_root = package_share_path.parents[3]
+        source_path = workspace_root / "src" / "navegacion_gps" / "config" / "no_go_zones.yaml"
+        if source_path.parent.exists():
+            return str(source_path)
+    except IndexError:
+        pass
+    return str(default_path)
 
 
 def _build_robot_state_publisher(context):
@@ -49,6 +63,7 @@ def generate_launch_description():
     map_tools_dir = get_package_share_directory("map_tools")
     sensores_dir = get_package_share_directory("sensores")
     params_dir = os.path.join(gps_wpf_dir, "config")
+    zones_file_path = _resolve_zones_file_path(gps_wpf_dir)
 
     nav2_params = os.path.join(params_dir, "nav2_no_map_params.yaml")
     rl_params_file = os.path.join(params_dir, "dual_ekf_navsat_params.yaml")
@@ -245,12 +260,12 @@ def generate_launch_description():
                 "set_zones_service": "/keepout_manager/set_zones",
                 "get_state_service": "/keepout_manager/get_state",
                 "map_frame": map_frame,
-                "zones_file": "",
+                "zones_file": zones_file_path,
                 "mask_topic": "/keepout_filter_mask",
                 "filter_info_topic": "/costmap_filter_info",
                 "degrade_enabled": True,
-                "degrade_radius_m": 2.0,
-                "degrade_edge_cost": 12,
+                "degrade_radius_m": 1.0,
+                "degrade_edge_cost": 20,
                 "degrade_min_cost": 1,
                 "degrade_use_l2": True,
                 "use_fixed_mask_grid": True,

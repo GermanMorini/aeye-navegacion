@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import rclpy
 import yaml
+from ament_index_python.packages import get_package_share_directory
 from geographic_msgs.msg import GeoPoint
 from geometry_msgs.msg import Pose, Quaternion
 from nav2_msgs.msg import CostmapFilterInfo
@@ -17,6 +18,7 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from robot_localization.srv import FromLL
+from std_srvs.srv import Trigger
 
 from navegacion_gps_interfaces.msg import NoGoPoint, NoGoZone
 from navegacion_gps_interfaces.srv import GetKeepoutState, SetKeepoutZones
@@ -36,6 +38,7 @@ class KeepoutManagerNode(Node):
         self.declare_parameter("global_costmap_service", "/global_costmap/get_costmap")
         self.declare_parameter("set_zones_service", "/keepout_manager/set_zones")
         self.declare_parameter("get_state_service", "/keepout_manager/get_state")
+        self.declare_parameter("reload_zones_service", "/keepout_manager/reload_zones")
         self.declare_parameter("mask_topic", "/keepout_filter_mask")
         self.declare_parameter("filter_info_topic", "/costmap_filter_info")
         self.declare_parameter("map_frame", "map")
@@ -68,6 +71,7 @@ class KeepoutManagerNode(Node):
         self.global_costmap_service = str(self.get_parameter("global_costmap_service").value)
         self.set_zones_service = str(self.get_parameter("set_zones_service").value)
         self.get_state_service = str(self.get_parameter("get_state_service").value)
+        self.reload_zones_service = str(self.get_parameter("reload_zones_service").value)
         self.mask_topic = str(self.get_parameter("mask_topic").value)
         self.filter_info_topic = str(self.get_parameter("filter_info_topic").value)
         self.map_frame = str(self.get_parameter("map_frame").value)
@@ -143,12 +147,20 @@ class KeepoutManagerNode(Node):
             self._on_get_state,
             callback_group=self._service_group,
         )
+        self._reload_srv = self.create_service(
+            Trigger,
+            self.reload_zones_service,
+            self._on_reload_zones,
+            callback_group=self._service_group,
+        )
 
         self._publish_filter_info()
         self.load_initial_zones()
+        self.get_logger().info(f"Zones file path: {str(self.zones_file)}")
         self.get_logger().info(
             "Keepout manager ready "
             f"(set_service={self.set_zones_service}, get_service={self.get_state_service}, "
+            f"reload_service={self.reload_zones_service}, "
             f"mask_topic={self.mask_topic}, source={'fixed_grid' if self.use_fixed_mask_grid else 'global_costmap'})"
         )
         self.get_logger().info(
@@ -158,7 +170,18 @@ class KeepoutManagerNode(Node):
     def _resolve_zones_file(self, configured: str) -> Path:
         if configured:
             return Path(configured)
-        return Path.cwd() / "config" / "no_go_zones.yaml"
+        pkg_dir = Path(get_package_share_directory("navegacion_gps"))
+        default_path = pkg_dir / "config" / "no_go_zones.yaml"
+        try:
+            workspace_root = pkg_dir.parents[3]
+            source_path = (
+                workspace_root / "src" / "navegacion_gps" / "config" / "no_go_zones.yaml"
+            )
+            if source_path.parent.exists():
+                return source_path
+        except IndexError:
+            pass
+        return default_path
 
     def _sanitize_degrade_params(self) -> None:
         if self.degrade_radius_m < 0.0:
@@ -604,6 +627,21 @@ class KeepoutManagerNode(Node):
         self.get_logger().debug(
             f"GetKeepoutState served (zones={len(zones)}, mask_ready={mask_ready}, source={mask_source})"
         )
+        return response
+
+    def _on_reload_zones(
+        self,
+        _request: Trigger.Request,
+        response: Trigger.Response,
+    ) -> Trigger.Response:
+        self.get_logger().info("Reload zones requested from disk")
+        ok, err = self._load_zones_from_disk()
+        response.success = bool(ok)
+        response.message = "zones reloaded" if ok else str(err)
+        if ok:
+            self.get_logger().info("Reload zones from disk completed")
+        else:
+            self.get_logger().warning(f"Reload zones from disk failed: {err}")
         return response
 
 
