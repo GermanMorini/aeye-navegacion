@@ -292,6 +292,7 @@ def generate_launch_description():
                 "cmd_vel_safe_topic": "/cmd_vel_safe",
                 "brake_topic": "/cmd_vel_safe",
                 "manual_cmd_topic": "/cmd_vel_safe",
+                "teleop_cmd_topic": "/cmd_vel_teleop",
                 "brake_publish_count": 5,
                 "brake_publish_interval_s": 0.1,
                 "manual_cmd_timeout_s": 0.4,
@@ -302,7 +303,6 @@ def generate_launch_description():
                 "cancel_goal_service": "/nav_command_server/cancel_goal",
                 "brake_service": "/nav_command_server/brake",
                 "set_manual_mode_service": "/nav_command_server/set_manual_mode",
-                "set_manual_cmd_service": "/nav_command_server/set_manual_cmd",
                 "get_state_service": "/nav_command_server/get_state",
             }
         ],
@@ -340,6 +340,7 @@ def generate_launch_description():
             "ws_port": ws_port,
             "gps_topic": gps_topic,
             "map_frame": map_frame,
+            "teleop_cmd_topic": "/cmd_vel_teleop",
         }.items(),
     )
 

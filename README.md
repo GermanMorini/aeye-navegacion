@@ -39,6 +39,7 @@ Minimo para operar con GPS:
 - `/scan_3d` (PointCloud2 para costmaps)
 - `/odometry/local` (odometria filtrada del EKF)
 - `/cmd_vel` (entrada de control) y `/cmd_vel_steer` (bridge hacia Gazebo)
+- `/cmd_vel_teleop` (`geometry_msgs/Twist`, stream manual desde UI/gateway web)
 
 Frames tipicos:
 - `map` -> `odom` -> `base_footprint` -> `base_link`
@@ -98,6 +99,10 @@ ros2 run navegacion_gps teleop
 ```
 Nota: el modelo Ackermann no gira en el sitio; manten velocidad lineal (W/X)
 y cambia direccion con A/D.
+
+Control manual web:
+- `web_zone_server` publica comandos manuales continuos en `/cmd_vel_teleop`.
+- `nav_command_server` consume `/cmd_vel_teleop` y re-publica comando efectivo en `manual_cmd_topic` (default `/cmd_vel_safe`) con watchdog por timeout.
 
 ### Uso con el script de tools
 El script detecta si el contenedor esta corriendo y entra con `docker exec`.

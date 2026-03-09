@@ -20,7 +20,6 @@ from navegacion_gps_interfaces.srv import (
     BrakeNav,
     CancelNavGoal,
     GetNavState,
-    SetManualCmd,
     SetManualMode,
     SetNavGoalLL,
 )
@@ -40,6 +39,7 @@ class NavCommandServerNode(Node):
         self.declare_parameter("cmd_vel_safe_topic", "/cmd_vel_safe")
         self.declare_parameter("brake_topic", "/cmd_vel_safe")
         self.declare_parameter("manual_cmd_topic", "/cmd_vel_safe")
+        self.declare_parameter("teleop_cmd_topic", "/cmd_vel_teleop")
         self.declare_parameter("brake_publish_count", 5)
         self.declare_parameter("brake_publish_interval_s", 0.1)
         self.declare_parameter("manual_cmd_timeout_s", 0.4)
@@ -50,7 +50,6 @@ class NavCommandServerNode(Node):
         self.declare_parameter("cancel_goal_service", "/nav_command_server/cancel_goal")
         self.declare_parameter("brake_service", "/nav_command_server/brake")
         self.declare_parameter("set_manual_mode_service", "/nav_command_server/set_manual_mode")
-        self.declare_parameter("set_manual_cmd_service", "/nav_command_server/set_manual_cmd")
         self.declare_parameter("get_state_service", "/nav_command_server/get_state")
 
         self.fromll_service = str(self.get_parameter("fromll_service").value)
@@ -71,6 +70,7 @@ class NavCommandServerNode(Node):
         self.cmd_vel_safe_topic = str(self.get_parameter("cmd_vel_safe_topic").value)
         self.brake_topic = str(self.get_parameter("brake_topic").value)
         self.manual_cmd_topic = str(self.get_parameter("manual_cmd_topic").value)
+        self.teleop_cmd_topic = str(self.get_parameter("teleop_cmd_topic").value)
         self.brake_publish_count = max(1, int(self.get_parameter("brake_publish_count").value))
         self.brake_publish_interval_s = max(
             0.0, float(self.get_parameter("brake_publish_interval_s").value)
@@ -88,9 +88,6 @@ class NavCommandServerNode(Node):
         self.brake_service = str(self.get_parameter("brake_service").value)
         self.set_manual_mode_service = str(
             self.get_parameter("set_manual_mode_service").value
-        )
-        self.set_manual_cmd_service = str(
-            self.get_parameter("set_manual_cmd_service").value
         )
         self.get_state_service = str(self.get_parameter("get_state_service").value)
 
@@ -157,12 +154,6 @@ class NavCommandServerNode(Node):
             self._on_set_manual_mode,
             callback_group=self._service_group,
         )
-        self._set_manual_cmd_srv = self.create_service(
-            SetManualCmd,
-            self.set_manual_cmd_service,
-            self._on_set_manual_cmd,
-            callback_group=self._service_group,
-        )
         self._get_state_srv = self.create_service(
             GetNavState,
             self.get_state_service,
@@ -176,6 +167,9 @@ class NavCommandServerNode(Node):
         self._cmd_vel_sub = self.create_subscription(
             Twist, self.cmd_vel_safe_topic, self._on_cmd_vel_safe, 10
         )
+        self._teleop_cmd_sub = self.create_subscription(
+            Twist, self.teleop_cmd_topic, self._on_teleop_cmd, 10
+        )
 
         self._manual_watchdog_timer = self.create_timer(
             1.0 / float(self.manual_watchdog_hz), self._manual_watchdog_tick
@@ -183,7 +177,8 @@ class NavCommandServerNode(Node):
         self.get_logger().info(
             "Nav command server ready "
             f"(set_goal={self.set_goal_service}, cancel={self.cancel_goal_service}, "
-            f"brake={self.brake_service}, telemetry={self.telemetry_topic})"
+            f"brake={self.brake_service}, telemetry={self.telemetry_topic}, "
+            f"teleop_topic={self.teleop_cmd_topic})"
         )
         self.get_logger().info(
             "Callback groups configured (services=MutuallyExclusive, clients=Reentrant)"
@@ -362,6 +357,15 @@ class NavCommandServerNode(Node):
         with self._lock:
             self._last_cmd_vel_safe = msg
         self._publish_telemetry(force=False)
+
+    def _on_teleop_cmd(self, msg: Twist) -> None:
+        ok, err = self.set_manual_cmd(float(msg.linear.x), float(msg.angular.z))
+        if (not ok) and (err != "manual control is disabled"):
+            self.get_logger().warning(
+                "Teleop cmd rejected "
+                f"(linear_x={float(msg.linear.x):.3f}, angular_z={float(msg.angular.z):.3f}, "
+                f"error='{err}')"
+            )
 
     def _publish_manual_twist(self, linear_x: float, angular_z: float) -> None:
         cmd = Twist()
@@ -588,22 +592,6 @@ class NavCommandServerNode(Node):
             f"SetManualMode response (requested={bool(request.enabled)}, "
             f"enabled_after={response.enabled_after}, ok={response.ok}, error='{response.error}')"
         )
-        return response
-
-    def _on_set_manual_cmd(
-        self,
-        request: SetManualCmd.Request,
-        response: SetManualCmd.Response,
-    ) -> SetManualCmd.Response:
-        ok, err = self.set_manual_cmd(float(request.linear_x), float(request.angular_z))
-        response.ok = bool(ok)
-        response.error = "" if ok else str(err)
-        if not response.ok:
-            self.get_logger().warning(
-                "SetManualCmd rejected "
-                f"(linear_x={float(request.linear_x):.3f}, angular_z={float(request.angular_z):.3f}, "
-                f"error='{response.error}')"
-            )
         return response
 
     def _on_get_state(

@@ -37,6 +37,7 @@ Default workflows
 
 Key topics and frames
 - Topics: `/gps/fix` (NavSatFix), `/imu` (Imu), `/odom`, `/scan`.
+- Manual teleop stream: `/cmd_vel_teleop` (`geometry_msgs/Twist`) -> `nav_command_server`.
 - TF: `map -> odom -> base_link` (or `base_footprint` if configured).
 
 Config edit guidance
