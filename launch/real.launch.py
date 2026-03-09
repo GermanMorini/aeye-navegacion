@@ -59,7 +59,6 @@ def _build_robot_state_publisher(context):
 
 def generate_launch_description():
     bringup_dir = get_package_share_directory("nav2_bringup")
-    controller_server_dir = get_package_share_directory("controller_server")
     gps_wpf_dir = get_package_share_directory("navegacion_gps")
     map_tools_dir = get_package_share_directory("map_tools")
     sensores_dir = get_package_share_directory("sensores")
@@ -99,7 +98,6 @@ def generate_launch_description():
     use_pointcloud_to_laserscan = LaunchConfiguration("use_pointcloud_to_laserscan")
     start_pixhawk = LaunchConfiguration("start_pixhawk")
     start_lidar = LaunchConfiguration("start_lidar")
-    start_controller_server = LaunchConfiguration("start_controller_server")
     launch_web = LaunchConfiguration("launch_web")
     lidar_config_path = LaunchConfiguration("lidar_config_path")
     ws_host = LaunchConfiguration("ws_host")
@@ -166,11 +164,6 @@ def generate_launch_description():
         "start_lidar",
         default_value="True",
         description="Start RS16 LiDAR driver",
-    )
-    declare_start_controller_server_cmd = DeclareLaunchArgument(
-        "start_controller_server",
-        default_value="True",
-        description="Start controller_server node for actuator control",
     )
     declare_launch_web_cmd = DeclareLaunchArgument(
         "launch_web",
@@ -454,12 +447,6 @@ def generate_launch_description():
         launch_arguments={"config_path": lidar_config_path}.items(),
         condition=IfCondition(start_lidar),
     )
-    controller_server_cmd = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(controller_server_dir, "launch", "controller_server.launch.py")
-        ),
-        condition=IfCondition(start_controller_server),
-    )
 
     ld = LaunchDescription()
     ld.add_action(declare_use_sim_time_cmd)
@@ -474,7 +461,6 @@ def generate_launch_description():
     ld.add_action(declare_use_pointcloud_to_laserscan_cmd)
     ld.add_action(declare_start_pixhawk_cmd)
     ld.add_action(declare_start_lidar_cmd)
-    ld.add_action(declare_start_controller_server_cmd)
     ld.add_action(declare_launch_web_cmd)
     ld.add_action(declare_lidar_config_path_cmd)
     ld.add_action(declare_ws_host_cmd)
@@ -484,7 +470,6 @@ def generate_launch_description():
     ld.add_action(OpaqueFunction(function=_build_robot_state_publisher))
     ld.add_action(pixhawk_cmd)
     ld.add_action(lidar_cmd)
-    ld.add_action(controller_server_cmd)
     ld.add_action(ekf_odom_cmd)
     ld.add_action(ekf_map_cmd)
     ld.add_action(navsat_transform_cmd)
