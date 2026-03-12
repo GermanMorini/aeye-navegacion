@@ -64,7 +64,7 @@ planner_server:
       optimizer_costmap_weight: 6.0
 
       tolerance: 0.5
-      allow_unknown: true
+      allow_unknown: false
       max_planning_time: 6.0
       max_iterations: 3000000
 
@@ -227,6 +227,9 @@ local_costmap:
         plugin: "nav2_costmap_2d::KeepoutFilter"
         enabled: True
         filter_info_topic: "/costmap_filter_info"
+        transform_tolerance: 1.0
+        override_lethal_cost: True
+        lethal_override_cost: 252
       always_send_full_costmap: true
 
 # ================================
@@ -247,7 +250,7 @@ global_costmap:
       height: 100
       resolution: 0.1
       transform_tolerance: 1.0
-      track_unknown_space: false
+      track_unknown_space: true
       use_maximum_static_value: true
       plugins: ["obstacle_layer", "inflation_layer"]
       filters: ["keepout_filter"]
@@ -282,6 +285,9 @@ global_costmap:
         plugin: "nav2_costmap_2d::KeepoutFilter"
         enabled: True
         filter_info_topic: "/costmap_filter_info"
+        transform_tolerance: 1.0
+        override_lethal_cost: True
+        lethal_override_cost: 252
       always_send_full_costmap: true
 
 # ================================

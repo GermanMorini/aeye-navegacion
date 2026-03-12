@@ -1,13 +1,14 @@
 import math
 import threading
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import rclpy
+from action_msgs.msg import GoalStatus
 from geographic_msgs.msg import GeoPoint
 from geometry_msgs.msg import PoseStamped, Quaternion, Twist
-from nav2_msgs.action import NavigateToPose
+from nav2_msgs.action import FollowWaypoints
 from rclpy.action import ActionClient
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
@@ -51,6 +52,7 @@ class NavCommandServerNode(Node):
         self.declare_parameter("brake_service", "/nav_command_server/brake")
         self.declare_parameter("set_manual_mode_service", "/nav_command_server/set_manual_mode")
         self.declare_parameter("get_state_service", "/nav_command_server/get_state")
+        self.declare_parameter("follow_waypoints_action", "follow_waypoints")
 
         self.fromll_service = str(self.get_parameter("fromll_service").value)
         self.fromll_service_fallback = str(
@@ -90,6 +92,9 @@ class NavCommandServerNode(Node):
             self.get_parameter("set_manual_mode_service").value
         )
         self.get_state_service = str(self.get_parameter("get_state_service").value)
+        self.follow_waypoints_action = str(
+            self.get_parameter("follow_waypoints_action").value
+        )
 
         self._lock = threading.Lock()
         self._current_goal_handle = None
@@ -100,6 +105,9 @@ class NavCommandServerNode(Node):
         self._last_cmd_vel_safe: Optional[Twist] = None
         self._last_robot_pose: Optional[Dict[str, float]] = None
         self._last_telemetry_sent: Optional[float] = None
+        self._loop_waypoint_poses: List[PoseStamped] = []
+        self._loop_enabled = False
+        self._loop_restart_pending = False
 
         # Service callbacks are mutually exclusive; clients/actions are reentrant to avoid
         # deadlocks when a service callback waits for a client future.
@@ -121,10 +129,10 @@ class NavCommandServerNode(Node):
         self._active_fromll_name: Optional[str] = None
         self._active_fromll_client: Optional[Any] = None
         self._last_fromll_error: Optional[str] = None
-        self._nav2_client = ActionClient(
+        self._follow_waypoints_client = ActionClient(
             self,
-            NavigateToPose,
-            "navigate_to_pose",
+            FollowWaypoints,
+            self.follow_waypoints_action,
             callback_group=self._client_group,
         )
 
@@ -174,11 +182,13 @@ class NavCommandServerNode(Node):
         self._manual_watchdog_timer = self.create_timer(
             1.0 / float(self.manual_watchdog_hz), self._manual_watchdog_tick
         )
+        self._waypoint_loop_timer = self.create_timer(0.25, self._waypoint_loop_tick)
         self.get_logger().info(
             "Nav command server ready "
             f"(set_goal={self.set_goal_service}, cancel={self.cancel_goal_service}, "
             f"brake={self.brake_service}, telemetry={self.telemetry_topic}, "
-            f"teleop_topic={self.teleop_cmd_topic})"
+            f"teleop_topic={self.teleop_cmd_topic}, "
+            f"follow_waypoints_action={self.follow_waypoints_action})"
         )
         self.get_logger().info(
             "Callback groups configured (services=MutuallyExclusive, clients=Reentrant)"
@@ -376,65 +386,167 @@ class NavCommandServerNode(Node):
     def _publish_manual_stop(self) -> None:
         self._publish_manual_twist(0.0, 0.0)
 
-    def send_nav2_goal(self, lat: float, lon: float, yaw_deg: float = 0.0) -> Tuple[bool, str]:
-        self.get_logger().info(
-            f"SetNavGoalLL request (lat={lat:.8f}, lon={lon:.8f}, yaw_deg={yaw_deg:.2f})"
-        )
+    def _clear_loop_config_locked(self) -> None:
+        self._loop_waypoint_poses = []
+        self._loop_enabled = False
+        self._loop_restart_pending = False
+
+    def _build_pose_from_ll(self, lat: float, lon: float, yaw_deg: float) -> Optional[PoseStamped]:
         converted = self._call_from_ll(lat, lon)
         if converted is None:
-            detail = self._last_fromll_error or "unknown"
-            return False, f"fromLL conversion failed: {detail}"
+            return None
         x, y, _ = converted
 
         pose = PoseStamped()
         pose.header.frame_id = self.map_frame
         pose.header.stamp = self.get_clock().now().to_msg()
-        pose.pose.position.x = x
-        pose.pose.position.y = y
+        pose.pose.position.x = float(x)
+        pose.pose.position.y = float(y)
         pose.pose.position.z = 0.0
         pose.pose.orientation = self._yaw_to_quaternion(yaw_deg)
+        return pose
 
-        goal = NavigateToPose.Goal()
-        goal.pose = pose
+    def _convert_waypoints_to_poses(
+        self, waypoints: Sequence[Tuple[float, float, float]]
+    ) -> Tuple[Optional[List[PoseStamped]], str]:
+        poses: List[PoseStamped] = []
+        for idx, waypoint in enumerate(waypoints):
+            lat, lon, yaw_deg = waypoint
+            pose = self._build_pose_from_ll(lat, lon, yaw_deg)
+            if pose is None:
+                detail = self._last_fromll_error or "unknown"
+                return None, f"fromLL conversion failed at waypoint {idx + 1}: {detail}"
+            poses.append(pose)
+        return poses, ""
 
-        if not self._nav2_client.wait_for_server(timeout_sec=2.0):
-            self.get_logger().error("SetNavGoalLL failed: NavigateToPose action server not available")
-            return False, "NavigateToPose action server not available"
+    def _send_follow_waypoints_goal(
+        self, poses: Sequence[PoseStamped], loop_enabled: bool, reason: str
+    ) -> Tuple[bool, str]:
+        if not poses:
+            return False, "no waypoint poses to send"
 
-        future = self._nav2_client.send_goal_async(goal)
+        if not self._follow_waypoints_client.wait_for_server(timeout_sec=2.0):
+            self.get_logger().error(
+                "SetNavGoalLL failed: FollowWaypoints action server not available"
+            )
+            return False, "FollowWaypoints action server not available"
+
+        goal = FollowWaypoints.Goal()
+        goal.poses = list(poses)
+
+        future = self._follow_waypoints_client.send_goal_async(goal)
         goal_handle = self._wait_for_future(future, timeout_sec=5.0)
         if goal_handle is None:
-            self.get_logger().error("SetNavGoalLL failed: timeout sending goal to Nav2")
-            return False, "failed to send goal"
-
+            self.get_logger().error("SetNavGoalLL failed: timeout sending FollowWaypoints goal")
+            return False, "failed to send FollowWaypoints goal"
         if not goal_handle.accepted:
-            self.get_logger().warning("SetNavGoalLL rejected by Nav2")
-            return False, "goal rejected by Nav2"
+            self.get_logger().warning("SetNavGoalLL rejected by FollowWaypoints")
+            return False, "goal rejected by FollowWaypoints"
 
         with self._lock:
             self._current_goal_handle = goal_handle
+            self._loop_waypoint_poses = list(poses)
+            self._loop_enabled = bool(loop_enabled and (len(poses) > 1))
+            self._loop_restart_pending = False
 
         result_future = goal_handle.get_result_async()
-        result_future.add_done_callback(self._on_goal_result_done)
+        result_future.add_done_callback(self._on_follow_waypoints_result_done)
+
+        self.get_logger().info(
+            "FollowWaypoints goal accepted "
+            f"(waypoints={len(poses)}, loop={bool(loop_enabled and (len(poses) > 1))}, "
+            f"reason={reason})"
+        )
         self._publish_telemetry(force=True)
-        self.get_logger().info(f"SetNavGoalLL accepted by Nav2 (x={x:.2f}, y={y:.2f})")
         return True, "goal accepted"
 
-    def _on_goal_result_done(self, future: Any) -> None:
-        status_text = "unknown"
+    def send_nav2_goals(
+        self, waypoints: Sequence[Tuple[float, float, float]], loop_enabled: bool
+    ) -> Tuple[bool, str]:
+        if len(waypoints) == 0:
+            return False, "at least one waypoint is required"
+
+        with self._lock:
+            has_goal = self._current_goal_handle is not None
+        if has_goal:
+            cancel_ok, cancel_msg = self.cancel_current_goal(clear_loop_config=True)
+            if not cancel_ok:
+                return False, f"failed to cancel previous goal: {cancel_msg}"
+
+        with self._lock:
+            self._clear_loop_config_locked()
+
+        self.get_logger().info(
+            f"SetNavGoalLL request (waypoints={len(waypoints)}, loop={bool(loop_enabled)})"
+        )
+        poses, err = self._convert_waypoints_to_poses(waypoints)
+        if poses is None:
+            return False, err
+        return self._send_follow_waypoints_goal(
+            poses=poses,
+            loop_enabled=loop_enabled,
+            reason="set_goal_service",
+        )
+
+    def _on_follow_waypoints_result_done(self, future: Any) -> None:
+        status = None
+        missed_waypoints: List[int] = []
         try:
             result_msg = future.result()
-            status_text = str(getattr(result_msg, "status", "unknown"))
+            status = int(getattr(result_msg, "status", -1))
+            result = getattr(result_msg, "result", None)
+            if result is not None:
+                missed_waypoints = [int(v) for v in getattr(result, "missed_waypoints", [])]
         except Exception as exc:
-            status_text = f"exception:{exc}"
-        self.get_logger().info(f"NavigateToPose result received (status={status_text})")
+            self.get_logger().warning(f"FollowWaypoints result callback failed: {exc}")
+
+        should_restart = False
         with self._lock:
             self._current_goal_handle = None
+            if (
+                status == GoalStatus.STATUS_SUCCEEDED
+                and self._loop_enabled
+                and len(self._loop_waypoint_poses) > 1
+                and (not self._manual_enabled)
+            ):
+                self._loop_restart_pending = True
+                should_restart = True
+
+        self.get_logger().info(
+            "FollowWaypoints result received "
+            f"(status={status}, missed_waypoints={missed_waypoints}, loop_restart={should_restart})"
+        )
         self._publish_telemetry(force=True)
 
-    def cancel_current_goal(self) -> Tuple[bool, str]:
+    def _waypoint_loop_tick(self) -> None:
+        with self._lock:
+            if (
+                (not self._loop_restart_pending)
+                or (not self._loop_enabled)
+                or self._manual_enabled
+                or (self._current_goal_handle is not None)
+                or (len(self._loop_waypoint_poses) <= 1)
+            ):
+                return
+            poses = list(self._loop_waypoint_poses)
+            self._loop_restart_pending = False
+
+        ok, err = self._send_follow_waypoints_goal(
+            poses=poses,
+            loop_enabled=True,
+            reason="loop_restart",
+        )
+        if not ok:
+            self.get_logger().warning(f"FollowWaypoints loop restart failed: {err}")
+            with self._lock:
+                if self._loop_enabled and (not self._manual_enabled):
+                    self._loop_restart_pending = True
+
+    def cancel_current_goal(self, clear_loop_config: bool = True) -> Tuple[bool, str]:
         with self._lock:
             handle = self._current_goal_handle
+            if clear_loop_config:
+                self._clear_loop_config_locked()
         if handle is None:
             return False, "no active goal"
 
@@ -445,6 +557,8 @@ class NavCommandServerNode(Node):
 
         with self._lock:
             self._current_goal_handle = None
+            if clear_loop_config:
+                self._clear_loop_config_locked()
         self._publish_telemetry(force=True)
         return True, "cancelled"
 
@@ -532,6 +646,40 @@ class NavCommandServerNode(Node):
                 self._manual_watchdog_stop_sent = True
             self._publish_telemetry(force=True)
 
+    def _parse_set_goal_request(
+        self, request: SetNavGoalLL.Request
+    ) -> Tuple[Optional[List[Tuple[float, float, float]]], bool, str]:
+        lats = [float(v) for v in request.lats]
+        lons = [float(v) for v in request.lons]
+        yaws = [float(v) for v in request.yaws_deg]
+
+        has_array_payload = bool(lats) or bool(lons) or bool(yaws)
+        if has_array_payload:
+            if len(lats) != len(lons):
+                return None, False, "lats and lons must have the same length"
+            if len(lats) == 0:
+                return None, False, "at least one waypoint is required"
+            if len(yaws) not in (0, len(lats)):
+                return None, False, "yaws_deg must be empty or match lats length"
+
+            waypoints: List[Tuple[float, float, float]] = []
+            for idx in range(len(lats)):
+                yaw_deg = yaws[idx] if len(yaws) == len(lats) else 0.0
+                lat = float(lats[idx])
+                lon = float(lons[idx])
+                if (not np.isfinite(lat)) or (not np.isfinite(lon)) or (not np.isfinite(yaw_deg)):
+                    return None, False, f"invalid waypoint values at index {idx}"
+                waypoints.append((lat, lon, float(yaw_deg)))
+            loop_enabled = bool(request.loop) or (len(waypoints) > 1)
+            return waypoints, loop_enabled, ""
+
+        lat = float(request.lat)
+        lon = float(request.lon)
+        yaw_deg = float(request.yaw_deg)
+        if (not np.isfinite(lat)) or (not np.isfinite(lon)) or (not np.isfinite(yaw_deg)):
+            return None, False, "invalid waypoint values"
+        return [(lat, lon, yaw_deg)], bool(request.loop), ""
+
     def _on_set_goal(
         self,
         request: SetNavGoalLL.Request,
@@ -544,8 +692,15 @@ class NavCommandServerNode(Node):
             response.error = "manual control enabled; disable manual mode to send goals"
             return response
 
-        ok, err = self.send_nav2_goal(
-            float(request.lat), float(request.lon), float(request.yaw_deg)
+        waypoints, loop_enabled, parse_err = self._parse_set_goal_request(request)
+        if waypoints is None:
+            response.ok = False
+            response.error = parse_err
+            return response
+
+        ok, err = self.send_nav2_goals(
+            waypoints=waypoints,
+            loop_enabled=loop_enabled,
         )
         response.ok = bool(ok)
         response.error = "" if ok else str(err)

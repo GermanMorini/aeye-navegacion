@@ -313,7 +313,7 @@ def generate_launch_description():
                 "geojson_file": zones_geojson_path,
                 "mask_image_file": keepout_mask_image_path,
                 "mask_yaml_file": keepout_mask_yaml_path,
-                "buffer_margin_m": 0.0,
+                "buffer_margin_m": 0.8,
                 "mask_origin_x": -150.0,
                 "mask_origin_y": -150.0,
                 "mask_width": 3000,
