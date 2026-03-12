@@ -37,7 +37,7 @@ setup(
             'teleop = navegacion_gps.teleop:main',
             'frame_id_stripper = navegacion_gps.frame_id_stripper:main',
             'yaml_waypoints_from_ll = navegacion_gps.yaml_waypoints_from_ll:main',
-            'keepout_manager = navegacion_gps.keepout_manager:main',
+            'zones_manager = navegacion_gps.zones_manager:main',
             'nav_command_server = navegacion_gps.nav_command_server:main',
             'nav_snapshot_server = navegacion_gps.nav_snapshot_server:main',
         ],

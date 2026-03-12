@@ -18,8 +18,8 @@ from tf2_ros import Buffer, ConnectivityException, ExtrapolationException, Looku
 from tf2_ros.transform_listener import TransformListener
 from visualization_msgs.msg import Marker, MarkerArray
 
-from navegacion_gps_interfaces.msg import NavSnapshotLayers
-from navegacion_gps_interfaces.srv import GetNavSnapshot
+from interfaces.msg import NavSnapshotLayers
+from interfaces.srv import GetNavSnapshot
 
 
 class NavSnapshotServerNode(Node):

@@ -11,6 +11,8 @@
   <depend>nav2_simple_commander</depend>
   <depend>nav2_collision_monitor</depend>
   <depend>nav2_msgs</depend>
+  <depend>nav2_map_server</depend>
+  <depend>nav2_lifecycle_manager</depend>
   <depend>robot_localization</depend>
   <depend>geographic_msgs</depend>
   <depend>mapviz</depend>
@@ -26,7 +28,7 @@
   <depend>std_msgs</depend>
   <depend>tf2_ros</depend>
   <depend>visualization_msgs</depend>
-  <depend>navegacion_gps_interfaces</depend>
+  <depend>interfaces</depend>
   <depend>turtlebot3_description</depend>
   <depend>turtlebot3_gazebo</depend>
   <depend>ros_gz_sim</depend>

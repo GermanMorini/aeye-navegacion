@@ -32,12 +32,12 @@ def _read_file(path):
         return file_handle.read()
 
 
-def _resolve_zones_file_path(package_share_dir: str) -> str:
+def _resolve_config_file_path(package_share_dir: str, filename: str) -> str:
     package_share_path = Path(package_share_dir)
-    default_path = package_share_path / "config" / "no_go_zones.yaml"
+    default_path = package_share_path / "config" / filename
     try:
         workspace_root = package_share_path.parents[3]
-        source_path = workspace_root / "src" / "navegacion_gps" / "config" / "no_go_zones.yaml"
+        source_path = workspace_root / "src" / "navegacion_gps" / "config" / filename
         if source_path.parent.exists():
             return str(source_path)
     except IndexError:
@@ -124,7 +124,9 @@ def generate_launch_description():
     map_tools_dir = get_package_share_directory("map_tools")
     ros_gz_sim_dir = get_package_share_directory("ros_gz_sim")
     params_dir = os.path.join(gps_wpf_dir, "config")
-    zones_file_path = _resolve_zones_file_path(gps_wpf_dir)
+    zones_geojson_path = _resolve_config_file_path(gps_wpf_dir, "no_go_zones.geojson")
+    keepout_mask_image_path = _resolve_config_file_path(gps_wpf_dir, "keepout_mask.pgm")
+    keepout_mask_yaml_path = _resolve_config_file_path(gps_wpf_dir, "keepout_mask.yaml")
     world_path = os.path.join(gps_wpf_dir, "worlds", "pasillos_obstaculos.world")
     nav2_params = os.path.join(params_dir, "nav2_no_map_params.yaml")
     rl_params_file = os.path.join(params_dir, "dual_ekf_navsat_params.yaml")
@@ -294,29 +296,72 @@ def generate_launch_description():
             "autostart": "True",
         }.items(),
     )
-    keepout_manager_cmd = Node(
+    keepout_filter_mask_server_cmd = Node(
+        package="nav2_map_server",
+        executable="map_server",
+        name="keepout_filter_mask_server",
+        output="screen",
+        parameters=[
+            {
+                "yaml_filename": keepout_mask_yaml_path,
+                "topic_name": "/keepout_filter_mask",
+                "frame_id": map_frame,
+            },
+            {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+        ],
+    )
+    keepout_costmap_filter_info_server_cmd = Node(
+        package="nav2_map_server",
+        executable="costmap_filter_info_server",
+        name="keepout_costmap_filter_info_server",
+        output="screen",
+        parameters=[
+            {
+                "type": 0,
+                "filter_info_topic": "/costmap_filter_info",
+                "mask_topic": "/keepout_filter_mask",
+                "base": 0.0,
+                "multiplier": 1.0,
+            },
+            {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+        ],
+    )
+    keepout_lifecycle_cmd = Node(
+        package="nav2_lifecycle_manager",
+        executable="lifecycle_manager",
+        name="lifecycle_manager_keepout_filters",
+        output="screen",
+        parameters=[
+            {
+                "autostart": True,
+                "bond_timeout": 4.0,
+                "node_names": [
+                    "keepout_filter_mask_server",
+                    "keepout_costmap_filter_info_server",
+                ],
+            },
+            {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+        ],
+    )
+    zones_manager_cmd = Node(
         package="navegacion_gps",
-        executable="keepout_manager",
-        name="keepout_manager",
+        executable="zones_manager",
+        name="zones_manager",
         output="screen",
         parameters=[
             {
                 "fromll_service": "/fromLL",
                 "fromll_service_fallback": "/navsat_transform/fromLL",
                 "fromll_wait_timeout_s": 2.0,
-                "global_costmap_service": "/global_costmap/get_costmap",
-                "set_zones_service": "/keepout_manager/set_zones",
-                "get_state_service": "/keepout_manager/get_state",
+                "load_map_service": "/keepout_filter_mask_server/load_map",
+                "set_geojson_service": "/zones_manager/set_geojson",
+                "get_state_service": "/zones_manager/get_state",
+                "reload_from_disk_service": "/zones_manager/reload_from_disk",
                 "map_frame": map_frame,
-                "zones_file": zones_file_path,
-                "mask_topic": "/keepout_filter_mask",
-                "filter_info_topic": "/costmap_filter_info",
-                "degrade_enabled": True,
-                "degrade_radius_m": 1.0,
-                "degrade_edge_cost": 20,
-                "degrade_min_cost": 1,
-                "degrade_use_l2": True,
-                "use_fixed_mask_grid": True,
+                "geojson_file": zones_geojson_path,
+                "mask_image_file": keepout_mask_image_path,
+                "mask_yaml_file": keepout_mask_yaml_path,
+                "buffer_margin_m": 0.0,
                 "mask_origin_x": -150.0,
                 "mask_origin_y": -150.0,
                 "mask_width": 3000,
@@ -389,6 +434,9 @@ def generate_launch_description():
             "gps_topic": gps_topic,
             "map_frame": map_frame,
             "teleop_cmd_topic": "/cmd_vel_teleop",
+            "zones_set_geojson_service": "/zones_manager/set_geojson",
+            "zones_get_state_service": "/zones_manager/get_state",
+            "zones_reload_service": "/zones_manager/reload_from_disk",
         }.items(),
     )
 
@@ -532,7 +580,10 @@ def generate_launch_description():
     ld.add_action(ekf_map_cmd)
     ld.add_action(navsat_transform_cmd)
     ld.add_action(navigation2_cmd)
-    ld.add_action(keepout_manager_cmd)
+    ld.add_action(keepout_filter_mask_server_cmd)
+    ld.add_action(keepout_costmap_filter_info_server_cmd)
+    ld.add_action(keepout_lifecycle_cmd)
+    ld.add_action(zones_manager_cmd)
     ld.add_action(nav_command_server_cmd)
     ld.add_action(nav_snapshot_server_cmd)
     ld.add_action(no_go_editor_cmd)

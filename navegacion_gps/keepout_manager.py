@@ -20,8 +20,8 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from robot_localization.srv import FromLL
 from std_srvs.srv import Trigger
 
-from navegacion_gps_interfaces.msg import NoGoPoint, NoGoZone
-from navegacion_gps_interfaces.srv import GetKeepoutState, SetKeepoutZones
+from interfaces.msg import NoGoPoint, NoGoZone
+from interfaces.srv import GetKeepoutState, SetKeepoutZones
 
 from .keepout_mask_utils import exponential_gradient_from_core, rasterize_polygons_core
 

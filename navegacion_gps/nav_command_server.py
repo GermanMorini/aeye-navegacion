@@ -15,8 +15,8 @@ from rclpy.node import Node
 from robot_localization.srv import FromLL
 from sensor_msgs.msg import NavSatFix
 
-from navegacion_gps_interfaces.msg import NavTelemetry
-from navegacion_gps_interfaces.srv import (
+from interfaces.msg import NavTelemetry
+from interfaces.srv import (
     BrakeNav,
     CancelNavGoal,
     GetNavState,

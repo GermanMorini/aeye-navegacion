@@ -68,7 +68,7 @@ planner_server:
       max_planning_time: 6.0
       max_iterations: 3000000
 
-      motion_model_for_search: "DUBIN"
+      motion_model_for_search: "REEDS_SHEPP"
       # Radio de giro efectivo más conservador para reducir sobreapertura en curva
       minimum_turning_radius: 2.2
       angle_quantization_bins: 48
@@ -132,8 +132,8 @@ controller_server:
 
       use_rotate_to_heading: false
       rotate_to_heading_angular_vel: 1.8
-      # En seguimiento nominal no se permite reversa (solo recovery BT)
-      allow_reversing: false
+      # Permite reversa también en seguimiento nominal (no solo en recovery BT)
+      allow_reversing: true
 
       max_angular_accel: 1.2
       transform_tolerance: 0.2
@@ -184,7 +184,7 @@ local_costmap:
       resolution: 0.1
       transform_tolerance: 1.0
       footprint: "[[1.19,0.46],[1.19,-0.46],[-0.25,-0.46],[-0.25,0.46]]"
-      footprint_padding: 0.1
+      footprint_padding: 0.0
       plugins: ["voxel_layer", "inflation_layer"]
       filters: ["keepout_filter"]
       track_unknown_space: false
@@ -241,7 +241,7 @@ global_costmap:
       global_frame: map
       robot_base_frame: base_footprint
       footprint: "[[1.19,0.46],[1.19,-0.46],[-0.25,-0.46],[-0.25,0.46]]"
-      footprint_padding: 0.1
+      footprint_padding: 0.0
       rolling_window: true
       width: 100
       height: 100
