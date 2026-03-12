@@ -1,6 +1,7 @@
 import math
 import threading
 import time
+from functools import partial
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -8,7 +9,7 @@ import rclpy
 from action_msgs.msg import GoalStatus
 from geographic_msgs.msg import GeoPoint
 from geometry_msgs.msg import PoseStamped, Quaternion, Twist
-from nav2_msgs.action import FollowWaypoints
+from nav2_msgs.action import FollowWaypoints, NavigateThroughPoses
 from rclpy.action import ActionClient
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
@@ -53,6 +54,7 @@ class NavCommandServerNode(Node):
         self.declare_parameter("set_manual_mode_service", "/nav_command_server/set_manual_mode")
         self.declare_parameter("get_state_service", "/nav_command_server/get_state")
         self.declare_parameter("follow_waypoints_action", "follow_waypoints")
+        self.declare_parameter("navigate_through_poses_action", "navigate_through_poses")
 
         self.fromll_service = str(self.get_parameter("fromll_service").value)
         self.fromll_service_fallback = str(
@@ -95,6 +97,9 @@ class NavCommandServerNode(Node):
         self.follow_waypoints_action = str(
             self.get_parameter("follow_waypoints_action").value
         )
+        self.navigate_through_poses_action = str(
+            self.get_parameter("navigate_through_poses_action").value
+        )
 
         self._lock = threading.Lock()
         self._current_goal_handle = None
@@ -133,6 +138,12 @@ class NavCommandServerNode(Node):
             self,
             FollowWaypoints,
             self.follow_waypoints_action,
+            callback_group=self._client_group,
+        )
+        self._navigate_through_poses_client = ActionClient(
+            self,
+            NavigateThroughPoses,
+            self.navigate_through_poses_action,
             callback_group=self._client_group,
         )
 
@@ -188,7 +199,8 @@ class NavCommandServerNode(Node):
             f"(set_goal={self.set_goal_service}, cancel={self.cancel_goal_service}, "
             f"brake={self.brake_service}, telemetry={self.telemetry_topic}, "
             f"teleop_topic={self.teleop_cmd_topic}, "
-            f"follow_waypoints_action={self.follow_waypoints_action})"
+            f"follow_waypoints_action={self.follow_waypoints_action}, "
+            f"navigate_through_poses_action={self.navigate_through_poses_action})"
         )
         self.get_logger().info(
             "Callback groups configured (services=MutuallyExclusive, clients=Reentrant)"
@@ -422,7 +434,8 @@ class NavCommandServerNode(Node):
     def _send_follow_waypoints_goal(
         self, poses: Sequence[PoseStamped], loop_enabled: bool, reason: str
     ) -> Tuple[bool, str]:
-        if not poses:
+        poses_list = list(poses)
+        if not poses_list:
             return False, "no waypoint poses to send"
 
         if not self._follow_waypoints_client.wait_for_server(timeout_sec=2.0):
@@ -432,7 +445,7 @@ class NavCommandServerNode(Node):
             return False, "FollowWaypoints action server not available"
 
         goal = FollowWaypoints.Goal()
-        goal.poses = list(poses)
+        goal.poses = poses_list
 
         future = self._follow_waypoints_client.send_goal_async(goal)
         goal_handle = self._wait_for_future(future, timeout_sec=5.0)
@@ -445,20 +458,84 @@ class NavCommandServerNode(Node):
 
         with self._lock:
             self._current_goal_handle = goal_handle
-            self._loop_waypoint_poses = list(poses)
-            self._loop_enabled = bool(loop_enabled and (len(poses) > 1))
+            self._loop_waypoint_poses = poses_list
+            self._loop_enabled = bool(loop_enabled and (len(poses_list) > 1))
             self._loop_restart_pending = False
 
         result_future = goal_handle.get_result_async()
-        result_future.add_done_callback(self._on_follow_waypoints_result_done)
+        result_future.add_done_callback(
+            partial(self._on_nav_action_result_done, "FollowWaypoints")
+        )
 
         self.get_logger().info(
             "FollowWaypoints goal accepted "
-            f"(waypoints={len(poses)}, loop={bool(loop_enabled and (len(poses) > 1))}, "
+            f"(waypoints={len(poses_list)}, loop={bool(loop_enabled and (len(poses_list) > 1))}, "
             f"reason={reason})"
         )
         self._publish_telemetry(force=True)
         return True, "goal accepted"
+
+    def _send_navigate_through_poses_goal(
+        self, poses: Sequence[PoseStamped], loop_enabled: bool, reason: str
+    ) -> Tuple[bool, str]:
+        poses_list = list(poses)
+        if not poses_list:
+            return False, "no waypoint poses to send"
+
+        if not self._navigate_through_poses_client.wait_for_server(timeout_sec=2.0):
+            self.get_logger().error(
+                "SetNavGoalLL failed: NavigateThroughPoses action server not available"
+            )
+            return False, "NavigateThroughPoses action server not available"
+
+        goal = NavigateThroughPoses.Goal()
+        goal.poses = poses_list
+
+        future = self._navigate_through_poses_client.send_goal_async(goal)
+        goal_handle = self._wait_for_future(future, timeout_sec=5.0)
+        if goal_handle is None:
+            self.get_logger().error(
+                "SetNavGoalLL failed: timeout sending NavigateThroughPoses goal"
+            )
+            return False, "failed to send NavigateThroughPoses goal"
+        if not goal_handle.accepted:
+            self.get_logger().warning("SetNavGoalLL rejected by NavigateThroughPoses")
+            return False, "goal rejected by NavigateThroughPoses"
+
+        with self._lock:
+            self._current_goal_handle = goal_handle
+            self._loop_waypoint_poses = poses_list
+            self._loop_enabled = bool(loop_enabled and (len(poses_list) > 1))
+            self._loop_restart_pending = False
+
+        result_future = goal_handle.get_result_async()
+        result_future.add_done_callback(
+            partial(self._on_nav_action_result_done, "NavigateThroughPoses")
+        )
+
+        self.get_logger().info(
+            "NavigateThroughPoses goal accepted "
+            f"(waypoints={len(poses_list)}, loop={bool(loop_enabled and (len(poses_list) > 1))}, "
+            f"reason={reason})"
+        )
+        self._publish_telemetry(force=True)
+        return True, "goal accepted"
+
+    def _send_nav_goal_for_poses(
+        self, poses: Sequence[PoseStamped], loop_enabled: bool, reason: str
+    ) -> Tuple[bool, str]:
+        poses_list = list(poses)
+        if len(poses_list) > 1:
+            return self._send_navigate_through_poses_goal(
+                poses=poses_list,
+                loop_enabled=loop_enabled,
+                reason=reason,
+            )
+        return self._send_follow_waypoints_goal(
+            poses=poses_list,
+            loop_enabled=loop_enabled,
+            reason=reason,
+        )
 
     def send_nav2_goals(
         self, waypoints: Sequence[Tuple[float, float, float]], loop_enabled: bool
@@ -482,13 +559,13 @@ class NavCommandServerNode(Node):
         poses, err = self._convert_waypoints_to_poses(waypoints)
         if poses is None:
             return False, err
-        return self._send_follow_waypoints_goal(
+        return self._send_nav_goal_for_poses(
             poses=poses,
             loop_enabled=loop_enabled,
             reason="set_goal_service",
         )
 
-    def _on_follow_waypoints_result_done(self, future: Any) -> None:
+    def _on_nav_action_result_done(self, action_name: str, future: Any) -> None:
         status = None
         missed_waypoints: List[int] = []
         try:
@@ -498,7 +575,7 @@ class NavCommandServerNode(Node):
             if result is not None:
                 missed_waypoints = [int(v) for v in getattr(result, "missed_waypoints", [])]
         except Exception as exc:
-            self.get_logger().warning(f"FollowWaypoints result callback failed: {exc}")
+            self.get_logger().warning(f"{action_name} result callback failed: {exc}")
 
         should_restart = False
         with self._lock:
@@ -513,7 +590,7 @@ class NavCommandServerNode(Node):
                 should_restart = True
 
         self.get_logger().info(
-            "FollowWaypoints result received "
+            f"{action_name} result received "
             f"(status={status}, missed_waypoints={missed_waypoints}, loop_restart={should_restart})"
         )
         self._publish_telemetry(force=True)
@@ -531,13 +608,13 @@ class NavCommandServerNode(Node):
             poses = list(self._loop_waypoint_poses)
             self._loop_restart_pending = False
 
-        ok, err = self._send_follow_waypoints_goal(
+        ok, err = self._send_nav_goal_for_poses(
             poses=poses,
             loop_enabled=True,
             reason="loop_restart",
         )
         if not ok:
-            self.get_logger().warning(f"FollowWaypoints loop restart failed: {err}")
+            self.get_logger().warning(f"Loop restart failed: {err}")
             with self._lock:
                 if self._loop_enabled and (not self._manual_enabled):
                     self._loop_restart_pending = True
@@ -670,7 +747,7 @@ class NavCommandServerNode(Node):
                 if (not np.isfinite(lat)) or (not np.isfinite(lon)) or (not np.isfinite(yaw_deg)):
                     return None, False, f"invalid waypoint values at index {idx}"
                 waypoints.append((lat, lon, float(yaw_deg)))
-            loop_enabled = bool(request.loop) or (len(waypoints) > 1)
+            loop_enabled = bool(request.loop)
             return waypoints, loop_enabled, ""
 
         lat = float(request.lat)
