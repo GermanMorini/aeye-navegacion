@@ -487,6 +487,12 @@ def generate_launch_description():
         launch_arguments={"launch_web": launch_web}.items(),
         condition=IfCondition(start_pixhawk),
     )
+    camera_cmd = Node(
+        package="sensores",
+        executable="camara",
+        name="camara",
+        output="screen",
+    )
 
     lidar_cmd = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -517,6 +523,7 @@ def generate_launch_description():
     ld.add_action(declare_map_frame_cmd)
     ld.add_action(OpaqueFunction(function=_build_robot_state_publisher))
     ld.add_action(pixhawk_cmd)
+    ld.add_action(camera_cmd)
     ld.add_action(lidar_cmd)
     ld.add_action(ekf_odom_cmd)
     ld.add_action(ekf_map_cmd)
