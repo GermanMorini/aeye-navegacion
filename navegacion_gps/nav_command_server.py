@@ -111,6 +111,9 @@ class NavCommandServerNode(Node):
         self._last_robot_pose: Optional[Dict[str, float]] = None
         self._last_telemetry_sent: Optional[float] = None
         self._loop_waypoint_poses: List[PoseStamped] = []
+        self._loop_original_poses: List[PoseStamped] = []
+        self._loop_reduced_poses: List[PoseStamped] = []
+        self._loop_send_reduced_next = True
         self._loop_enabled = False
         self._loop_restart_pending = False
 
@@ -400,6 +403,9 @@ class NavCommandServerNode(Node):
 
     def _clear_loop_config_locked(self) -> None:
         self._loop_waypoint_poses = []
+        self._loop_original_poses = []
+        self._loop_reduced_poses = []
+        self._loop_send_reduced_next = True
         self._loop_enabled = False
         self._loop_restart_pending = False
 
@@ -430,6 +436,13 @@ class NavCommandServerNode(Node):
                 return None, f"fromLL conversion failed at waypoint {idx + 1}: {detail}"
             poses.append(pose)
         return poses, ""
+
+    @staticmethod
+    def _build_loop_restart_poses(poses: Sequence[PoseStamped]) -> List[PoseStamped]:
+        poses_list = list(poses)
+        if len(poses_list) <= 1:
+            return poses_list
+        return [poses_list[-1], poses_list[0]]
 
     def _send_follow_waypoints_goal(
         self, poses: Sequence[PoseStamped], loop_enabled: bool, reason: str
@@ -559,11 +572,28 @@ class NavCommandServerNode(Node):
         poses, err = self._convert_waypoints_to_poses(waypoints)
         if poses is None:
             return False, err
-        return self._send_nav_goal_for_poses(
+        ok, err = self._send_nav_goal_for_poses(
             poses=poses,
             loop_enabled=loop_enabled,
             reason="set_goal_service",
         )
+        if (not ok) or (not loop_enabled) or (len(poses) <= 1):
+            return ok, err
+
+        loop_restart_poses = self._build_loop_restart_poses(poses)
+        with self._lock:
+            self._loop_original_poses = list(poses)
+            self._loop_reduced_poses = loop_restart_poses
+            self._loop_waypoint_poses = loop_restart_poses
+            self._loop_enabled = True
+            self._loop_restart_pending = False
+            self._loop_send_reduced_next = True
+        self.get_logger().info(
+            "Loop paths configured "
+            f"(original={len(self._loop_original_poses)}, reduced={len(loop_restart_poses)}, "
+            "next=reduced)"
+        )
+        return ok, err
 
     def _on_nav_action_result_done(self, action_name: str, future: Any) -> None:
         status = None
@@ -591,28 +621,46 @@ class NavCommandServerNode(Node):
 
         self.get_logger().info(
             f"{action_name} result received "
-            f"(status={status}, missed_waypoints={missed_waypoints}, loop_restart={should_restart})"
+            f"(status={status}, missed_waypoints={missed_waypoints}, "
+            f"loop_restart={should_restart})"
         )
         self._publish_telemetry(force=True)
 
     def _waypoint_loop_tick(self) -> None:
+        sent_reduced = False
+        reason = "loop_restart"
         with self._lock:
             if (
                 (not self._loop_restart_pending)
                 or (not self._loop_enabled)
                 or self._manual_enabled
                 or (self._current_goal_handle is not None)
-                or (len(self._loop_waypoint_poses) <= 1)
             ):
                 return
-            poses = list(self._loop_waypoint_poses)
+
+            if self._loop_send_reduced_next:
+                poses = list(self._loop_reduced_poses)
+                sent_reduced = True
+                reason = "loop_restart_reduced"
+            else:
+                poses = list(self._loop_original_poses)
+                reason = "loop_restart_original"
+            if len(poses) <= 1:
+                return
+
             self._loop_restart_pending = False
 
         ok, err = self._send_nav_goal_for_poses(
             poses=poses,
             loop_enabled=True,
-            reason="loop_restart",
+            reason=reason,
         )
+        if ok:
+            with self._lock:
+                if self._loop_enabled and (not self._manual_enabled):
+                    self._loop_send_reduced_next = not sent_reduced
+            return
+
         if not ok:
             self.get_logger().warning(f"Loop restart failed: {err}")
             with self._lock:
