@@ -22,12 +22,72 @@ from std_srvs.srv import Trigger
 
 from interfaces.srv import GetZonesState, SetZonesGeoJson
 
+from .keepout_mask_utils import exponential_gradient_from_core
 from .zones_geojson_utils import (
     feature_and_polygon_counts,
     iter_polygons,
     normalize_geojson_object,
     rasterize_polygons_trinary,
 )
+
+
+def compose_keepout_cost_mask(
+    core_binary_mask: np.ndarray,
+    resolution: float,
+    degrade_enabled: bool,
+    degrade_radius_m: float,
+    degrade_edge_cost: int,
+    degrade_min_cost: int,
+    degrade_use_l2: bool,
+) -> np.ndarray:
+    core_mask = np.where(core_binary_mask > 0, 100, 0).astype(np.uint8)
+    if (not degrade_enabled) or degrade_radius_m <= 0.0:
+        return core_mask
+
+    gradient_mask = exponential_gradient_from_core(
+        core_mask=core_mask,
+        resolution=resolution,
+        radius_m=degrade_radius_m,
+        edge_cost=degrade_edge_cost,
+        min_cost=degrade_min_cost,
+        use_l2=degrade_use_l2,
+    )
+    cost_mask = np.maximum(core_mask, gradient_mask)
+    cost_mask[core_mask > 0] = 100
+    return cost_mask
+
+
+def cost_mask_to_scale_image(cost_mask: np.ndarray) -> np.ndarray:
+    bounded = np.clip(cost_mask.astype(np.float32), 0.0, 100.0)
+    return np.rint((100.0 - bounded) * (255.0 / 100.0)).astype(np.uint8)
+
+
+def summarize_keepout_cost_mask(cost_mask: np.ndarray) -> Dict[str, int]:
+    core_cells = int(np.sum(cost_mask == 100))
+    halo_cells = int(np.sum((cost_mask > 0) & (cost_mask < 100)))
+    free_cells = int(np.sum(cost_mask == 0))
+    return {
+        "core_cells": core_cells,
+        "halo_cells": halo_cells,
+        "free_cells": free_cells,
+    }
+
+
+def build_scale_mask_yaml_data(
+    image_ref: str,
+    resolution: float,
+    origin_x: float,
+    origin_y: float,
+) -> Dict[str, Any]:
+    return {
+        "image": image_ref,
+        "mode": "scale",
+        "resolution": float(resolution),
+        "origin": [float(origin_x), float(origin_y), 0.0],
+        "negate": 0,
+        "occupied_thresh": 1.0,
+        "free_thresh": 0.0,
+    }
 
 
 class ZonesManagerNode(Node):
@@ -50,6 +110,11 @@ class ZonesManagerNode(Node):
 
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("buffer_margin_m", 0.0)
+        self.declare_parameter("degrade_enabled", True)
+        self.declare_parameter("degrade_radius_m", 1.5)
+        self.declare_parameter("degrade_edge_cost", 12)
+        self.declare_parameter("degrade_min_cost", 1)
+        self.declare_parameter("degrade_use_l2", True)
         self.declare_parameter("geojson_file", "")
         self.declare_parameter("mask_image_file", "")
         self.declare_parameter("mask_yaml_file", "")
@@ -86,12 +151,18 @@ class ZonesManagerNode(Node):
 
         self.map_frame = str(self.get_parameter("map_frame").value)
         self.buffer_margin_m = max(0.0, float(self.get_parameter("buffer_margin_m").value))
+        self.degrade_enabled = bool(self.get_parameter("degrade_enabled").value)
+        self.degrade_radius_m = float(self.get_parameter("degrade_radius_m").value)
+        self.degrade_edge_cost = int(self.get_parameter("degrade_edge_cost").value)
+        self.degrade_min_cost = int(self.get_parameter("degrade_min_cost").value)
+        self.degrade_use_l2 = bool(self.get_parameter("degrade_use_l2").value)
 
         self.mask_origin_x = float(self.get_parameter("mask_origin_x").value)
         self.mask_origin_y = float(self.get_parameter("mask_origin_y").value)
         self.mask_width = int(self.get_parameter("mask_width").value)
         self.mask_height = int(self.get_parameter("mask_height").value)
         self.mask_resolution = float(self.get_parameter("mask_resolution").value)
+        self._sanitize_degrade_params()
         self._sanitize_mask_grid_params()
 
         default_dir = self._resolve_default_config_dir()
@@ -169,7 +240,14 @@ class ZonesManagerNode(Node):
         self.get_logger().info(
             "Zones manager ready "
             f"(set_service={self.set_geojson_service}, get_service={self.get_state_service}, "
-            f"reload_service={self.reload_from_disk_service}, load_map_service={self.load_map_service})"
+            f"reload_service={self.reload_from_disk_service}, "
+            f"load_map_service={self.load_map_service})"
+        )
+        self.get_logger().info(
+            "Keepout degrade config "
+            f"(enabled={self.degrade_enabled}, radius_m={self.degrade_radius_m}, "
+            f"edge_cost={self.degrade_edge_cost}, min_cost={self.degrade_min_cost}, "
+            f"use_l2={self.degrade_use_l2})"
         )
 
     def _empty_geojson_doc(self) -> Dict[str, Any]:
@@ -199,6 +277,31 @@ class ZonesManagerNode(Node):
                 f"mask_resolution={self.mask_resolution} invalid; forcing 0.1"
             )
             self.mask_resolution = 0.1
+
+    def _sanitize_degrade_params(self) -> None:
+        if self.degrade_radius_m < 0.0:
+            self.get_logger().warning(
+                f"degrade_radius_m={self.degrade_radius_m} invalid; forcing 0.0"
+            )
+            self.degrade_radius_m = 0.0
+
+        if self.degrade_edge_cost < 1 or self.degrade_edge_cost > 99:
+            self.get_logger().warning(
+                f"degrade_edge_cost={self.degrade_edge_cost} out of range [1,99]; clamping"
+            )
+            self.degrade_edge_cost = max(1, min(99, self.degrade_edge_cost))
+
+        if self.degrade_min_cost < 1 or self.degrade_min_cost > 99:
+            self.get_logger().warning(
+                f"degrade_min_cost={self.degrade_min_cost} out of range [1,99]; clamping"
+            )
+            self.degrade_min_cost = max(1, min(99, self.degrade_min_cost))
+
+        if self.degrade_min_cost > self.degrade_edge_cost:
+            self.get_logger().warning(
+                "degrade_min_cost is greater than degrade_edge_cost; forcing equality"
+            )
+            self.degrade_min_cost = self.degrade_edge_cost
 
     def _build_fixed_mask_metadata(self) -> MapMetaData:
         info = MapMetaData()
@@ -401,15 +504,12 @@ class ZonesManagerNode(Node):
             image_ref = str(self.mask_image_file.relative_to(self.mask_yaml_file.parent))
         except Exception:
             image_ref = str(self.mask_image_file)
-        yaml_data = {
-            "image": image_ref,
-            "mode": "trinary",
-            "resolution": float(self.mask_resolution),
-            "origin": [float(self.mask_origin_x), float(self.mask_origin_y), 0.0],
-            "negate": 0,
-            "occupied_thresh": 0.65,
-            "free_thresh": 0.25,
-        }
+        yaml_data = build_scale_mask_yaml_data(
+            image_ref=image_ref,
+            resolution=float(self.mask_resolution),
+            origin_x=float(self.mask_origin_x),
+            origin_y=float(self.mask_origin_y),
+        )
         try:
             with self.mask_yaml_file.open("w", encoding="utf-8") as handle:
                 yaml.safe_dump(yaml_data, handle, sort_keys=False)
@@ -459,7 +559,13 @@ class ZonesManagerNode(Node):
         )
         if enabled_polygon_count > 0 and len(xy_polygons) == 0:
             detail = self._last_fromll_error or "fromLL conversion failed"
-            return False, f"no valid polygons after fromLL conversion: {detail}", False, feature_count, polygon_count
+            return (
+                False,
+                f"no valid polygons after fromLL conversion: {detail}",
+                False,
+                feature_count,
+                polygon_count,
+            )
         if failed_polygon_ids:
             self.get_logger().warning(
                 "Some polygons failed LL->XY conversion: " + ", ".join(failed_polygon_ids)
@@ -484,9 +590,27 @@ class ZonesManagerNode(Node):
                 f"Polygon '{polygon_id}' is outside mask bounds and was skipped"
             )
 
-        ok_write, err_write = self._write_mask_files(image)
+        core_binary_mask = np.where(image == 0, 1, 0).astype(np.uint8)
+        cost_mask = compose_keepout_cost_mask(
+            core_binary_mask=core_binary_mask,
+            resolution=float(info.resolution),
+            degrade_enabled=bool(self.degrade_enabled),
+            degrade_radius_m=float(self.degrade_radius_m),
+            degrade_edge_cost=int(self.degrade_edge_cost),
+            degrade_min_cost=int(self.degrade_min_cost),
+            degrade_use_l2=bool(self.degrade_use_l2),
+        )
+        mask_summary = summarize_keepout_cost_mask(cost_mask)
+        scale_image = cost_mask_to_scale_image(cost_mask)
+        ok_write, err_write = self._write_mask_files(scale_image)
         if not ok_write:
             return False, err_write, False, feature_count, polygon_count
+        self.get_logger().info(
+            "Keepout mask regenerated "
+            f"(degrade_enabled={self.degrade_enabled}, radius_m={self.degrade_radius_m:.2f}, "
+            f"core_cells={mask_summary['core_cells']}, halo_cells={mask_summary['halo_cells']}, "
+            f"free_cells={mask_summary['free_cells']})"
+        )
 
         map_reloaded = False
         ok_reload, err_reload = self._call_load_map()
@@ -508,7 +632,13 @@ class ZonesManagerNode(Node):
             self._mask_source = "map_server_load_map" if map_reloaded else "mask_files_only"
 
         if not map_reloaded:
-            return False, "mask files written but load_map failed", False, feature_count, polygon_count
+            return (
+                False,
+                "mask files written but load_map failed",
+                False,
+                feature_count,
+                polygon_count,
+            )
         return True, "", True, feature_count, polygon_count
 
     def _load_geojson_from_disk(self) -> Tuple[Optional[Dict[str, Any]], str]:

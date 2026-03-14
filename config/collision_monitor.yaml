@@ -11,7 +11,7 @@ collision_monitor:
     state_update_rate: 10.0
     source_timeout: 1.0
     stop_pub_timeout: 0.5
-    polygons: ["footprint", "stop_zone"]
+    polygons: ["footprint", "slow_zone_front", "stop_zone_rear"]
     
     footprint:
       type: "polygon"
@@ -21,11 +21,20 @@ collision_monitor:
       visualize: true
       enabled: true
 
-    stop_zone:
+    slow_zone_front:
+      type: "polygon"
+      action_type: "slowdown"
+      min_points: 3
+      points: [1.8, 0.8, 1.8, -0.8, 0.2, -0.8, 0.2, 0.8]
+      slowdown_ratio: 0.35
+      visualize: true
+      enabled: true
+
+    stop_zone_rear:
       type: "polygon"
       action_type: "stop"
       min_points: 3
-      points: [1.6, 0.7, 1.6, -0.7, -0.4, -0.7, -0.4, 0.7]
+      points: [-0.25, 0.7, -0.25, -0.7, -1.1, -0.7, -1.1, 0.7]
       visualize: true
       enabled: true
 

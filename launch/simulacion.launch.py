@@ -13,6 +13,8 @@
 # limitations under the License.
 
 import os
+import re
+import tempfile
 from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
@@ -43,6 +45,39 @@ def _resolve_config_file_path(package_share_dir: str, filename: str) -> str:
     except IndexError:
         pass
     return str(default_path)
+
+
+def _extract_world_name_from_sdf(world_path: str) -> str:
+    try:
+        with open(world_path, "r", encoding="utf-8") as file_handle:
+            world_contents = file_handle.read()
+        match = re.search(r"<world\s+name\s*=\s*['\"]([^'\"]+)['\"]", world_contents)
+        if match:
+            return match.group(1)
+    except OSError:
+        pass
+    return ""
+
+
+def _materialize_bridge_config_for_world(bridge_config_path: str, world_name: str) -> str:
+    with open(bridge_config_path, "r", encoding="utf-8") as file_handle:
+        bridge_config_contents = file_handle.read()
+    # Keep one bridge config for all worlds by replacing world-scoped Gazebo topics at runtime.
+    patched_contents = re.sub(
+        r"/world/[^/\s]+/",
+        f"/world/{world_name}/",
+        bridge_config_contents,
+    )
+    tmp_file = tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        suffix=".yaml",
+        prefix="bridge_config_",
+        delete=False,
+    )
+    with tmp_file:
+        tmp_file.write(patched_contents)
+    return tmp_file.name
 
 
 def _spawn_robot(context):
@@ -88,11 +123,19 @@ def _spawn_robot(context):
 
 
 def _build_gz_bridge(context, *, bridge_config):
+    world_path = LaunchConfiguration("world").perform(context)
+    world_name_arg = LaunchConfiguration("world_name").perform(context)
+    world_name_from_sdf = _extract_world_name_from_sdf(world_path)
+    resolved_world_name = world_name_from_sdf or world_name_arg
+    resolved_bridge_config = _materialize_bridge_config_for_world(
+        bridge_config, resolved_world_name
+    )
+
     bridge_cmd = Node(
         package="ros_gz_bridge",
         executable="parameter_bridge",
         output="screen",
-        parameters=[{"config_file": bridge_config}],
+        parameters=[{"config_file": resolved_bridge_config}],
     )
     return [bridge_cmd]
 
@@ -127,7 +170,7 @@ def generate_launch_description():
     zones_geojson_path = _resolve_config_file_path(gps_wpf_dir, "no_go_zones.geojson")
     keepout_mask_image_path = _resolve_config_file_path(gps_wpf_dir, "keepout_mask.pgm")
     keepout_mask_yaml_path = _resolve_config_file_path(gps_wpf_dir, "keepout_mask.yaml")
-    world_path = os.path.join(gps_wpf_dir, "worlds", "pasillos_obstaculos.world")
+    world_path = os.path.join(gps_wpf_dir, "worlds", "vacio.world")
     nav2_params = os.path.join(params_dir, "nav2_no_map_params.yaml")
     rl_params_file = os.path.join(params_dir, "dual_ekf_navsat_params.yaml")
     collision_monitor_params = os.path.join(params_dir, "collision_monitor.yaml")
@@ -217,7 +260,7 @@ def generate_launch_description():
     )
     declare_world_name_cmd = DeclareLaunchArgument(
         "world_name",
-        default_value="pasillos_obstaculos",
+        default_value="vacio",
         description="Gazebo world name for joint_state bridge",
     )
     declare_model_name_cmd = DeclareLaunchArgument(
@@ -362,6 +405,11 @@ def generate_launch_description():
                 "mask_image_file": keepout_mask_image_path,
                 "mask_yaml_file": keepout_mask_yaml_path,
                 "buffer_margin_m": 0.8,
+                "degrade_enabled": True,
+                "degrade_radius_m": 1.5,
+                "degrade_edge_cost": 40,
+                "degrade_min_cost": 1,
+                "degrade_use_l2": True,
                 "mask_origin_x": -150.0,
                 "mask_origin_y": -150.0,
                 "mask_width": 3000,

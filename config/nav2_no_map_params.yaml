@@ -66,11 +66,11 @@ planner_server:
       optimizer_costmap_weight: 6.0
 
       tolerance: 0.5
-      allow_unknown: false
+      allow_unknown: true
       max_planning_time: 6.0
       max_iterations: 3000000
 
-      motion_model_for_search: "REEDS_SHEPP"
+      motion_model_for_search: "DUBIN"
       # Radio de giro efectivo más conservador para reducir sobreapertura en curva
       minimum_turning_radius: 2.2
       angle_quantization_bins: 48
@@ -103,12 +103,12 @@ controller_server:
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
       required_movement_radius: 0.1
-      movement_time_allowance: 30.0
+      movement_time_allowance: 5.0
 
     general_goal_checker:
       plugin: "nav2_controller::PositionGoalChecker"
       stateful: true
-      xy_goal_tolerance: 0.8
+      xy_goal_tolerance: 1.2
 
     FollowPath:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
@@ -135,9 +135,9 @@ controller_server:
       use_rotate_to_heading: false
       rotate_to_heading_angular_vel: 1.8
       # Permite reversa también en seguimiento nominal (no solo en recovery BT)
-      allow_reversing: true
+      allow_reversing: false
 
-      max_angular_accel: 1.2
+      max_angular_accel: 3.0
       transform_tolerance: 0.2
       use_interpolation: false
       max_robot_pose_search_dist: 4.0
@@ -159,8 +159,8 @@ velocity_smoother:
 
     # max_velocity: [4.16, 0.0, 2.5]
     max_velocity: [1.2, 0.0, 0.6]
-    # Reversa de recoveries alineada con BackUp a 1.0 m/s
-    min_velocity: [-1.0, 0.0, -0.6]
+    # Solo permite reversa para recoveries (BackUp), no en seguimiento nominal.
+    min_velocity: [-1.2, 0.0, -0.6]
 
     max_accel: [0.8, 0.0, 0.8]
     max_decel: [-1.5, 0.0, -0.8]
@@ -193,8 +193,8 @@ local_costmap:
 
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        inflation_radius: 0.9
-        cost_scaling_factor: 3.0
+        inflation_radius: 1.2
+        cost_scaling_factor: 2.0
       voxel_layer:
         plugin: "nav2_costmap_2d::VoxelLayer"
         enabled: True
@@ -231,8 +231,8 @@ local_costmap:
         filter_info_topic: "/costmap_filter_info"
         transform_tolerance: 1.0
         override_lethal_cost: True
-        lethal_override_cost: 252
-      always_send_full_costmap: true
+        lethal_override_cost: 254
+      always_send_full_costmap: false
 
 # ================================
 # GLOBAL COSTMAP (rolling, GPS)
@@ -241,16 +241,16 @@ global_costmap:
   global_costmap:
     ros__parameters:
       use_sim_time: true
-      update_frequency: 5.0
+      update_frequency: 3.0
       publish_frequency: 1.0
       global_frame: map
       robot_base_frame: base_footprint
       footprint: "[[1.19,0.46],[1.19,-0.46],[-0.25,-0.46],[-0.25,0.46]]"
       footprint_padding: 0.0
       rolling_window: true
-      width: 100
-      height: 100
-      resolution: 0.1
+      width: 250
+      height: 250
+      resolution: 0.25
       transform_tolerance: 1.0
       track_unknown_space: true
       use_maximum_static_value: true
@@ -281,7 +281,7 @@ global_costmap:
 
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        inflation_radius: 0.7
+        inflation_radius: 1.2
         cost_scaling_factor: 3.5
       keepout_filter:
         plugin: "nav2_costmap_2d::KeepoutFilter"
@@ -289,8 +289,8 @@ global_costmap:
         filter_info_topic: "/costmap_filter_info"
         transform_tolerance: 1.0
         override_lethal_cost: True
-        lethal_override_cost: 252
-      always_send_full_costmap: true
+        lethal_override_cost: 254
+      always_send_full_costmap: false
 
 # ================================
 # LIFECYCLE

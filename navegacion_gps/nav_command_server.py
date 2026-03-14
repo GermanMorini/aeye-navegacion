@@ -115,7 +115,6 @@ class NavCommandServerNode(Node):
         self._loop_reduced_poses: List[PoseStamped] = []
         self._loop_send_reduced_next = True
         self._loop_enabled = False
-        self._loop_restart_pending = False
 
         # Service callbacks are mutually exclusive; clients/actions are reentrant to avoid
         # deadlocks when a service callback waits for a client future.
@@ -196,7 +195,6 @@ class NavCommandServerNode(Node):
         self._manual_watchdog_timer = self.create_timer(
             1.0 / float(self.manual_watchdog_hz), self._manual_watchdog_tick
         )
-        self._waypoint_loop_timer = self.create_timer(0.25, self._waypoint_loop_tick)
         self.get_logger().info(
             "Nav command server ready "
             f"(set_goal={self.set_goal_service}, cancel={self.cancel_goal_service}, "
@@ -407,7 +405,6 @@ class NavCommandServerNode(Node):
         self._loop_reduced_poses = []
         self._loop_send_reduced_next = True
         self._loop_enabled = False
-        self._loop_restart_pending = False
 
     def _build_pose_from_ll(self, lat: float, lon: float, yaw_deg: float) -> Optional[PoseStamped]:
         converted = self._call_from_ll(lat, lon)
@@ -473,7 +470,6 @@ class NavCommandServerNode(Node):
             self._current_goal_handle = goal_handle
             self._loop_waypoint_poses = poses_list
             self._loop_enabled = bool(loop_enabled and (len(poses_list) > 1))
-            self._loop_restart_pending = False
 
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(
@@ -519,7 +515,6 @@ class NavCommandServerNode(Node):
             self._current_goal_handle = goal_handle
             self._loop_waypoint_poses = poses_list
             self._loop_enabled = bool(loop_enabled and (len(poses_list) > 1))
-            self._loop_restart_pending = False
 
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(
@@ -586,7 +581,6 @@ class NavCommandServerNode(Node):
             self._loop_reduced_poses = loop_restart_poses
             self._loop_waypoint_poses = loop_restart_poses
             self._loop_enabled = True
-            self._loop_restart_pending = False
             self._loop_send_reduced_next = True
         self.get_logger().info(
             "Loop paths configured "
@@ -607,17 +601,40 @@ class NavCommandServerNode(Node):
         except Exception as exc:
             self.get_logger().warning(f"{action_name} result callback failed: {exc}")
 
-        should_restart = False
+        restart_goal_poses: Optional[List[PoseStamped]] = None
+        restart_reason = ""
+        sent_reduced = False
         with self._lock:
             self._current_goal_handle = None
             if (
                 status == GoalStatus.STATUS_SUCCEEDED
                 and self._loop_enabled
-                and len(self._loop_waypoint_poses) > 1
                 and (not self._manual_enabled)
+                and len(self._loop_original_poses) > 1
+                and len(self._loop_reduced_poses) > 1
             ):
-                self._loop_restart_pending = True
-                should_restart = True
+                if self._loop_send_reduced_next:
+                    restart_goal_poses = list(self._loop_reduced_poses)
+                    restart_reason = "loop_restart_reduced"
+                    sent_reduced = True
+                else:
+                    restart_goal_poses = list(self._loop_original_poses)
+                    restart_reason = "loop_restart_original"
+
+        should_restart = restart_goal_poses is not None
+        if should_restart:
+            ok, err = self._send_nav_goal_for_poses(
+                poses=restart_goal_poses,
+                loop_enabled=True,
+                reason=restart_reason,
+            )
+            with self._lock:
+                if ok and self._loop_enabled and (not self._manual_enabled):
+                    self._loop_send_reduced_next = not sent_reduced
+                else:
+                    self._clear_loop_config_locked()
+            if not ok:
+                self.get_logger().warning(f"Loop restart failed: {err}")
 
         self.get_logger().info(
             f"{action_name} result received "
@@ -625,47 +642,6 @@ class NavCommandServerNode(Node):
             f"loop_restart={should_restart})"
         )
         self._publish_telemetry(force=True)
-
-    def _waypoint_loop_tick(self) -> None:
-        sent_reduced = False
-        reason = "loop_restart"
-        with self._lock:
-            if (
-                (not self._loop_restart_pending)
-                or (not self._loop_enabled)
-                or self._manual_enabled
-                or (self._current_goal_handle is not None)
-            ):
-                return
-
-            if self._loop_send_reduced_next:
-                poses = list(self._loop_reduced_poses)
-                sent_reduced = True
-                reason = "loop_restart_reduced"
-            else:
-                poses = list(self._loop_original_poses)
-                reason = "loop_restart_original"
-            if len(poses) <= 1:
-                return
-
-            self._loop_restart_pending = False
-
-        ok, err = self._send_nav_goal_for_poses(
-            poses=poses,
-            loop_enabled=True,
-            reason=reason,
-        )
-        if ok:
-            with self._lock:
-                if self._loop_enabled and (not self._manual_enabled):
-                    self._loop_send_reduced_next = not sent_reduced
-            return
-
-        if not ok:
-            self.get_logger().warning(f"Loop restart failed: {err}")
-            with self._lock:
-                if self._loop_enabled and (not self._manual_enabled):
-                    self._loop_restart_pending = True
 
     def cancel_current_goal(self, clear_loop_config: bool = True) -> Tuple[bool, str]:
         with self._lock:
