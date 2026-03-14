@@ -327,36 +327,6 @@ def generate_launch_description():
             }
         ],
     )
-    nav_command_server_cmd = Node(
-        package="navegacion_gps",
-        executable="nav_command_server",
-        name="nav_command_server",
-        output="screen",
-        parameters=[
-            {
-                "fromll_service": "/fromLL",
-                "fromll_service_fallback": "/navsat_transform/fromLL",
-                "fromll_wait_timeout_s": 2.0,
-                "map_frame": map_frame,
-                "gps_topic": gps_topic,
-                "cmd_vel_safe_topic": "/cmd_vel_safe",
-                "brake_topic": "/cmd_vel_safe",
-                "manual_cmd_topic": "/cmd_vel_safe",
-                "teleop_cmd_topic": "/cmd_vel_teleop",
-                "brake_publish_count": 5,
-                "brake_publish_interval_s": 0.1,
-                "manual_cmd_timeout_s": 0.4,
-                "manual_watchdog_hz": 10.0,
-                "nav_telemetry_hz": 5.0,
-                "telemetry_topic": "/nav_command_server/telemetry",
-                "set_goal_service": "/nav_command_server/set_goal_ll",
-                "cancel_goal_service": "/nav_command_server/cancel_goal",
-                "brake_service": "/nav_command_server/brake",
-                "set_manual_mode_service": "/nav_command_server/set_manual_mode",
-                "get_state_service": "/nav_command_server/get_state",
-            }
-        ],
-    )
     nav_snapshot_server_cmd = Node(
         package="navegacion_gps",
         executable="nav_snapshot_server",
@@ -538,7 +508,6 @@ def generate_launch_description():
     ld.add_action(keepout_costmap_filter_info_server_cmd)
     ld.add_action(keepout_lifecycle_cmd)
     ld.add_action(zones_manager_cmd)
-    ld.add_action(nav_command_server_cmd)
     ld.add_action(nav_snapshot_server_cmd)
     ld.add_action(no_go_editor_cmd)
     ld.add_action(rviz_cmd)
