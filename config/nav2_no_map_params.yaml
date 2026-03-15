@@ -73,7 +73,7 @@ planner_server:
       motion_model_for_search: "DUBIN"
       # Radio de giro efectivo más conservador para reducir sobreapertura en curva
       minimum_turning_radius: 2.2
-      angle_quantization_bins: 48
+      angle_quantization_bins: 64
 
       reverse_penalty: 2.8
       change_penalty: 1.8
@@ -99,13 +99,14 @@ smoother_server:
     Constrained:
       plugin: "nav2_constrained_smoother/ConstrainedSmoother"
       reversing_enabled: false
+      # Evita inestabilidad numérica cuando el path local contiene puntos consecutivos repetidos.
       path_downsampling_factor: 2
       path_upsampling_factor: 1
       keep_start_orientation: true
       keep_goal_orientation: true
       minimum_turning_radius: 1.7
       optimizer:
-        max_iterations: 30
+        max_iterations: 80
 
 # ================================
 # CONTROLLER (RPP Ackermann)
@@ -274,7 +275,9 @@ global_costmap:
       height: 250
       resolution: 0.25
       transform_tolerance: 1.0
-      track_unknown_space: true
+      # En modo sin mapa estático, mantener celdas como conocidas permite
+      # visualizar y aplicar consistentemente el keepout en RViz/global.
+      track_unknown_space: false
       use_maximum_static_value: true
       plugins: ["obstacle_layer", "inflation_layer"]
       filters: ["keepout_filter"]

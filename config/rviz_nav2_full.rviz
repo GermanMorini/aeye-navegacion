@@ -3,9 +3,10 @@ Panels:
     Help Height: 0
     Name: Displays
     Property Tree Widget:
-      Expanded: ~
+      Expanded:
+        - /Plan1
       Splitter Ratio: 0.5
-    Tree Height: 466
+    Tree Height: 367
   - Class: rviz_common/Tool Properties
     Expanded: ~
     Name: Tool Properties
@@ -71,26 +72,25 @@ Visualization Manager:
       Show Names: true
       Tree:
         map:
-          {}
-        odom:
-          base_footprint:
-            base_link:
-              front_left_steer_link:
-                front_left_wheel_link:
+          odom:
+            base_footprint:
+              base_link:
+                front_left_steer_link:
+                  front_left_wheel_link:
+                    {}
+                front_right_steer_link:
+                  front_right_wheel_link:
+                    {}
+                gps_link:
                   {}
-              front_right_steer_link:
-                front_right_wheel_link:
+                imu_link:
                   {}
-              gps_link:
-                {}
-              imu_link:
-                {}
-              lidar_link:
-                {}
-              rear_left_wheel_link:
-                {}
-              rear_right_wheel_link:
-                {}
+                lidar_link:
+                  {}
+                rear_left_wheel_link:
+                  {}
+                rear_right_wheel_link:
+                  {}
       Update Interval: 0
       Value: true
     - Alpha: 1
@@ -103,7 +103,7 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Best Effort
-        Value: "/robot_description"
+        Value: /robot_description
       Enabled: true
       Links:
         All Links Enabled: true
@@ -358,7 +358,7 @@ Visualization Manager:
     - Alpha: 1
       Buffer Length: 1
       Class: rviz_default_plugins/Path
-      Color: 25; 255; 0
+      Color: 255; 85; 0
       Enabled: true
       Head Diameter: 0.30000001192092896
       Head Length: 0.20000000298023224
@@ -577,16 +577,16 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 22.79608917236328
+      Distance: 89.74317932128906
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 0.6513136625289917
-        Y: 0.8003897070884705
-        Z: 7.844636917114258
+        X: -26.337587356567383
+        Y: -14.110328674316406
+        Z: 7.829424858093262
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
@@ -605,7 +605,7 @@ Window Geometry:
   Hide Right Dock: false
   Navigation 2:
     collapsed: true
-  QMainWindow State: 000000ff00000000fd00000001000000000000015600000420fc0200000005fb000000100044006900730070006c006100790073000000003b0000020d000000c700fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007300000001d8000000c70000005c00fffffffb0000000c00430061006d00650072006100000001d9000000c60000000000000000fb0000000a0049006d0061006700650000000263000001060000000000000000fb00000018004e0061007600690067006100740069006f006e00200032000000024e0000020d0000012300ffffff000003c00000042000000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd00000001000000000000015600000420fc0200000005fb000000100044006900730070006c006100790073000000003b000001aa000000c700fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007300000001d8000000c70000005c00fffffffb0000000c00430061006d00650072006100000001d9000000c60000000000000000fb0000000a0049006d0061006700650000000263000001060000000000000000fb00000018004e0061007600690067006100740069006f006e0020003200000001eb000002700000012300ffffff000003c00000042000000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Tool Properties:
     collapsed: false
   Width: 960

@@ -427,6 +427,61 @@ class NavSnapshotServerNode(Node):
             borderValue=float(border_value),
         )
 
+    def _sample_grid_to_reference(
+        self, src_grid: OccupancyGrid, ref_grid: OccupancyGrid, border_value: float
+    ) -> np.ndarray:
+        src = self._grid_data_top_left(src_grid)
+        src_h = int(src_grid.info.height)
+        src_w = int(src_grid.info.width)
+        src_res = float(src_grid.info.resolution)
+        ref_h = int(ref_grid.info.height)
+        ref_w = int(ref_grid.info.width)
+        ref_res = float(ref_grid.info.resolution)
+
+        if (
+            src_h <= 0
+            or src_w <= 0
+            or src_res <= 0.0
+            or ref_h <= 0
+            or ref_w <= 0
+            or ref_res <= 0.0
+        ):
+            return np.full((ref_h, ref_w), border_value, dtype=np.float32)
+
+        ref_origin_x = float(ref_grid.info.origin.position.x)
+        ref_origin_y = float(ref_grid.info.origin.position.y)
+        cols = np.arange(ref_w, dtype=np.float32)
+        rows = np.arange(ref_h, dtype=np.float32)
+        xs = ref_origin_x + ((cols + 0.5) * ref_res)
+        ys = ref_origin_y + ((float(ref_h) - (rows + 0.5)) * ref_res)
+        x_tgt, y_tgt = np.meshgrid(xs, ys)
+
+        src_frame = src_grid.header.frame_id
+        ref_frame = ref_grid.header.frame_id
+        if src_frame and ref_frame and src_frame != ref_frame:
+            tf = self._lookup_transform(src_frame, ref_frame)
+            if tf is not None:
+                x_src, y_src = self._transform_2d_from_tf(tf, x_tgt, y_tgt)
+            else:
+                return np.full((ref_h, ref_w), border_value, dtype=np.float32)
+        else:
+            x_src = x_tgt
+            y_src = y_tgt
+
+        src_origin_x = float(src_grid.info.origin.position.x)
+        src_origin_y = float(src_grid.info.origin.position.y)
+        src_top_y = src_origin_y + (float(src_h) * src_res)
+        map_x = ((x_src - src_origin_x) / src_res) - 0.5
+        map_y = ((src_top_y - y_src) / src_res) - 0.5
+        return cv2.remap(
+            src.astype(np.float32),
+            map_x.astype(np.float32),
+            map_y.astype(np.float32),
+            interpolation=cv2.INTER_NEAREST,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=float(border_value),
+        )
+
     def _occupancy_to_color(self, occ: np.ndarray) -> np.ndarray:
         out = np.zeros((occ.shape[0], occ.shape[1], 3), dtype=np.uint8)
         out[:, :] = (120, 120, 120)
@@ -465,6 +520,24 @@ class NavSnapshotServerNode(Node):
             return None
         u = int(round(((x - min_x) / (max_x - min_x)) * float(size_px - 1)))
         v = int(round(((max_y - y) / (max_y - min_y)) * float(size_px - 1)))
+        return u, v
+
+    def _world_to_px_unbounded(
+        self, x: float, y: float, window: Dict[str, Any]
+    ) -> Optional[Tuple[int, int]]:
+        min_x = float(window["min_x"])
+        max_x = float(window["max_x"])
+        min_y = float(window["min_y"])
+        max_y = float(window["max_y"])
+        size_px = int(window["size_px"])
+        if size_px <= 1:
+            return None
+        span_x = max_x - min_x
+        span_y = max_y - min_y
+        if span_x <= 0.0 or span_y <= 0.0:
+            return None
+        u = int(round(((x - min_x) / span_x) * float(size_px - 1)))
+        v = int(round(((max_y - y) / span_y) * float(size_px - 1)))
         return u, v
 
     def _transform_points_2d(
@@ -644,7 +717,58 @@ class NavSnapshotServerNode(Node):
         pts_tgt = self._transform_points_2d(pts, src_frame, str(window["frame_id"]))
         if pts_tgt is None:
             return False
-        return self._draw_polyline(canvas, pts_tgt, window, color_bgr, thickness, closed=False)
+        return self._draw_path_segment_clipped(
+            canvas, pts_tgt, window, color_bgr, thickness
+        )
+
+    def _draw_path_segment_clipped(
+        self,
+        canvas: np.ndarray,
+        pts_xy: List[Tuple[float, float]],
+        window: Dict[str, Any],
+        color_bgr: Tuple[int, int, int],
+        thickness: int,
+    ) -> bool:
+        if len(pts_xy) < 2:
+            return False
+
+        size_px = int(window["size_px"])
+        if size_px <= 1:
+            return False
+        clip_rect = (0, 0, size_px, size_px)
+
+        drawn = False
+        for idx in range(len(pts_xy) - 1):
+            x0, y0 = pts_xy[idx]
+            x1, y1 = pts_xy[idx + 1]
+            if not (
+                np.isfinite(x0)
+                and np.isfinite(y0)
+                and np.isfinite(x1)
+                and np.isfinite(y1)
+            ):
+                continue
+
+            p0 = self._world_to_px_unbounded(float(x0), float(y0), window)
+            p1 = self._world_to_px_unbounded(float(x1), float(y1), window)
+            if p0 is None or p1 is None:
+                continue
+
+            ok, c0, c1 = cv2.clipLine(clip_rect, p0, p1)
+            if not ok:
+                continue
+
+            cv2.line(
+                canvas,
+                c0,
+                c1,
+                color_bgr,
+                thickness=thickness,
+                lineType=cv2.LINE_AA,
+            )
+            drawn = True
+
+        return drawn
 
     def _draw_global_inset(
         self,
@@ -661,20 +785,9 @@ class NavSnapshotServerNode(Node):
         global_img = self._occupancy_to_color(global_occ)
 
         if keepout_mask is not None:
-            h = int(global_costmap.info.height)
-            w = int(global_costmap.info.width)
-            info = global_costmap.info
-            extent_x = float(w) * float(info.resolution)
-            extent_y = float(h) * float(info.resolution)
-            window = {
-                "frame_id": global_costmap.header.frame_id or self.base_frame,
-                "size_px": h,
-                "min_x": float(info.origin.position.x),
-                "max_x": float(info.origin.position.x) + extent_x,
-                "min_y": float(info.origin.position.y),
-                "max_y": float(info.origin.position.y) + extent_y,
-            }
-            keep = self._sample_grid_to_window(keepout_mask, window, border_value=0.0)
+            keep = self._sample_grid_to_reference(
+                keepout_mask, global_costmap, border_value=0.0
+            )
             if keep.shape == global_occ.shape:
                 self._overlay_keepout(global_img, keep)
 

@@ -119,11 +119,12 @@ class ZonesManagerNode(Node):
         self.declare_parameter("mask_image_file", "")
         self.declare_parameter("mask_yaml_file", "")
 
-        self.declare_parameter("mask_origin_x", -150.0)
-        self.declare_parameter("mask_origin_y", -150.0)
-        self.declare_parameter("mask_width", 3000)
-        self.declare_parameter("mask_height", 3000)
-        self.declare_parameter("mask_resolution", 0.1)
+        self.declare_parameter("mask_origin_mode", "centered")
+        self.declare_parameter("mask_origin_x", 0.0)
+        self.declare_parameter("mask_origin_y", 0.0)
+        self.declare_parameter("mask_width", 500)
+        self.declare_parameter("mask_height", 500)
+        self.declare_parameter("mask_resolution", 0.5)
 
         self.fromll_service = str(self.get_parameter("fromll_service").value)
         self.fromll_service_fallback = str(
@@ -157,6 +158,7 @@ class ZonesManagerNode(Node):
         self.degrade_min_cost = int(self.get_parameter("degrade_min_cost").value)
         self.degrade_use_l2 = bool(self.get_parameter("degrade_use_l2").value)
 
+        self.mask_origin_mode = str(self.get_parameter("mask_origin_mode").value).strip().lower()
         self.mask_origin_x = float(self.get_parameter("mask_origin_x").value)
         self.mask_origin_y = float(self.get_parameter("mask_origin_y").value)
         self.mask_width = int(self.get_parameter("mask_width").value)
@@ -266,17 +268,29 @@ class ZonesManagerNode(Node):
         return default_dir
 
     def _sanitize_mask_grid_params(self) -> None:
+        if self.mask_origin_mode not in ("centered", "explicit"):
+            self.get_logger().warning(
+                f"mask_origin_mode='{self.mask_origin_mode}' invalid; forcing 'centered'"
+            )
+            self.mask_origin_mode = "centered"
         if self.mask_width <= 0:
-            self.get_logger().warning(f"mask_width={self.mask_width} invalid; forcing 3000")
-            self.mask_width = 3000
+            self.get_logger().warning(f"mask_width={self.mask_width} invalid; forcing 500")
+            self.mask_width = 500
         if self.mask_height <= 0:
-            self.get_logger().warning(f"mask_height={self.mask_height} invalid; forcing 3000")
-            self.mask_height = 3000
+            self.get_logger().warning(f"mask_height={self.mask_height} invalid; forcing 500")
+            self.mask_height = 500
         if self.mask_resolution <= 0.0 or not np.isfinite(self.mask_resolution):
             self.get_logger().warning(
-                f"mask_resolution={self.mask_resolution} invalid; forcing 0.1"
+                f"mask_resolution={self.mask_resolution} invalid; forcing 0.5"
             )
-            self.mask_resolution = 0.1
+            self.mask_resolution = 0.5
+
+    def _effective_mask_origin(self) -> Tuple[float, float]:
+        if self.mask_origin_mode == "centered":
+            half_extent_x = 0.5 * float(self.mask_width) * float(self.mask_resolution)
+            half_extent_y = 0.5 * float(self.mask_height) * float(self.mask_resolution)
+            return (-half_extent_x, -half_extent_y)
+        return (float(self.mask_origin_x), float(self.mask_origin_y))
 
     def _sanitize_degrade_params(self) -> None:
         if self.degrade_radius_m < 0.0:
@@ -309,10 +323,11 @@ class ZonesManagerNode(Node):
         info.resolution = float(self.mask_resolution)
         info.width = int(self.mask_width)
         info.height = int(self.mask_height)
+        effective_origin_x, effective_origin_y = self._effective_mask_origin()
 
         origin = Pose()
-        origin.position.x = float(self.mask_origin_x)
-        origin.position.y = float(self.mask_origin_y)
+        origin.position.x = float(effective_origin_x)
+        origin.position.y = float(effective_origin_y)
         origin.position.z = 0.0
         origin.orientation = Quaternion(x=0.0, y=0.0, z=0.0, w=1.0)
         info.origin = origin
@@ -504,11 +519,12 @@ class ZonesManagerNode(Node):
             image_ref = str(self.mask_image_file.relative_to(self.mask_yaml_file.parent))
         except Exception:
             image_ref = str(self.mask_image_file)
+        effective_origin_x, effective_origin_y = self._effective_mask_origin()
         yaml_data = build_scale_mask_yaml_data(
             image_ref=image_ref,
             resolution=float(self.mask_resolution),
-            origin_x=float(self.mask_origin_x),
-            origin_y=float(self.mask_origin_y),
+            origin_x=float(effective_origin_x),
+            origin_y=float(effective_origin_y),
         )
         try:
             with self.mask_yaml_file.open("w", encoding="utf-8") as handle:

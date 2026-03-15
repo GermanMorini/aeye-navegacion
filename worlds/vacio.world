@@ -29,8 +29,8 @@
 
     <spherical_coordinates>
       <surface_model>EARTH_WGS84</surface_model>
-      <latitude_deg>-31.421914</latitude_deg>
-      <longitude_deg>-64.102516</longitude_deg>
+      <latitude_deg>-31.42948945234063</latitude_deg>
+      <longitude_deg>-64.10382880072703</longitude_deg>
       <elevation>0.0</elevation>
     </spherical_coordinates>
 
@@ -52,11 +52,11 @@
       <static>1</static>
       <link name="link">
         <collision name="collision">
+          <pose>0 0 -0.05 0 0 0</pose>
           <geometry>
-            <plane>
-              <normal>0 0 1</normal>
-              <size>100 100</size>
-            </plane>
+            <box>
+              <size>2000 2000 0.1</size>
+            </box>
           </geometry>
           <max_contacts>10</max_contacts>
         </collision>
@@ -64,7 +64,7 @@
           <geometry>
             <plane>
               <normal>0 0 1</normal>
-              <size>100 100</size>
+              <size>2000 2000</size>
             </plane>
           </geometry>
           <material>
@@ -76,7 +76,7 @@
       </link>
     </model>
 
-    <physics name="3ms" type="ode">
+    <physics name="3ms" type="dart">
       <max_step_size>0.003</max_step_size>
       <real_time_factor>1</real_time_factor>
     </physics>

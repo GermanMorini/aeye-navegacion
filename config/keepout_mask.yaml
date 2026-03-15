@@ -1,9 +1,9 @@
 image: keepout_mask.pgm
 mode: scale
-resolution: 0.1
+resolution: 0.5
 origin:
-- -150.0
-- -150.0
+- -125.0
+- -125.0
 - 0.0
 negate: 0
 occupied_thresh: 1.0
