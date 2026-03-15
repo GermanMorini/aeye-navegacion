@@ -1,0 +1,64 @@
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <RecoveryNode number_of_retries="3" name="NavigateRecovery">
+      <Parallel
+        name="NavigateWithRouteTracking"
+        success_threshold="2"
+        failure_threshold="1">
+        <PipelineSequence>
+          <RateController hz="1.0" name="RoutePlannerRateController">
+            <RecoveryNode number_of_retries="1" name="RecoveryComputeRoute">
+              <Fallback name="FallbackComputeRoute">
+                <ReactiveSequence name="CheckIfNewRouteNeeded">
+                  <Inverter>
+                    <GlobalUpdatedGoal/>
+                  </Inverter>
+                  <IsPathValid path="{path}"/>
+                </ReactiveSequence>
+                <ComputeRoute
+                  goal="{goal}"
+                  use_poses="true"
+                  path="{path}"
+                  route="{route}"/>
+              </Fallback>
+              <Wait name="WaitRouteRetryContext" wait_duration="1"/>
+            </RecoveryNode>
+          </RateController>
+          <SmoothPath
+            unsmoothed_path="{path}"
+            smoothed_path="{smoothed_path}"
+            smoother_id="Constrained"
+            max_smoothing_duration="0.35"
+            check_for_collisions="true"/>
+          <RecoveryNode number_of_retries="1" name="RecoveryFollowRoutePath">
+            <FollowPath path="{smoothed_path}" controller_id="FollowPath"/>
+            <Wait name="WaitLocalRetryContext" wait_duration="1"/>
+          </RecoveryNode>
+        </PipelineSequence>
+        <RateController hz="1.0" name="RouteTrackerRateController">
+          <RecoveryNode number_of_retries="1" name="RecoveryComputeAndTrackRoute">
+            <ComputeAndTrackRoute
+              goal="{goal}"
+              use_poses="true"
+              path="{path}"
+              route="{route}"
+              rerouted="{rerouted}"/>
+            <Wait name="WaitTrackRouteRetryContext" wait_duration="1"/>
+          </RecoveryNode>
+        </RateController>
+      </Parallel>
+      <ReactiveFallback name="FallbackRecoveries">
+        <GoalUpdated/>
+        <Sequence name="WaitAndReplan">
+          <BackUp backup_dist="2.0" backup_speed="1.2"/>
+          <Wait name="WaitRecovery" wait_duration="5"/>
+          <ComputeRoute
+            goal="{goal}"
+            use_poses="true"
+            path="{path}"
+            route="{route}"/>
+        </Sequence>
+      </ReactiveFallback>
+    </RecoveryNode>
+  </BehaviorTree>
+</root>

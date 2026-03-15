@@ -1,23 +1,15 @@
+import json
 import math
 import threading
 import time
 from functools import partial
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-import numpy as np
 import rclpy
 from action_msgs.msg import GoalStatus
 from geographic_msgs.msg import GeoPoint
-from geometry_msgs.msg import PoseStamped, Quaternion, Twist
-from nav2_msgs.action import FollowWaypoints, NavigateThroughPoses
-from nav2_msgs.msg import CollisionMonitorState
-from rclpy.action import ActionClient
-from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
-from rclpy.executors import MultiThreadedExecutor
-from rclpy.node import Node
-from robot_localization.srv import FromLL
-from sensor_msgs.msg import NavSatFix
-
+from geometry_msgs.msg import Twist
 from interfaces.msg import CmdVelFinal, NavTelemetry
 from interfaces.srv import (
     BrakeNav,
@@ -26,6 +18,20 @@ from interfaces.srv import (
     SetManualMode,
     SetNavGoalLL,
 )
+from nav2_msgs.action import ComputeAndTrackRoute, FollowPath
+from nav2_msgs.msg import CollisionMonitorState
+from nav2_msgs.srv import SetRouteGraph
+from rclpy.action import ActionClient
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.node import Node
+from robot_localization.srv import FromLL
+from sensor_msgs.msg import NavSatFix
+
+
+MODE_MANUAL = "manual"
+MODE_AUTO_LOOP = "auto_loop"
+MODE_AUTO_P2P = "auto_p2p"
 
 
 class NavCommandServerNode(Node):
@@ -35,36 +41,63 @@ class NavCommandServerNode(Node):
         self.declare_parameter("fromll_service", "/fromLL")
         self.declare_parameter("fromll_service_fallback", "/navsat_transform/fromLL")
         self.declare_parameter("fromll_wait_timeout_s", 2.0)
-        self.declare_parameter("fromll_call_retries", 4)
+        self.declare_parameter("fromll_call_timeout_s", 2.5)
+        self.declare_parameter("fromll_call_retries", 2)
         self.declare_parameter("fromll_retry_delay_s", 0.15)
+
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("gps_topic", "/gps/fix")
         self.declare_parameter("cmd_vel_safe_topic", "/cmd_vel_safe")
+        self.declare_parameter("teleop_cmd_topic", "/cmd_vel_teleop")
         self.declare_parameter("cmd_vel_final_topic", "/cmd_vel_final")
         self.declare_parameter("collision_monitor_state_topic", "/collision_monitor_state")
+
         self.declare_parameter("brake_topic", "/cmd_vel_safe")
         self.declare_parameter("manual_cmd_topic", "/cmd_vel_safe")
-        self.declare_parameter("teleop_cmd_topic", "/cmd_vel_teleop")
+
         self.declare_parameter("brake_publish_count", 5)
         self.declare_parameter("brake_publish_interval_s", 0.1)
+        self.declare_parameter("brake_pct_on_stop", 100)
+
         self.declare_parameter("manual_cmd_timeout_s", 0.4)
         self.declare_parameter("manual_watchdog_hz", 10.0)
+
         self.declare_parameter("nav_telemetry_hz", 5.0)
         self.declare_parameter("telemetry_topic", "/nav_command_server/telemetry")
+
         self.declare_parameter("set_goal_service", "/nav_command_server/set_goal_ll")
         self.declare_parameter("cancel_goal_service", "/nav_command_server/cancel_goal")
         self.declare_parameter("brake_service", "/nav_command_server/brake")
-        self.declare_parameter("set_manual_mode_service", "/nav_command_server/set_manual_mode")
+        self.declare_parameter(
+            "set_manual_mode_service", "/nav_command_server/set_manual_mode"
+        )
         self.declare_parameter("get_state_service", "/nav_command_server/get_state")
-        self.declare_parameter("follow_waypoints_action", "follow_waypoints")
-        self.declare_parameter("navigate_through_poses_action", "navigate_through_poses")
+
+        self.declare_parameter("navigate_to_pose_action", "navigate_to_pose")
+        self.declare_parameter(
+            "compute_and_track_route_action", "compute_and_track_route"
+        )
+        self.declare_parameter("follow_path_action", "follow_path")
+        self.declare_parameter("set_route_graph_service", "/route_server/set_route_graph")
+
+        self.declare_parameter("route_first_path_timeout_s", 2.0)
+        self.declare_parameter(
+            "route_graph_temp_filepath", "/tmp/nav_command_server_route_graph.geojson"
+        )
+        self.declare_parameter("route_nav_to_pose_bt_xml", "")
+        self.declare_parameter("legacy_nav_to_pose_bt_xml", "")
+        self.declare_parameter("follow_path_controller_id", "")
+        self.declare_parameter("follow_path_goal_checker_id", "")
 
         self.fromll_service = str(self.get_parameter("fromll_service").value)
         self.fromll_service_fallback = str(
             self.get_parameter("fromll_service_fallback").value
         )
         self.fromll_wait_timeout_s = max(
-            0.1, float(self.get_parameter("fromll_wait_timeout_s").value)
+            0.05, float(self.get_parameter("fromll_wait_timeout_s").value)
+        )
+        self.fromll_call_timeout_s = max(
+            0.1, float(self.get_parameter("fromll_call_timeout_s").value)
         )
         self.fromll_call_retries = max(
             1, int(self.get_parameter("fromll_call_retries").value)
@@ -72,28 +105,38 @@ class NavCommandServerNode(Node):
         self.fromll_retry_delay_s = max(
             0.0, float(self.get_parameter("fromll_retry_delay_s").value)
         )
+
         self.map_frame = str(self.get_parameter("map_frame").value)
         self.gps_topic = str(self.get_parameter("gps_topic").value)
         self.cmd_vel_safe_topic = str(self.get_parameter("cmd_vel_safe_topic").value)
+        self.teleop_cmd_topic = str(self.get_parameter("teleop_cmd_topic").value)
         self.cmd_vel_final_topic = str(self.get_parameter("cmd_vel_final_topic").value)
         self.collision_monitor_state_topic = str(
             self.get_parameter("collision_monitor_state_topic").value
         )
-        self.brake_topic = str(self.get_parameter("brake_topic").value)
-        self.manual_cmd_topic = str(self.get_parameter("manual_cmd_topic").value)
-        self.teleop_cmd_topic = str(self.get_parameter("teleop_cmd_topic").value)
-        self.brake_publish_count = max(1, int(self.get_parameter("brake_publish_count").value))
-        self.brake_publish_interval_s = max(
-            0.0, float(self.get_parameter("brake_publish_interval_s").value)
+
+        self.brake_publish_count = max(
+            1, int(self.get_parameter("brake_publish_count").value)
         )
+        self.brake_publish_interval_s = max(
+            0.01, float(self.get_parameter("brake_publish_interval_s").value)
+        )
+        self.brake_pct_on_stop = max(
+            0, min(100, int(self.get_parameter("brake_pct_on_stop").value))
+        )
+
         self.manual_cmd_timeout_s = max(
-            0.1, float(self.get_parameter("manual_cmd_timeout_s").value)
+            0.05, float(self.get_parameter("manual_cmd_timeout_s").value)
         )
         self.manual_watchdog_hz = max(
             1.0, float(self.get_parameter("manual_watchdog_hz").value)
         )
-        self.nav_telemetry_hz = max(1.0, float(self.get_parameter("nav_telemetry_hz").value))
+
+        self.nav_telemetry_hz = max(
+            1.0, float(self.get_parameter("nav_telemetry_hz").value)
+        )
         self.telemetry_topic = str(self.get_parameter("telemetry_topic").value)
+
         self.set_goal_service = str(self.get_parameter("set_goal_service").value)
         self.cancel_goal_service = str(self.get_parameter("cancel_goal_service").value)
         self.brake_service = str(self.get_parameter("brake_service").value)
@@ -101,37 +144,72 @@ class NavCommandServerNode(Node):
             self.get_parameter("set_manual_mode_service").value
         )
         self.get_state_service = str(self.get_parameter("get_state_service").value)
-        self.follow_waypoints_action = str(
-            self.get_parameter("follow_waypoints_action").value
+
+        self.compute_and_track_route_action = str(
+            self.get_parameter("compute_and_track_route_action").value
         )
-        self.navigate_through_poses_action = str(
-            self.get_parameter("navigate_through_poses_action").value
+        self.follow_path_action = str(self.get_parameter("follow_path_action").value)
+        self.set_route_graph_service = str(
+            self.get_parameter("set_route_graph_service").value
+        )
+        self.route_first_path_timeout_s = max(
+            0.1, float(self.get_parameter("route_first_path_timeout_s").value)
+        )
+        self.route_graph_temp_filepath = Path(
+            str(self.get_parameter("route_graph_temp_filepath").value)
+        )
+        self.follow_path_controller_id = str(
+            self.get_parameter("follow_path_controller_id").value
+        )
+        self.follow_path_goal_checker_id = str(
+            self.get_parameter("follow_path_goal_checker_id").value
         )
 
         self._lock = threading.Lock()
-        self._current_goal_handle = None
-        self._manual_enabled = False
-        self._last_manual_cmd = CmdVelFinal()
-        self._last_manual_cmd_time: Optional[float] = None
-        self._manual_watchdog_stop_sent = False
-        self._last_cmd_vel_safe: Optional[Twist] = None
-        self._is_navigating = False
-        self._auto_mode = "idle"
-        self._collision_stop_active = False
-        self._last_robot_pose: Optional[Dict[str, float]] = None
-        self._last_telemetry_sent: Optional[float] = None
-        self._loop_waypoint_poses: List[PoseStamped] = []
-        self._loop_original_poses: List[PoseStamped] = []
-        self._loop_restart_poses: List[PoseStamped] = []
-        self._loop_enabled = False
 
-        # Service callbacks are mutually exclusive; clients/actions are reentrant to avoid
-        # deadlocks when a service callback waits for a client future.
+        self._mode = MODE_AUTO_P2P
+        self._goal_active = False
+        self._loop_enabled = False
+        self._manual_enabled = False
+        self._manual_linear_x_cmd = 0.0
+        self._manual_angular_z_cmd = 0.0
+        self._manual_cmd_last_monotonic: Optional[float] = None
+        self._manual_watchdog_last_brake: Optional[float] = None
+
+        self._cmd_vel_available = False
+        self._cmd_vel_linear_x = 0.0
+        self._cmd_vel_angular_z = 0.0
+
+        self._robot_lat = float("nan")
+        self._robot_lon = float("nan")
+
+        self._collision_stop_active = False
+        self._last_collision_brake_monotonic: Optional[float] = None
+
+        self._mission_token = 0
+        self._initial_segments: List[Tuple[int, int]] = []
+        self._loop_segments: List[Tuple[int, int]] = []
+        self._initial_cursor = 0
+        self._loop_cursor = 0
+        self._segment_started_monotonic: Optional[float] = None
+        self._follow_path_started = False
+        self._follow_goal_seq = 0
+        self._active_leg_seq = 0
+        self._active_leg_closed = False
+        self._active_segment: Optional[Tuple[int, int]] = None
+        self._last_path_signature: Optional[Tuple[int, int, int, int, int]] = None
+
+        self._compute_goal_handle = None
+        self._follow_goal_handle = None
+        self._last_fromll_error: Optional[str] = None
+
         self._service_group = MutuallyExclusiveCallbackGroup()
-        self._client_group = ReentrantCallbackGroup()
+        self._client_action_group = ReentrantCallbackGroup()
 
         self._fromll_client = self.create_client(
-            FromLL, self.fromll_service, callback_group=self._client_group
+            FromLL,
+            self.fromll_service,
+            callback_group=self._client_action_group,
         )
         self._fromll_fallback_client = None
         if self.fromll_service_fallback and (
@@ -140,30 +218,63 @@ class NavCommandServerNode(Node):
             self._fromll_fallback_client = self.create_client(
                 FromLL,
                 self.fromll_service_fallback,
-                callback_group=self._client_group,
+                callback_group=self._client_action_group,
             )
-        self._active_fromll_name: Optional[str] = None
         self._active_fromll_client: Optional[Any] = None
-        self._last_fromll_error: Optional[str] = None
-        self._follow_waypoints_client = ActionClient(
-            self,
-            FollowWaypoints,
-            self.follow_waypoints_action,
-            callback_group=self._client_group,
-        )
-        self._navigate_through_poses_client = ActionClient(
-            self,
-            NavigateThroughPoses,
-            self.navigate_through_poses_action,
-            callback_group=self._client_group,
+        self._active_fromll_service_name: Optional[str] = None
+
+        self._set_route_graph_client = self.create_client(
+            SetRouteGraph,
+            self.set_route_graph_service,
+            callback_group=self._client_action_group,
         )
 
+        self._compute_route_client = ActionClient(
+            self,
+            ComputeAndTrackRoute,
+            self.compute_and_track_route_action,
+            callback_group=self._client_action_group,
+        )
+        self._follow_path_client = ActionClient(
+            self,
+            FollowPath,
+            self.follow_path_action,
+            callback_group=self._client_action_group,
+        )
+
+        self._gps_sub = self.create_subscription(
+            NavSatFix, self.gps_topic, self._on_gps_fix, 10
+        )
+        self._cmd_vel_safe_sub = self.create_subscription(
+            Twist,
+            self.cmd_vel_safe_topic,
+            self._on_cmd_vel_safe,
+            10,
+        )
+        self._teleop_sub = self.create_subscription(
+            CmdVelFinal,
+            self.teleop_cmd_topic,
+            self._on_teleop_cmd,
+            10,
+        )
+        self._collision_sub = self.create_subscription(
+            CollisionMonitorState,
+            self.collision_monitor_state_topic,
+            self._on_collision_state,
+            10,
+        )
+
+        self._cmd_vel_final_pub = self.create_publisher(
+            CmdVelFinal,
+            self.cmd_vel_final_topic,
+            10,
+        )
         self._telemetry_pub = self.create_publisher(NavTelemetry, self.telemetry_topic, 10)
 
         self._set_goal_srv = self.create_service(
             SetNavGoalLL,
             self.set_goal_service,
-            self._on_set_goal,
+            self._on_set_goal_ll,
             callback_group=self._service_group,
         )
         self._cancel_goal_srv = self.create_service(
@@ -178,7 +289,7 @@ class NavCommandServerNode(Node):
             self._on_brake,
             callback_group=self._service_group,
         )
-        self._set_manual_mode_srv = self.create_service(
+        self._set_manual_srv = self.create_service(
             SetManualMode,
             self.set_manual_mode_service,
             self._on_set_manual_mode,
@@ -191,751 +302,989 @@ class NavCommandServerNode(Node):
             callback_group=self._service_group,
         )
 
-        self._cmd_vel_final_pub = self.create_publisher(
-            CmdVelFinal, self.cmd_vel_final_topic, 10
-        )
-        self._gps_sub = self.create_subscription(NavSatFix, self.gps_topic, self._on_gps_fix, 10)
-        self._cmd_vel_sub = self.create_subscription(
-            Twist, self.cmd_vel_safe_topic, self._on_cmd_vel_safe, 10
-        )
-        self._teleop_cmd_sub = self.create_subscription(
-            CmdVelFinal, self.teleop_cmd_topic, self._on_teleop_cmd, 10
-        )
-        self._collision_state_sub = self.create_subscription(
-            CollisionMonitorState,
-            self.collision_monitor_state_topic,
-            self._on_collision_monitor_state,
-            10,
-        )
-
         self._manual_watchdog_timer = self.create_timer(
-            1.0 / float(self.manual_watchdog_hz), self._manual_watchdog_tick
+            1.0 / self.manual_watchdog_hz, self._manual_watchdog_tick
         )
-        self.get_logger().info(
-            "Nav command server ready "
-            f"(set_goal={self.set_goal_service}, cancel={self.cancel_goal_service}, "
-            f"brake={self.brake_service}, telemetry={self.telemetry_topic}, "
-            f"teleop_topic={self.teleop_cmd_topic}, "
-            f"cmd_vel_final_topic={self.cmd_vel_final_topic}, "
-            f"follow_waypoints_action={self.follow_waypoints_action}, "
-            f"navigate_through_poses_action={self.navigate_through_poses_action})"
-        )
-        self.get_logger().info(
-            "Callback groups configured (services=MutuallyExclusive, clients=Reentrant)"
+        self._telemetry_timer = self.create_timer(
+            1.0 / self.nav_telemetry_hz, self._publish_telemetry
         )
 
-    def _wait_for_future(self, future: Any, timeout_sec: float) -> Optional[Any]:
-        start = time.monotonic()
+        self.get_logger().info(
+            "nav_command_server ready "
+            f"(goal_srv={self.set_goal_service}, cancel_srv={self.cancel_goal_service}, "
+            f"manual_srv={self.set_manual_mode_service}, telemetry={self.telemetry_topic}, "
+            f"compute_route_action={self.compute_and_track_route_action}, "
+            f"follow_path_action={self.follow_path_action}, route_graph_srv={self.set_route_graph_service}, "
+            f"fromll_retries={self.fromll_call_retries}, fromll_timeout_s={self.fromll_call_timeout_s:.2f})"
+        )
+
+    def _wait_for_future(self, future: Any, timeout_s: float) -> Optional[Any]:
+        started = time.monotonic()
         while rclpy.ok():
             if future.done():
                 return future.result()
-            if (time.monotonic() - start) >= timeout_sec:
+            if (time.monotonic() - started) >= timeout_s:
                 return None
             time.sleep(0.01)
         return None
 
-    def _call_from_ll(self, lat: float, lon: float) -> Optional[Tuple[float, float, float]]:
-        for attempt in range(self.fromll_call_retries):
-            fromll_client = self._resolve_fromll_client()
-            if fromll_client is None:
-                if attempt + 1 < self.fromll_call_retries and self.fromll_retry_delay_s > 0.0:
-                    time.sleep(self.fromll_retry_delay_s)
-                continue
+    def _invalidate_active_fromll(self) -> None:
+        self._active_fromll_client = None
+        self._active_fromll_service_name = None
 
-            req = FromLL.Request()
-            req.ll_point = GeoPoint(latitude=lat, longitude=lon, altitude=0.0)
-            future = fromll_client.call_async(req)
-            try:
-                res = self._wait_for_future(future, timeout_sec=2.5)
-            except Exception as exc:
-                self._last_fromll_error = str(exc)
-                if attempt + 1 < self.fromll_call_retries and self.fromll_retry_delay_s > 0.0:
-                    time.sleep(self.fromll_retry_delay_s)
-                continue
-            if res is None:
-                self._last_fromll_error = "timeout waiting fromLL response"
-                if attempt + 1 < self.fromll_call_retries and self.fromll_retry_delay_s > 0.0:
-                    time.sleep(self.fromll_retry_delay_s)
-                continue
+    def _resolve_fromll_client(
+        self,
+        *,
+        prefer_fallback: bool = False,
+    ) -> Optional[Tuple[Any, str]]:
+        candidates: List[Tuple[Any, str, float]] = []
 
-            self._last_fromll_error = None
-            return (float(res.map_point.x), float(res.map_point.y), float(res.map_point.z))
+        if (
+            (not prefer_fallback)
+            and self._active_fromll_client is not None
+            and self._active_fromll_service_name
+        ):
+            candidates.append(
+                (self._active_fromll_client, self._active_fromll_service_name, 0.05)
+            )
 
-        self.get_logger().warning(
-            "fromLL conversion failed "
-            f"(lat={lat:.8f}, lon={lon:.8f}, reason={self._last_fromll_error or 'unknown'})"
-        )
-        return None
+        primary_timeout = min(0.5, self.fromll_wait_timeout_s)
+        primary_client = self._fromll_client
+        primary_name = self.fromll_service
+        fallback_timeout = min(0.5, self.fromll_wait_timeout_s)
+        fallback_client = self._fromll_fallback_client
+        fallback_name = self.fromll_service_fallback
 
-    def _resolve_fromll_client(self) -> Optional[Any]:
-        candidates: list[tuple[Any, str, float]] = []
-        if self._active_fromll_client is not None and self._active_fromll_name is not None:
-            candidates.append((self._active_fromll_client, self._active_fromll_name, 0.05))
+        if prefer_fallback and fallback_client is not None:
+            candidates.append((fallback_client, fallback_name, fallback_timeout))
+            candidates.append((primary_client, primary_name, primary_timeout))
+        else:
+            candidates.append((primary_client, primary_name, primary_timeout))
+            if fallback_client is not None:
+                candidates.append((fallback_client, fallback_name, fallback_timeout))
 
-        candidates.append((self._fromll_client, self.fromll_service, self.fromll_wait_timeout_s))
-        fallback = self._fromll_fallback_client
-        if fallback is not None:
-            candidates.append((fallback, self.fromll_service_fallback, self.fromll_wait_timeout_s))
+        # Last chance: active endpoint even if fallback is preferred.
+        if (
+            prefer_fallback
+            and self._active_fromll_client is not None
+            and self._active_fromll_service_name
+        ):
+            candidates.append(
+                (self._active_fromll_client, self._active_fromll_service_name, 0.05)
+            )
 
         seen = set()
-        for client, service_name, wait_s in candidates:
+        for client, service_name, timeout_s in candidates:
             key = (id(client), service_name)
             if key in seen:
                 continue
             seen.add(key)
-            if client.wait_for_service(timeout_sec=wait_s):
+            if client.wait_for_service(timeout_sec=timeout_s):
+                if self._active_fromll_service_name != service_name:
+                    self.get_logger().info(f"Using fromLL service: {service_name}")
                 self._active_fromll_client = client
-                self._maybe_log_active_fromll(service_name)
-                return client
+                self._active_fromll_service_name = service_name
+                return client, service_name
 
-        self.get_logger().warning(
-            "fromLL service unavailable "
-            f"(tried '{self.fromll_service}'"
-            + (
-                f" and '{self.fromll_service_fallback}'"
-                if self._fromll_fallback_client is not None
-                else ""
-            )
-            + ")"
-        )
-        self._last_fromll_error = "fromLL service unavailable"
+        self._invalidate_active_fromll()
         return None
 
-    def _maybe_log_active_fromll(self, service_name: str) -> None:
-        if self._active_fromll_name == service_name:
-            return
-        self._active_fromll_name = service_name
-        self.get_logger().info(f"Using fromLL service: {service_name}")
+    def _from_ll_to_map(self, lat: float, lon: float) -> Optional[Tuple[float, float]]:
+        last_error = "fromLL conversion failed"
 
-    def _yaw_to_quaternion(self, yaw_deg: float) -> Quaternion:
-        yaw_rad = math.radians(yaw_deg)
-        half_yaw = yaw_rad / 2.0
-        qz = math.sin(half_yaw)
-        qw = math.cos(half_yaw)
-        return Quaternion(x=0.0, y=0.0, z=qz, w=qw)
+        for attempt in range(self.fromll_call_retries):
+            prefer_fallback = (
+                (attempt % 2 == 1) and (self._fromll_fallback_client is not None)
+            )
+            resolved = self._resolve_fromll_client(prefer_fallback=prefer_fallback)
+            if resolved is None:
+                last_error = (
+                    "fromLL service unavailable "
+                    f"(tried '{self.fromll_service}'"
+                    + (
+                        f" and '{self.fromll_service_fallback}'"
+                        if self._fromll_fallback_client is not None
+                        else ""
+                    )
+                    + ")"
+                )
+            else:
+                client, service_name = resolved
+                req = FromLL.Request()
+                req.ll_point = GeoPoint(
+                    latitude=float(lat),
+                    longitude=float(lon),
+                    altitude=0.0,
+                )
+                future = client.call_async(req)
+                try:
+                    response = self._wait_for_future(future, self.fromll_call_timeout_s)
+                except Exception as exc:
+                    last_error = (
+                        f"fromLL request failed on '{service_name}' "
+                        f"(attempt {attempt + 1}/{self.fromll_call_retries}): {exc}"
+                    )
+                    self._invalidate_active_fromll()
+                else:
+                    if response is None:
+                        last_error = (
+                            f"timeout waiting fromLL response on '{service_name}' "
+                            f"(attempt {attempt + 1}/{self.fromll_call_retries}, "
+                            f"timeout_s={self.fromll_call_timeout_s:.2f})"
+                        )
+                        self._invalidate_active_fromll()
+                    else:
+                        if attempt > 0:
+                            self.get_logger().info(
+                                "fromLL conversion recovered "
+                                f"after {attempt + 1} attempts using '{service_name}'"
+                            )
+                        self._last_fromll_error = None
+                        return float(response.map_point.x), float(response.map_point.y)
 
-    def _cmd_vel_safe_payload_locked(self) -> Dict[str, Any]:
-        if self._last_cmd_vel_safe is None:
-            return {"available": False, "linear_x": 0.0, "angular_z": 0.0}
-        msg = self._last_cmd_vel_safe
-        return {
-            "available": True,
-            "linear_x": float(msg.linear.x),
-            "angular_z": float(msg.angular.z),
-        }
+            if (attempt + 1) < self.fromll_call_retries and self.fromll_retry_delay_s > 0.0:
+                time.sleep(self.fromll_retry_delay_s)
 
-    def _manual_control_payload_locked(self) -> Dict[str, Any]:
-        return {
-            "enabled": bool(self._manual_enabled),
-            "linear_x_cmd": float(self._last_manual_cmd.twist.linear.x),
-            "angular_z_cmd": float(self._last_manual_cmd.twist.angular.z),
-        }
+        self._last_fromll_error = last_error
+        self.get_logger().warning(
+            "fromLL conversion failed "
+            f"(lat={lat:.8f}, lon={lon:.8f}, attempts={self.fromll_call_retries}): "
+            f"{last_error}"
+        )
+        return None
 
-    @staticmethod
-    def _build_cmd_vel_final(linear_x: float, angular_z: float, brake_pct: int) -> CmdVelFinal:
+    def _publish_cmd_final(self, linear_x: float, angular_z: float, brake_pct: int) -> None:
         msg = CmdVelFinal()
         msg.twist.linear.x = float(linear_x)
         msg.twist.angular.z = float(angular_z)
-        msg.brake_pct = int(max(0, min(100, int(brake_pct))))
-        return msg
-
-    def _publish_cmd_vel_final(self, msg: CmdVelFinal) -> None:
+        msg.brake_pct = max(0, min(100, int(brake_pct)))
         self._cmd_vel_final_pub.publish(msg)
 
-    def _publish_stop(self, brake_pct: int) -> None:
-        self._publish_cmd_vel_final(
-            self._build_cmd_vel_final(linear_x=0.0, angular_z=0.0, brake_pct=brake_pct)
-        )
+    def _publish_brake_sequence(self, reason: str) -> None:
+        self.get_logger().warning(f"Applying brake sequence ({reason})")
 
-    def _publish_brake_sequence(self, brake_pct: int) -> None:
-        for index in range(self.brake_publish_count):
-            self._publish_stop(brake_pct=brake_pct)
-            if index + 1 < self.brake_publish_count and self.brake_publish_interval_s > 0.0:
-                time.sleep(self.brake_publish_interval_s)
+        def _run() -> None:
+            for idx in range(self.brake_publish_count):
+                self._publish_cmd_final(0.0, 0.0, self.brake_pct_on_stop)
+                if idx + 1 < self.brake_publish_count:
+                    time.sleep(self.brake_publish_interval_s)
 
-    def _activate_manual_takeover_if_needed(self) -> None:
-        with self._lock:
-            already_manual = bool(self._manual_enabled)
-        if already_manual:
+        thread = threading.Thread(target=_run, daemon=True)
+        thread.start()
+
+    def _cancel_goal_handle(self, handle: Any, label: str) -> None:
+        if handle is None:
             return
-        ok, err, _ = self.set_manual_mode(True)
-        if not ok:
-            self.get_logger().warning(f"Manual takeover failed: {err}")
+        try:
+            future = handle.cancel_goal_async()
+            self._wait_for_future(future, 0.6)
+        except Exception as exc:
+            self.get_logger().warning(f"cancel {label} failed: {exc}")
 
-    def _cancel_goal_for_manual_takeover_async(self) -> None:
-        def _run_cancel() -> None:
-            cancel_ok, cancel_msg = self.cancel_current_goal(clear_loop_config=True)
-            if not cancel_ok and cancel_msg != "no active goal":
-                self.get_logger().warning(
-                    f"Manual mode: failed to cancel goal ({cancel_msg}), continuing"
-                )
-
-        cancel_thread = threading.Thread(
-            target=_run_cancel,
-            daemon=True,
-            name="nav_cmd_manual_cancel",
-        )
-        cancel_thread.start()
-
-    def _fill_get_state_response(self, response: GetNavState.Response) -> None:
+    def _cancel_navigation_actions(self, reason: str) -> None:
         with self._lock:
-            goal_active = self._is_navigating
-            cmd_vel_safe = self._cmd_vel_safe_payload_locked()
-            manual_control = self._manual_control_payload_locked()
-            robot_pose = self._last_robot_pose
+            compute_handle = self._compute_goal_handle
+            follow_handle = self._follow_goal_handle
+            self._compute_goal_handle = None
+            self._follow_goal_handle = None
+            self._follow_path_started = False
+            self._segment_started_monotonic = None
+            self._active_leg_seq = 0
+            self._active_leg_closed = False
+            self._active_segment = None
+            self._last_path_signature = None
+        if compute_handle is not None:
+            self._cancel_goal_handle(compute_handle, "compute_and_track_route")
+        if follow_handle is not None:
+            self._cancel_goal_handle(follow_handle, "follow_path")
+        if self.context.ok():
+            self.get_logger().info(f"Navigation actions canceled ({reason})")
 
-        response.ok = True
-        response.error = ""
-        response.goal_active = bool(goal_active)
-        response.manual_enabled = bool(manual_control["enabled"])
-        response.manual_linear_x_cmd = float(manual_control["linear_x_cmd"])
-        response.manual_angular_z_cmd = float(manual_control["angular_z_cmd"])
-        response.cmd_vel_available = bool(cmd_vel_safe["available"])
-        response.cmd_vel_linear_x = float(cmd_vel_safe["linear_x"])
-        response.cmd_vel_angular_z = float(cmd_vel_safe["angular_z"])
-
-        if robot_pose is None:
-            response.robot_lat = float("nan")
-            response.robot_lon = float("nan")
-        else:
-            response.robot_lat = float(robot_pose["lat"])
-            response.robot_lon = float(robot_pose["lon"])
-
-    def _publish_telemetry(self, force: bool = False) -> None:
-        now = time.monotonic()
+    def _cancel_active_mission(self, reason: str, brake_if_auto: bool) -> None:
         with self._lock:
-            last_sent = self._last_telemetry_sent
-            min_interval = 1.0 / float(self.nav_telemetry_hz)
-            if (not force) and last_sent is not None and (now - last_sent) < min_interval:
-                return
-            self._last_telemetry_sent = now
+            was_goal_active = self._goal_active
+            self._goal_active = False
+            self._loop_enabled = False
+            self._initial_segments = []
+            self._loop_segments = []
+            self._initial_cursor = 0
+            self._loop_cursor = 0
+            self._active_leg_seq = 0
+            self._active_leg_closed = False
+            self._active_segment = None
+            self._mission_token += 1
+            manual_enabled = self._manual_enabled
+            if not manual_enabled:
+                self._mode = MODE_AUTO_P2P
 
-            goal_active = self._is_navigating
-            manual_control = self._manual_control_payload_locked()
-            cmd_vel_safe = self._cmd_vel_safe_payload_locked()
-            robot_pose = self._last_robot_pose
+        self._cancel_navigation_actions(reason)
 
-        msg = NavTelemetry()
-        msg.goal_active = bool(goal_active)
-        msg.manual_enabled = bool(manual_control["enabled"])
-        msg.manual_linear_x_cmd = float(manual_control["linear_x_cmd"])
-        msg.manual_angular_z_cmd = float(manual_control["angular_z_cmd"])
-        msg.cmd_vel_available = bool(cmd_vel_safe["available"])
-        msg.cmd_vel_linear_x = float(cmd_vel_safe["linear_x"])
-        msg.cmd_vel_angular_z = float(cmd_vel_safe["angular_z"])
-        if robot_pose is None:
-            msg.robot_lat = float("nan")
-            msg.robot_lon = float("nan")
+        if brake_if_auto and not manual_enabled:
+            self._publish_brake_sequence(reason)
+
+        if was_goal_active and self.context.ok():
+            self.get_logger().info(f"Mission canceled ({reason})")
+
+    def _set_manual_enabled(self, enabled: bool, reason: str) -> None:
+        if enabled:
+            with self._lock:
+                already_manual = self._manual_enabled
+                self._manual_enabled = True
+                self._mode = MODE_MANUAL
+            if not already_manual:
+                self.get_logger().info(f"Manual mode enabled ({reason})")
         else:
-            msg.robot_lat = float(robot_pose["lat"])
-            msg.robot_lon = float(robot_pose["lon"])
-        self._telemetry_pub.publish(msg)
+            with self._lock:
+                was_manual = self._manual_enabled
+                self._manual_enabled = False
+                self._manual_cmd_last_monotonic = None
+                self._manual_watchdog_last_brake = None
+                if self._goal_active and self._loop_enabled:
+                    self._mode = MODE_AUTO_LOOP
+                else:
+                    self._mode = MODE_AUTO_P2P
+            if was_manual:
+                self.get_logger().info(f"Manual mode disabled ({reason})")
+
+    def _activate_manual_takeover(self, reason: str) -> None:
+        self._set_manual_enabled(True, reason)
+        self._cancel_active_mission(reason=f"manual takeover: {reason}", brake_if_auto=False)
 
     def _on_gps_fix(self, msg: NavSatFix) -> None:
-        if not np.isfinite(msg.latitude) or not np.isfinite(msg.longitude):
+        if not math.isfinite(msg.latitude) or not math.isfinite(msg.longitude):
             return
-        pose = {"lat": float(msg.latitude), "lon": float(msg.longitude)}
         with self._lock:
-            self._last_robot_pose = pose
-        self._publish_telemetry(force=False)
+            self._robot_lat = float(msg.latitude)
+            self._robot_lon = float(msg.longitude)
 
     def _on_cmd_vel_safe(self, msg: Twist) -> None:
         with self._lock:
-            self._last_cmd_vel_safe = msg
-            manual_enabled = bool(self._manual_enabled)
-            is_navigating = bool(self._is_navigating)
-            collision_stop_active = bool(self._collision_stop_active)
+            self._cmd_vel_available = True
+            self._cmd_vel_linear_x = float(msg.linear.x)
+            self._cmd_vel_angular_z = float(msg.angular.z)
+            manual_enabled = self._manual_enabled
+            collision_stop = self._collision_stop_active
 
-        if manual_enabled or (not is_navigating):
-            self._publish_telemetry(force=False)
+        if manual_enabled:
             return
 
-        if collision_stop_active:
-            self._publish_stop(brake_pct=100)
-            self._publish_telemetry(force=False)
+        if collision_stop:
+            now = time.monotonic()
+            do_brake = False
+            with self._lock:
+                if (
+                    self._last_collision_brake_monotonic is None
+                    or (now - self._last_collision_brake_monotonic) > 0.2
+                ):
+                    self._last_collision_brake_monotonic = now
+                    do_brake = True
+            if do_brake:
+                self._publish_cmd_final(0.0, 0.0, self.brake_pct_on_stop)
             return
 
-        self._publish_cmd_vel_final(
-            self._build_cmd_vel_final(
-                linear_x=float(msg.linear.x),
-                angular_z=float(msg.angular.z),
-                brake_pct=0,
-            )
-        )
-        self._publish_telemetry(force=False)
-
-    def _on_collision_monitor_state(self, msg: CollisionMonitorState) -> None:
-        stop_active = int(msg.action_type) == int(CollisionMonitorState.STOP)
-        with self._lock:
-            self._collision_stop_active = stop_active
-            manual_enabled = bool(self._manual_enabled)
-            is_navigating = bool(self._is_navigating)
-        if (not manual_enabled) and is_navigating and stop_active:
-            self._publish_brake_sequence(brake_pct=100)
-        self._publish_telemetry(force=False)
+        self._publish_cmd_final(float(msg.linear.x), float(msg.angular.z), 0)
 
     def _on_teleop_cmd(self, msg: CmdVelFinal) -> None:
-        self._activate_manual_takeover_if_needed()
-        ok, err = self.set_manual_cmd(
-            linear_x=float(msg.twist.linear.x),
-            angular_z=float(msg.twist.angular.z),
-            brake_pct=int(msg.brake_pct),
-        )
-        if (not ok) and (err != "manual control is disabled"):
+        with self._lock:
+            manual_enabled = self._manual_enabled
+
+        if not manual_enabled:
+            self._activate_manual_takeover("teleop topic")
+
+        now = time.monotonic()
+        linear_x = float(msg.twist.linear.x)
+        angular_z = float(msg.twist.angular.z)
+        brake_pct = max(0, min(100, int(msg.brake_pct)))
+
+        with self._lock:
+            self._manual_linear_x_cmd = linear_x
+            self._manual_angular_z_cmd = angular_z
+            self._manual_cmd_last_monotonic = now
+            self._manual_watchdog_last_brake = None
+
+        self._publish_cmd_final(linear_x, angular_z, brake_pct)
+
+    def _on_collision_state(self, msg: CollisionMonitorState) -> None:
+        is_stop = int(msg.action_type) == int(CollisionMonitorState.STOP)
+
+        with self._lock:
+            prev_stop = self._collision_stop_active
+            self._collision_stop_active = bool(is_stop)
+            manual_enabled = self._manual_enabled
+            mode = self._mode
+
+        if is_stop and (not prev_stop) and (not manual_enabled):
             self.get_logger().warning(
-                "Teleop cmd rejected "
-                f"(linear_x={float(msg.twist.linear.x):.3f}, "
-                f"angular_z={float(msg.twist.angular.z):.3f}, "
-                f"brake_pct={int(msg.brake_pct)}, "
-                f"error='{err}')"
+                f"Collision monitor STOP ({msg.polygon_name}) while mode={mode}; braking"
             )
+            self._publish_brake_sequence("collision monitor STOP")
+        elif (not is_stop) and prev_stop:
+            self.get_logger().info("Collision monitor cleared STOP")
 
-    def _publish_manual_cmd(self, linear_x: float, angular_z: float, brake_pct: int) -> None:
-        self._publish_cmd_vel_final(
-            self._build_cmd_vel_final(
-                linear_x=linear_x,
-                angular_z=angular_z,
-                brake_pct=brake_pct,
-            )
-        )
-
-    def _publish_manual_stop(self) -> None:
-        self._publish_manual_cmd(linear_x=0.0, angular_z=0.0, brake_pct=0)
-
-    def _clear_loop_config_locked(self) -> None:
-        self._loop_waypoint_poses = []
-        self._loop_original_poses = []
-        self._loop_restart_poses = []
-        self._loop_enabled = False
-
-    def _build_pose_from_ll(self, lat: float, lon: float, yaw_deg: float) -> Optional[PoseStamped]:
-        converted = self._call_from_ll(lat, lon)
-        if converted is None:
-            return None
-        x, y, _ = converted
-
-        pose = PoseStamped()
-        pose.header.frame_id = self.map_frame
-        pose.header.stamp = self.get_clock().now().to_msg()
-        pose.pose.position.x = float(x)
-        pose.pose.position.y = float(y)
-        pose.pose.position.z = 0.0
-        pose.pose.orientation = self._yaw_to_quaternion(yaw_deg)
-        return pose
-
-    def _convert_waypoints_to_poses(
-        self, waypoints: Sequence[Tuple[float, float, float]]
-    ) -> Tuple[Optional[List[PoseStamped]], str]:
-        poses: List[PoseStamped] = []
-        for idx, waypoint in enumerate(waypoints):
-            lat, lon, yaw_deg = waypoint
-            pose = self._build_pose_from_ll(lat, lon, yaw_deg)
-            if pose is None:
-                detail = self._last_fromll_error or "unknown"
-                return None, f"fromLL conversion failed at waypoint {idx + 1}: {detail}"
-            poses.append(pose)
-        return poses, ""
-
-    @staticmethod
-    def _build_loop_restart_poses(poses: Sequence[PoseStamped]) -> List[PoseStamped]:
-        poses_list = list(poses)
-        if len(poses_list) <= 1:
-            return poses_list
-        return poses_list[1:] + [poses_list[0]]
-
-    def _send_follow_waypoints_goal(
-        self, poses: Sequence[PoseStamped], loop_enabled: bool, reason: str
-    ) -> Tuple[bool, str]:
-        poses_list = list(poses)
-        if not poses_list:
-            return False, "no waypoint poses to send"
-
-        if not self._follow_waypoints_client.wait_for_server(timeout_sec=2.0):
-            self.get_logger().error(
-                "SetNavGoalLL failed: FollowWaypoints action server not available"
-            )
-            return False, "FollowWaypoints action server not available"
-
-        goal = FollowWaypoints.Goal()
-        goal.poses = poses_list
-
-        future = self._follow_waypoints_client.send_goal_async(goal)
-        goal_handle = self._wait_for_future(future, timeout_sec=5.0)
-        if goal_handle is None:
-            self.get_logger().error("SetNavGoalLL failed: timeout sending FollowWaypoints goal")
-            return False, "failed to send FollowWaypoints goal"
-        if not goal_handle.accepted:
-            self.get_logger().warning("SetNavGoalLL rejected by FollowWaypoints")
-            return False, "goal rejected by FollowWaypoints"
-
-        with self._lock:
-            self._current_goal_handle = goal_handle
-            self._loop_waypoint_poses = poses_list
-            self._loop_enabled = bool(loop_enabled and (len(poses_list) > 1))
-            self._is_navigating = True
-            self._auto_mode = "loop" if self._loop_enabled else "point_to_point"
-
-        result_future = goal_handle.get_result_async()
-        result_future.add_done_callback(
-            partial(self._on_nav_action_result_done, "FollowWaypoints")
-        )
-
-        self.get_logger().info(
-            "FollowWaypoints goal accepted "
-            f"(waypoints={len(poses_list)}, loop={bool(loop_enabled and (len(poses_list) > 1))}, "
-            f"reason={reason})"
-        )
-        self._publish_telemetry(force=True)
-        return True, "goal accepted"
-
-    def _send_navigate_through_poses_goal(
-        self, poses: Sequence[PoseStamped], loop_enabled: bool, reason: str
-    ) -> Tuple[bool, str]:
-        poses_list = list(poses)
-        if not poses_list:
-            return False, "no waypoint poses to send"
-
-        if not self._navigate_through_poses_client.wait_for_server(timeout_sec=2.0):
-            self.get_logger().error(
-                "SetNavGoalLL failed: NavigateThroughPoses action server not available"
-            )
-            return False, "NavigateThroughPoses action server not available"
-
-        goal = NavigateThroughPoses.Goal()
-        goal.poses = poses_list
-
-        future = self._navigate_through_poses_client.send_goal_async(goal)
-        goal_handle = self._wait_for_future(future, timeout_sec=5.0)
-        if goal_handle is None:
-            self.get_logger().error(
-                "SetNavGoalLL failed: timeout sending NavigateThroughPoses goal"
-            )
-            return False, "failed to send NavigateThroughPoses goal"
-        if not goal_handle.accepted:
-            self.get_logger().warning("SetNavGoalLL rejected by NavigateThroughPoses")
-            return False, "goal rejected by NavigateThroughPoses"
-
-        with self._lock:
-            self._current_goal_handle = goal_handle
-            self._loop_waypoint_poses = poses_list
-            self._loop_enabled = bool(loop_enabled and (len(poses_list) > 1))
-            self._is_navigating = True
-            self._auto_mode = "loop" if self._loop_enabled else "point_to_point"
-
-        result_future = goal_handle.get_result_async()
-        result_future.add_done_callback(
-            partial(self._on_nav_action_result_done, "NavigateThroughPoses")
-        )
-
-        self.get_logger().info(
-            "NavigateThroughPoses goal accepted "
-            f"(waypoints={len(poses_list)}, loop={bool(loop_enabled and (len(poses_list) > 1))}, "
-            f"reason={reason})"
-        )
-        self._publish_telemetry(force=True)
-        return True, "goal accepted"
-
-    def _send_nav_goal_for_poses(
-        self, poses: Sequence[PoseStamped], loop_enabled: bool, reason: str
-    ) -> Tuple[bool, str]:
-        poses_list = list(poses)
-        if len(poses_list) > 1:
-            return self._send_navigate_through_poses_goal(
-                poses=poses_list,
-                loop_enabled=loop_enabled,
-                reason=reason,
-            )
-        return self._send_follow_waypoints_goal(
-            poses=poses_list,
-            loop_enabled=loop_enabled,
-            reason=reason,
-        )
-
-    def send_nav2_goals(
-        self, waypoints: Sequence[Tuple[float, float, float]], loop_enabled: bool
-    ) -> Tuple[bool, str]:
-        if len(waypoints) == 0:
-            return False, "at least one waypoint is required"
-
-        with self._lock:
-            has_goal = self._current_goal_handle is not None
-        if has_goal:
-            cancel_ok, cancel_msg = self.cancel_current_goal(clear_loop_config=True)
-            if not cancel_ok:
-                return False, f"failed to cancel previous goal: {cancel_msg}"
-
-        with self._lock:
-            self._clear_loop_config_locked()
-            self._is_navigating = False
-            self._auto_mode = "idle"
-
-        self.get_logger().info(
-            f"SetNavGoalLL request (waypoints={len(waypoints)}, loop={bool(loop_enabled)})"
-        )
-        poses, err = self._convert_waypoints_to_poses(waypoints)
-        if poses is None:
-            return False, err
-        ok, err = self._send_nav_goal_for_poses(
-            poses=poses,
-            loop_enabled=loop_enabled,
-            reason="set_goal_service",
-        )
-        if (not ok) or (not loop_enabled) or (len(poses) <= 1):
-            if not ok:
-                with self._lock:
-                    self._is_navigating = False
-                    self._auto_mode = "idle"
-            return ok, err
-
-        loop_restart_poses = self._build_loop_restart_poses(poses)
-        with self._lock:
-            self._loop_original_poses = list(poses)
-            self._loop_restart_poses = loop_restart_poses
-            self._loop_waypoint_poses = list(loop_restart_poses)
-            self._loop_enabled = True
-        self.get_logger().info(
-            "Loop paths configured "
-            f"(original={len(self._loop_original_poses)}, restart={len(loop_restart_poses)})"
-        )
-        return ok, err
-
-    def _on_nav_action_result_done(self, action_name: str, future: Any) -> None:
-        status = None
-        missed_waypoints: List[int] = []
-        try:
-            result_msg = future.result()
-            status = int(getattr(result_msg, "status", -1))
-            result = getattr(result_msg, "result", None)
-            if result is not None:
-                missed_waypoints = [int(v) for v in getattr(result, "missed_waypoints", [])]
-        except Exception as exc:
-            self.get_logger().warning(f"{action_name} result callback failed: {exc}")
-
-        restart_goal_poses: Optional[List[PoseStamped]] = None
-        restart_reason = ""
-        force_brake = False
-        with self._lock:
-            auto_mode = str(self._auto_mode)
-            manual_enabled = bool(self._manual_enabled)
-            self._current_goal_handle = None
-            if (
-                auto_mode == "loop"
-                and status == GoalStatus.STATUS_SUCCEEDED
-                and self._loop_enabled
-                and (not manual_enabled)
-                and len(self._loop_original_poses) > 1
-                and len(self._loop_restart_poses) > 1
-            ):
-                restart_goal_poses = list(self._loop_restart_poses)
-                restart_reason = "loop_restart_rotated"
-            else:
-                self._is_navigating = False
-                self._auto_mode = "idle"
-                if auto_mode == "loop":
-                    self._clear_loop_config_locked()
-                    if (status != GoalStatus.STATUS_SUCCEEDED) and (not manual_enabled):
-                        force_brake = True
-                elif auto_mode == "point_to_point":
-                    if not manual_enabled:
-                        force_brake = True
-
-        should_restart = restart_goal_poses is not None
-        if should_restart:
-            ok, err = self._send_nav_goal_for_poses(
-                poses=restart_goal_poses,
-                loop_enabled=True,
-                reason=restart_reason,
-            )
-            with self._lock:
-                if ok and self._loop_enabled and (not self._manual_enabled):
-                    self._is_navigating = True
-                    self._auto_mode = "loop"
-                else:
-                    self._clear_loop_config_locked()
-                    self._is_navigating = False
-                    self._auto_mode = "idle"
-                    force_brake = not self._manual_enabled
-            if not ok:
-                self.get_logger().warning(f"Loop restart failed: {err}")
-
-        if force_brake:
-            self._publish_brake_sequence(brake_pct=100)
-
-        self.get_logger().info(
-            f"{action_name} result received "
-            f"(status={status}, missed_waypoints={missed_waypoints}, "
-            f"loop_restart={should_restart})"
-        )
-        self._publish_telemetry(force=True)
-
-    def cancel_current_goal(self, clear_loop_config: bool = True) -> Tuple[bool, str]:
-        with self._lock:
-            handle = self._current_goal_handle
-            if clear_loop_config:
-                self._clear_loop_config_locked()
-                self._is_navigating = False
-                self._auto_mode = "idle"
-        if handle is None:
-            return False, "no active goal"
-
-        future = handle.cancel_goal_async()
-        result = self._wait_for_future(future, timeout_sec=2.0)
-        if result is None:
-            return False, "timeout cancelling goal"
-
-        with self._lock:
-            self._current_goal_handle = None
-            if clear_loop_config:
-                self._clear_loop_config_locked()
-            self._is_navigating = False
-            self._auto_mode = "idle"
-        self._publish_telemetry(force=True)
-        return True, "cancelled"
-
-    def apply_brake(self) -> Tuple[bool, str]:
-        cancel_ok = True
-        cancel_msg = "no active goal"
-        with self._lock:
-            has_goal = self._current_goal_handle is not None
-            self._is_navigating = False
-            self._auto_mode = "idle"
-        if has_goal:
-            cancel_ok, cancel_msg = self.cancel_current_goal()
-
-        self._publish_brake_sequence(brake_pct=100)
-
-        self._publish_telemetry(force=True)
-        if cancel_ok:
-            return True, "brake applied"
-        return False, f"brake applied, but goal cancel failed: {cancel_msg}"
-
-    def set_manual_mode(self, enabled: bool) -> Tuple[bool, str, bool]:
-        if enabled:
-            with self._lock:
-                has_goal = self._current_goal_handle is not None
-                self._manual_enabled = True
-                self._is_navigating = False
-                self._auto_mode = "idle"
-                self._last_manual_cmd = CmdVelFinal()
-                self._last_manual_cmd_time = None
-                self._manual_watchdog_stop_sent = False
-            if has_goal:
-                # Do not block manual takeover while waiting cancel ack from Nav2.
-                self._cancel_goal_for_manual_takeover_async()
-
-            self._publish_manual_stop()
-            self._publish_telemetry(force=True)
-            return True, "manual control enabled", True
-
-        with self._lock:
-            self._manual_enabled = False
-            self._last_manual_cmd = CmdVelFinal()
-            self._last_manual_cmd_time = None
-            self._manual_watchdog_stop_sent = False
-        self._publish_manual_stop()
-        self._publish_telemetry(force=True)
-        return True, "manual control disabled", False
-
-    def set_manual_cmd(
-        self, linear_x: float, angular_z: float, brake_pct: int
-    ) -> Tuple[bool, str]:
-        if not np.isfinite(linear_x) or not np.isfinite(angular_z):
-            return False, "invalid manual command values"
-        now = time.monotonic()
-        clamped_brake = int(max(0, min(100, int(brake_pct))))
-        with self._lock:
-            if not self._manual_enabled:
-                return False, "manual control is disabled"
-            self._last_manual_cmd.twist.linear.x = float(linear_x)
-            self._last_manual_cmd.twist.angular.z = float(angular_z)
-            self._last_manual_cmd.brake_pct = clamped_brake
-            self._last_manual_cmd_time = now
-            self._manual_watchdog_stop_sent = False
-        self._publish_manual_cmd(linear_x, angular_z, clamped_brake)
-        self._publish_telemetry(force=False)
-        return True, "manual command published"
-
-    def _manual_watchdog_tick(self) -> None:
-        with self._lock:
-            enabled = bool(self._manual_enabled)
-            last_cmd_time = self._last_manual_cmd_time
-            stop_sent = bool(self._manual_watchdog_stop_sent)
-
-        if not enabled:
-            return
-
-        now = time.monotonic()
-        stale = (
-            (last_cmd_time is None)
-            or ((now - last_cmd_time) > float(self.manual_cmd_timeout_s))
-        )
-        if stale and (not stop_sent):
-            self._publish_manual_stop()
-            with self._lock:
-                self._last_manual_cmd = CmdVelFinal()
-                self._manual_watchdog_stop_sent = True
-            self._publish_telemetry(force=True)
-
-    def _parse_set_goal_request(
+    def _extract_waypoints(
         self, request: SetNavGoalLL.Request
-    ) -> Tuple[Optional[List[Tuple[float, float, float]]], bool, str]:
+    ) -> Tuple[Optional[List[Tuple[float, float, float]]], str]:
         lats = [float(v) for v in request.lats]
         lons = [float(v) for v in request.lons]
         yaws = [float(v) for v in request.yaws_deg]
 
-        has_array_payload = bool(lats) or bool(lons) or bool(yaws)
-        if has_array_payload:
+        use_array = len(lats) > 0 or len(lons) > 0 or len(yaws) > 0
+        if use_array:
+            if len(lats) == 0 or len(lons) == 0:
+                return None, "lats and lons must be provided together"
             if len(lats) != len(lons):
-                return None, False, "lats and lons must have the same length"
-            if len(lats) == 0:
-                return None, False, "at least one waypoint is required"
+                return None, "lats and lons size mismatch"
             if len(yaws) not in (0, len(lats)):
-                return None, False, "yaws_deg must be empty or match lats length"
+                return None, "yaws_deg must be empty or match lats/lons size"
+            if len(yaws) == 0:
+                yaws = [0.0] * len(lats)
+            waypoints = list(zip(lats, lons, yaws))
+        else:
+            waypoints = [
+                (
+                    float(request.lat),
+                    float(request.lon),
+                    float(request.yaw_deg),
+                )
+            ]
 
-            waypoints: List[Tuple[float, float, float]] = []
-            for idx in range(len(lats)):
-                yaw_deg = yaws[idx] if len(yaws) == len(lats) else 0.0
-                lat = float(lats[idx])
-                lon = float(lons[idx])
-                if (not np.isfinite(lat)) or (not np.isfinite(lon)) or (not np.isfinite(yaw_deg)):
-                    return None, False, f"invalid waypoint values at index {idx}"
-                waypoints.append((lat, lon, float(yaw_deg)))
-            loop_enabled = bool(request.loop)
-            return waypoints, loop_enabled, ""
+        for lat, lon, yaw_deg in waypoints:
+            if (not math.isfinite(lat)) or (not math.isfinite(lon)):
+                return None, "invalid waypoint coordinates"
+            if not math.isfinite(yaw_deg):
+                return None, "invalid yaw value"
 
-        lat = float(request.lat)
-        lon = float(request.lon)
-        yaw_deg = float(request.yaw_deg)
-        if (not np.isfinite(lat)) or (not np.isfinite(lon)) or (not np.isfinite(yaw_deg)):
-            return None, False, "invalid waypoint values"
-        return [(lat, lon, yaw_deg)], bool(request.loop), ""
+        return waypoints, ""
 
-    def _on_set_goal(
+    def _get_current_anchor_point(self) -> Optional[Tuple[float, float]]:
+        with self._lock:
+            lat = float(self._robot_lat)
+            lon = float(self._robot_lon)
+
+        if (not math.isfinite(lat)) or (not math.isfinite(lon)):
+            return None
+
+        return self._from_ll_to_map(lat, lon)
+
+    def _build_graph_plan(
+        self,
+        waypoint_xy: Sequence[Tuple[float, float]],
+        loop: bool,
+    ) -> Tuple[Optional[Dict[str, Any]], str]:
+        points: List[Tuple[float, float]] = []
+        anchor = self._get_current_anchor_point()
+        anchor_added = False
+        if anchor is not None:
+            points.append(anchor)
+            anchor_added = True
+
+        points.extend(waypoint_xy)
+
+        if len(points) < 2:
+            return (
+                None,
+                "unable to build route graph: need GPS fix for single-waypoint mission",
+            )
+
+        first_wp_id = 2 if anchor_added else 1
+        last_wp_id = len(points)
+
+        graph_edges: List[Tuple[int, int]] = []
+
+        for node_id in range(1, len(points)):
+            edge = (node_id, node_id + 1)
+            graph_edges.append(edge)
+
+        loop_effective = bool(loop and len(waypoint_xy) > 1)
+        if loop_effective:
+            closing_edge = (last_wp_id, first_wp_id)
+            graph_edges.append(closing_edge)
+
+        features: List[Dict[str, Any]] = []
+        for idx, (x, y) in enumerate(points, start=1):
+            features.append(
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [float(x), float(y)]},
+                    "properties": {"id": int(idx)},
+                }
+            )
+
+        edge_id = 1
+        for start_id, end_id in graph_edges:
+            start_x, start_y = points[start_id - 1]
+            end_x, end_y = points[end_id - 1]
+            features.append(
+                {
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": [
+                            [float(start_x), float(start_y)],
+                            [float(end_x), float(end_y)],
+                        ],
+                    },
+                    "properties": {
+                        "id": int(edge_id),
+                        "startid": int(start_id),
+                        "endid": int(end_id),
+                    },
+                }
+            )
+            edge_id += 1
+
+        return (
+            {
+                "graph": {"type": "FeatureCollection", "features": features},
+                "loop_effective": loop_effective,
+                "start_node_id": 1 if anchor_added else first_wp_id,
+                "first_wp_id": first_wp_id,
+                "last_wp_id": last_wp_id,
+                "anchor_added": anchor_added,
+            },
+            "",
+        )
+
+    def _build_mission_legs(
+        self, plan: Dict[str, Any]
+    ) -> Tuple[List[Tuple[int, int]], List[Tuple[int, int]]]:
+        start_node_id = int(plan["start_node_id"])
+        first_wp_id = int(plan["first_wp_id"])
+        last_wp_id = int(plan["last_wp_id"])
+        loop_effective = bool(plan["loop_effective"])
+
+        if loop_effective:
+            loop_cycle_legs = [
+                (first_wp_id, last_wp_id),
+                (last_wp_id, first_wp_id),
+            ]
+            initial_legs: List[Tuple[int, int]] = []
+            if start_node_id != first_wp_id:
+                initial_legs.append((start_node_id, first_wp_id))
+            initial_legs.extend(loop_cycle_legs)
+            return initial_legs, loop_cycle_legs
+
+        initial_legs = [(start_node_id, last_wp_id)]
+        return initial_legs, []
+
+    def _install_route_graph(self, graph_payload: Dict[str, Any]) -> Tuple[bool, str]:
+        try:
+            self.route_graph_temp_filepath.parent.mkdir(parents=True, exist_ok=True)
+            self.route_graph_temp_filepath.write_text(
+                json.dumps(graph_payload, ensure_ascii=True),
+                encoding="utf-8",
+            )
+        except Exception as exc:
+            return False, f"failed writing route graph file: {exc}"
+
+        if not self._set_route_graph_client.wait_for_service(timeout_sec=2.0):
+            return False, "set_route_graph service unavailable"
+
+        req = SetRouteGraph.Request()
+        req.graph_filepath = str(self.route_graph_temp_filepath)
+        future = self._set_route_graph_client.call_async(req)
+        try:
+            response = self._wait_for_future(future, 5.0)
+        except Exception as exc:
+            return False, f"set_route_graph call failed: {exc}"
+
+        if response is None:
+            return False, "set_route_graph timeout"
+        if not bool(response.success):
+            return False, "set_route_graph failed"
+        return True, ""
+
+    def _consume_next_segment_locked(self) -> Optional[Tuple[int, int]]:
+        if self._initial_cursor < len(self._initial_segments):
+            segment = self._initial_segments[self._initial_cursor]
+            self._initial_cursor += 1
+            return segment
+
+        if self._loop_enabled and len(self._loop_segments) > 0:
+            segment = self._loop_segments[self._loop_cursor % len(self._loop_segments)]
+            self._loop_cursor += 1
+            return segment
+
+        return None
+
+    def _dispatch_next_segment(self, mission_token: int) -> Tuple[bool, str]:
+        with self._lock:
+            if mission_token != self._mission_token:
+                return False, "stale mission token"
+            if (not self._goal_active) or self._manual_enabled:
+                return False, "mission inactive"
+            segment = self._consume_next_segment_locked()
+            if segment is None:
+                self._goal_active = False
+                self._segment_started_monotonic = None
+                self._follow_path_started = False
+                self._active_leg_seq = 0
+                self._active_leg_closed = False
+                self._active_segment = None
+                self._last_path_signature = None
+                if self._loop_enabled:
+                    self._mode = MODE_AUTO_LOOP
+                else:
+                    self._mode = MODE_AUTO_P2P
+                self.get_logger().info("Mission completed")
+                return True, ""
+            self._active_leg_seq += 1
+            leg_seq = int(self._active_leg_seq)
+            self._active_leg_closed = False
+            self._active_segment = segment
+            self._segment_started_monotonic = time.monotonic()
+            self._follow_path_started = False
+            self._last_path_signature = None
+
+        if not self._compute_route_client.wait_for_server(timeout_sec=2.0):
+            return False, "compute_and_track_route action unavailable"
+
+        goal = ComputeAndTrackRoute.Goal()
+        goal.start_id = int(segment[0])
+        goal.goal_id = int(segment[1])
+        goal.use_start = False
+        goal.use_poses = False
+
+        send_future = self._compute_route_client.send_goal_async(
+            goal,
+            feedback_callback=partial(
+                self._on_compute_feedback,
+                mission_token=mission_token,
+                leg_seq=leg_seq,
+            ),
+        )
+        send_future.add_done_callback(
+            partial(
+                self._on_compute_goal_response,
+                mission_token=mission_token,
+                leg_seq=leg_seq,
+                segment=segment,
+            )
+        )
+
+        return True, ""
+
+    def _on_compute_goal_response(
+        self,
+        future: Any,
+        mission_token: int,
+        leg_seq: int,
+        segment: Tuple[int, int],
+    ) -> None:
+        try:
+            goal_handle = future.result()
+        except Exception as exc:
+            self._fail_active_mission(
+                mission_token,
+                f"compute_and_track_route send failed: {exc}",
+                brake=True,
+            )
+            return
+
+        with self._lock:
+            stale_goal = (
+                mission_token != self._mission_token
+                or (not self._goal_active)
+                or leg_seq != self._active_leg_seq
+                or self._active_leg_closed
+            )
+        if stale_goal:
+            if goal_handle.accepted:
+                try:
+                    cancel_future = goal_handle.cancel_goal_async()
+                    self._wait_for_future(cancel_future, 0.4)
+                except Exception:
+                    pass
+            return
+
+        if not goal_handle.accepted:
+            self._fail_active_mission(
+                mission_token,
+                "compute_and_track_route goal rejected",
+                brake=True,
+            )
+            return
+
+        with self._lock:
+            if (
+                mission_token != self._mission_token
+                or (not self._goal_active)
+                or leg_seq != self._active_leg_seq
+                or self._active_leg_closed
+            ):
+                try:
+                    cancel_future = goal_handle.cancel_goal_async()
+                    self._wait_for_future(cancel_future, 0.4)
+                except Exception:
+                    pass
+                return
+            self._compute_goal_handle = goal_handle
+
+        self.get_logger().info(
+            f"compute_and_track_route accepted segment {segment[0]}->{segment[1]}"
+        )
+
+        result_future = goal_handle.get_result_async()
+        result_future.add_done_callback(
+            partial(
+                self._on_compute_result,
+                mission_token=mission_token,
+                leg_seq=leg_seq,
+                segment=segment,
+            )
+        )
+
+    def _on_compute_feedback(self, feedback_msg: Any, mission_token: int, leg_seq: int) -> None:
+        fb = feedback_msg.feedback
+        path = fb.path
+        if len(path.poses) == 0:
+            return
+
+        try:
+            first_pose = path.poses[0].pose.position
+            last_pose = path.poses[-1].pose.position
+            signature = (
+                int(len(path.poses)),
+                int(round(first_pose.x * 100.0)),
+                int(round(first_pose.y * 100.0)),
+                int(round(last_pose.x * 100.0)),
+                int(round(last_pose.y * 100.0)),
+            )
+        except Exception:
+            signature = (len(path.poses), 0, 0, 0, 0)
+
+        send_follow = False
+        with self._lock:
+            if (
+                mission_token != self._mission_token
+                or (not self._goal_active)
+                or self._manual_enabled
+                or leg_seq != self._active_leg_seq
+                or self._active_leg_closed
+            ):
+                return
+
+            rerouted = bool(getattr(fb, "rerouted", False))
+            if (
+                (not self._follow_path_started)
+                or rerouted
+                or (signature != self._last_path_signature)
+            ):
+                self._follow_path_started = True
+                self._last_path_signature = signature
+                send_follow = True
+
+        if send_follow:
+            self._send_follow_path_goal(path, mission_token, leg_seq)
+
+    def _send_follow_path_goal(self, path: Any, mission_token: int, leg_seq: int) -> None:
+        if not self._follow_path_client.wait_for_server(timeout_sec=1.5):
+            self._fail_active_mission(
+                mission_token,
+                "follow_path action unavailable",
+                brake=True,
+            )
+            return
+
+        with self._lock:
+            if (
+                mission_token != self._mission_token
+                or (not self._goal_active)
+                or self._manual_enabled
+                or leg_seq != self._active_leg_seq
+                or self._active_leg_closed
+            ):
+                return
+            old_handle = self._follow_goal_handle
+            self._follow_goal_handle = None
+            self._follow_goal_seq += 1
+            follow_goal_seq = int(self._follow_goal_seq)
+
+        if old_handle is not None:
+            self._cancel_goal_handle(old_handle, "follow_path")
+
+        goal = FollowPath.Goal()
+        goal.path = path
+        goal.controller_id = self.follow_path_controller_id
+        goal.goal_checker_id = self.follow_path_goal_checker_id
+
+        send_future = self._follow_path_client.send_goal_async(goal)
+        send_future.add_done_callback(
+            partial(
+                self._on_follow_goal_response,
+                mission_token=mission_token,
+                leg_seq=leg_seq,
+                follow_goal_seq=follow_goal_seq,
+            )
+        )
+
+    def _on_follow_goal_response(
+        self,
+        future: Any,
+        mission_token: int,
+        leg_seq: int,
+        follow_goal_seq: int,
+    ) -> None:
+        try:
+            goal_handle = future.result()
+        except Exception as exc:
+            self._fail_active_mission(
+                mission_token,
+                f"follow_path send failed: {exc}",
+                brake=True,
+            )
+            return
+
+        with self._lock:
+            if (
+                mission_token != self._mission_token
+                or leg_seq != self._active_leg_seq
+                or self._active_leg_closed
+                or follow_goal_seq != self._follow_goal_seq
+            ):
+                if goal_handle.accepted:
+                    try:
+                        cancel_future = goal_handle.cancel_goal_async()
+                        self._wait_for_future(cancel_future, 0.4)
+                    except Exception:
+                        pass
+                return
+
+        if not goal_handle.accepted:
+            self._fail_active_mission(
+                mission_token,
+                "follow_path goal rejected",
+                brake=True,
+            )
+            return
+
+        with self._lock:
+            if (
+                mission_token != self._mission_token
+                or leg_seq != self._active_leg_seq
+                or self._active_leg_closed
+                or follow_goal_seq != self._follow_goal_seq
+            ):
+                try:
+                    cancel_future = goal_handle.cancel_goal_async()
+                    self._wait_for_future(cancel_future, 0.4)
+                except Exception:
+                    pass
+                return
+            self._follow_goal_handle = goal_handle
+
+        result_future = goal_handle.get_result_async()
+        result_future.add_done_callback(
+            partial(
+                self._on_follow_result,
+                mission_token=mission_token,
+                leg_seq=leg_seq,
+                follow_goal_seq=follow_goal_seq,
+            )
+        )
+
+    def _on_follow_result(
+        self,
+        future: Any,
+        mission_token: int,
+        leg_seq: int,
+        follow_goal_seq: int,
+    ) -> None:
+        try:
+            wrapped_result = future.result()
+        except Exception as exc:
+            self._fail_active_mission(
+                mission_token,
+                f"follow_path result failed: {exc}",
+                brake=True,
+            )
+            return
+
+        status = int(wrapped_result.status)
+
+        compute_handle = None
+        segment: Optional[Tuple[int, int]] = None
+        with self._lock:
+            if (
+                mission_token != self._mission_token
+                or leg_seq != self._active_leg_seq
+                or self._active_leg_closed
+                or follow_goal_seq != self._follow_goal_seq
+            ):
+                return
+            manual_enabled = self._manual_enabled
+            goal_active = self._goal_active
+            if status == GoalStatus.STATUS_SUCCEEDED and (not manual_enabled) and goal_active:
+                self._active_leg_closed = True
+                segment = self._active_segment
+                compute_handle = self._compute_goal_handle
+                self._compute_goal_handle = None
+                self._follow_goal_handle = None
+                self._follow_path_started = False
+                self._segment_started_monotonic = None
+                self._last_path_signature = None
+
+        if manual_enabled or (not goal_active):
+            return
+
+        if status == GoalStatus.STATUS_SUCCEEDED:
+            if compute_handle is not None:
+                self._cancel_goal_handle(compute_handle, "compute_and_track_route")
+            if segment is not None:
+                self.get_logger().info(
+                    f"Segment completed {segment[0]}->{segment[1]}"
+                )
+            ok, err = self._dispatch_next_segment(mission_token)
+            if not ok and err not in ("mission inactive", "stale mission token"):
+                self._fail_active_mission(
+                    mission_token,
+                    f"failed dispatching next segment: {err}",
+                    brake=True,
+                )
+            return
+
+        if status == GoalStatus.STATUS_CANCELED:
+            return
+
+        self._fail_active_mission(
+            mission_token,
+            f"follow_path ended with status={status}",
+            brake=True,
+        )
+
+    def _on_compute_result(
+        self,
+        future: Any,
+        mission_token: int,
+        leg_seq: int,
+        segment: Tuple[int, int],
+    ) -> None:
+        try:
+            wrapped_result = future.result()
+        except Exception as exc:
+            self._fail_active_mission(
+                mission_token,
+                f"compute_and_track_route result failed: {exc}",
+                brake=True,
+            )
+            return
+
+        status = int(wrapped_result.status)
+
+        with self._lock:
+            if mission_token != self._mission_token:
+                return
+            if leg_seq != self._active_leg_seq or self._active_leg_closed:
+                return
+            self._compute_goal_handle = None
+            manual_enabled = self._manual_enabled
+            goal_active = self._goal_active
+
+        if manual_enabled or (not goal_active):
+            return
+
+        if status != GoalStatus.STATUS_SUCCEEDED:
+            self._fail_active_mission(
+                mission_token,
+                f"compute_and_track_route status={status} for segment {segment[0]}->{segment[1]}",
+                brake=True,
+            )
+            return
+
+    def _fail_active_mission(
+        self,
+        mission_token: int,
+        error: str,
+        brake: bool,
+    ) -> None:
+        with self._lock:
+            if mission_token != self._mission_token:
+                return
+
+        self.get_logger().warning(f"Mission failure: {error}")
+        self._cancel_active_mission(reason=error, brake_if_auto=brake)
+
+    def _on_set_goal_ll(
         self,
         request: SetNavGoalLL.Request,
         response: SetNavGoalLL.Response,
     ) -> SetNavGoalLL.Response:
+        waypoints_ll, err = self._extract_waypoints(request)
+        if waypoints_ll is None:
+            response.ok = False
+            response.error = err
+            return response
+
+        self._set_manual_enabled(False, "set_goal_ll")
+        self._cancel_active_mission(reason="new set_goal_ll request", brake_if_auto=False)
+
+        waypoint_xy: List[Tuple[float, float]] = []
+        for lat, lon, _ in waypoints_ll:
+            xy = self._from_ll_to_map(lat, lon)
+            if xy is None:
+                detail = self._last_fromll_error or "fromLL conversion failed"
+                response.ok = False
+                response.error = (
+                    "failed converting waypoint "
+                    f"lat={lat:.8f}, lon={lon:.8f} with fromLL: {detail}"
+                )
+                return response
+            waypoint_xy.append(xy)
+
+        plan, err = self._build_graph_plan(waypoint_xy=waypoint_xy, loop=bool(request.loop))
+        if plan is None:
+            response.ok = False
+            response.error = err
+            return response
+
+        ok_graph, err_graph = self._install_route_graph(plan["graph"])
+        if not ok_graph:
+            response.ok = False
+            response.error = err_graph
+            return response
+
+        initial_segments, loop_segments = self._build_mission_legs(plan)
+        if len(initial_segments) == 0:
+            response.ok = False
+            response.error = "failed to build mission legs"
+            return response
+
         with self._lock:
-            manual_enabled = self._manual_enabled
-        if manual_enabled:
+            self._mission_token += 1
+            mission_token = self._mission_token
+            self._goal_active = True
+            self._loop_enabled = bool(plan["loop_effective"])
+            self._initial_segments = list(initial_segments)
+            self._loop_segments = list(loop_segments)
+            self._initial_cursor = 0
+            self._loop_cursor = 0
+            self._segment_started_monotonic = None
+            self._follow_path_started = False
+            self._active_leg_seq = 0
+            self._active_leg_closed = False
+            self._active_segment = None
+            self._last_path_signature = None
+            self._mode = MODE_AUTO_LOOP if self._loop_enabled else MODE_AUTO_P2P
+
+        ok_dispatch, err_dispatch = self._dispatch_next_segment(mission_token)
+        if not ok_dispatch:
+            self._cancel_active_mission(
+                reason=f"failed to start mission: {err_dispatch}",
+                brake_if_auto=True,
+            )
             response.ok = False
-            response.error = "manual control enabled; disable manual mode to send goals"
+            response.error = err_dispatch
             return response
 
-        waypoints, loop_enabled, parse_err = self._parse_set_goal_request(request)
-        if waypoints is None:
-            response.ok = False
-            response.error = parse_err
-            return response
-
-        ok, err = self.send_nav2_goals(
-            waypoints=waypoints,
-            loop_enabled=loop_enabled,
+        response.ok = True
+        response.error = ""
+        self.get_logger().info(
+            "set_goal_ll accepted "
+            f"(waypoints={len(waypoints_ll)}, loop={bool(plan['loop_effective'])}, "
+            f"start_node_id={int(plan['start_node_id'])}, first_wp_id={int(plan['first_wp_id'])}, "
+            f"last_wp_id={int(plan['last_wp_id'])}, mission_legs={len(initial_segments)}, "
+            f"loop_cycle_legs={len(loop_segments)})"
         )
-        response.ok = bool(ok)
-        response.error = "" if ok else str(err)
-        if not response.ok:
-            self.get_logger().warning(f"SetNavGoalLL response failed: {response.error}")
         return response
 
     def _on_cancel_goal(
@@ -943,12 +1292,12 @@ class NavCommandServerNode(Node):
         _request: CancelNavGoal.Request,
         response: CancelNavGoal.Response,
     ) -> CancelNavGoal.Response:
-        ok, err = self.cancel_current_goal()
-        response.ok = bool(ok)
-        response.error = "" if ok else str(err)
-        self.get_logger().info(
-            f"CancelNavGoal response (ok={response.ok}, error='{response.error}')"
-        )
+        with self._lock:
+            manual_enabled = self._manual_enabled
+
+        self._cancel_active_mission(reason="cancel_goal service", brake_if_auto=(not manual_enabled))
+        response.ok = True
+        response.error = ""
         return response
 
     def _on_brake(
@@ -956,12 +1305,10 @@ class NavCommandServerNode(Node):
         _request: BrakeNav.Request,
         response: BrakeNav.Response,
     ) -> BrakeNav.Response:
-        ok, err = self.apply_brake()
-        response.ok = bool(ok)
-        response.error = "" if ok else str(err)
-        self.get_logger().info(
-            f"BrakeNav response (ok={response.ok}, error='{response.error}')"
-        )
+        self._cancel_active_mission(reason="brake service", brake_if_auto=False)
+        self._publish_brake_sequence("brake service")
+        response.ok = True
+        response.error = ""
         return response
 
     def _on_set_manual_mode(
@@ -969,14 +1316,23 @@ class NavCommandServerNode(Node):
         request: SetManualMode.Request,
         response: SetManualMode.Response,
     ) -> SetManualMode.Response:
-        ok, err, enabled_after = self.set_manual_mode(bool(request.enabled))
-        response.ok = bool(ok)
-        response.error = "" if ok else str(err)
+        enabled = bool(request.enabled)
+        if enabled:
+            self._set_manual_enabled(True, "set_manual_mode service")
+            self._cancel_active_mission(
+                reason="manual mode service takeover",
+                brake_if_auto=False,
+            )
+            self._publish_brake_sequence("manual mode enable")
+        else:
+            self._set_manual_enabled(False, "set_manual_mode service")
+
+        with self._lock:
+            enabled_after = self._manual_enabled
+
+        response.ok = True
+        response.error = ""
         response.enabled_after = bool(enabled_after)
-        self.get_logger().info(
-            f"SetManualMode response (requested={bool(request.enabled)}, "
-            f"enabled_after={response.enabled_after}, ok={response.ok}, error='{response.error}')"
-        )
         return response
 
     def _on_get_state(
@@ -984,27 +1340,106 @@ class NavCommandServerNode(Node):
         _request: GetNavState.Request,
         response: GetNavState.Response,
     ) -> GetNavState.Response:
-        self._fill_get_state_response(response)
+        with self._lock:
+            response.ok = True
+            response.error = ""
+            response.goal_active = bool(self._goal_active)
+            response.manual_enabled = bool(self._manual_enabled)
+            response.manual_linear_x_cmd = float(self._manual_linear_x_cmd)
+            response.manual_angular_z_cmd = float(self._manual_angular_z_cmd)
+            response.cmd_vel_available = bool(self._cmd_vel_available)
+            response.cmd_vel_linear_x = float(self._cmd_vel_linear_x)
+            response.cmd_vel_angular_z = float(self._cmd_vel_angular_z)
+            response.robot_lat = float(self._robot_lat)
+            response.robot_lon = float(self._robot_lon)
         return response
 
+    def _manual_watchdog_tick(self) -> None:
+        now = time.monotonic()
 
-def main() -> None:
-    rclpy.init()
+        should_brake = False
+        mission_token = 0
+        route_elapsed = 0.0
+        route_timeout_should_fail = False
+        with self._lock:
+            manual_enabled = self._manual_enabled
+            last_cmd = self._manual_cmd_last_monotonic
+            if manual_enabled and (last_cmd is not None):
+                age = now - last_cmd
+                if age > self.manual_cmd_timeout_s and (
+                    self._manual_watchdog_last_brake is None
+                    or (now - self._manual_watchdog_last_brake)
+                    >= self.manual_cmd_timeout_s
+                ):
+                    self._manual_watchdog_last_brake = now
+                    should_brake = True
+                    self._manual_linear_x_cmd = 0.0
+                    self._manual_angular_z_cmd = 0.0
+
+            if (
+                self._goal_active
+                and (not self._manual_enabled)
+                and self._segment_started_monotonic is not None
+                and (not self._follow_path_started)
+            ):
+                route_elapsed = now - self._segment_started_monotonic
+                mission_token = self._mission_token
+                route_timeout_should_fail = route_elapsed > self.route_first_path_timeout_s
+
+        if should_brake:
+            self.get_logger().warning(
+                f"Manual watchdog timeout ({self.manual_cmd_timeout_s:.2f}s), braking"
+            )
+            self._publish_cmd_final(0.0, 0.0, self.brake_pct_on_stop)
+
+        if route_timeout_should_fail:
+            self._fail_active_mission(
+                mission_token,
+                (
+                    "timeout waiting first path feedback from "
+                    f"compute_and_track_route ({route_elapsed:.2f}s > "
+                    f"{self.route_first_path_timeout_s:.2f}s)"
+                ),
+                brake=True,
+            )
+
+    def _publish_telemetry(self) -> None:
+        msg = NavTelemetry()
+        with self._lock:
+            msg.goal_active = bool(self._goal_active)
+            msg.manual_enabled = bool(self._manual_enabled)
+            msg.manual_linear_x_cmd = float(self._manual_linear_x_cmd)
+            msg.manual_angular_z_cmd = float(self._manual_angular_z_cmd)
+            msg.cmd_vel_available = bool(self._cmd_vel_available)
+            msg.cmd_vel_linear_x = float(self._cmd_vel_linear_x)
+            msg.cmd_vel_angular_z = float(self._cmd_vel_angular_z)
+            msg.robot_lat = float(self._robot_lat)
+            msg.robot_lon = float(self._robot_lon)
+        self._telemetry_pub.publish(msg)
+
+    def destroy_node(self) -> bool:
+        self._cancel_active_mission(reason="node shutdown", brake_if_auto=False)
+        return super().destroy_node()
+
+
+def main(args=None) -> None:
+    rclpy.init(args=args)
     node = NavCommandServerNode()
-    executor = MultiThreadedExecutor(num_threads=2)
+    executor = MultiThreadedExecutor(num_threads=4)
     executor.add_node(node)
+
     try:
         executor.spin()
     except KeyboardInterrupt:
         pass
     finally:
         executor.shutdown()
-        node.destroy_node()
         try:
-            if rclpy.ok():
-                rclpy.shutdown()
+            node.destroy_node()
         except Exception:
             pass
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

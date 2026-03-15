@@ -82,7 +82,7 @@ planner_server:
       cost_travel_multiplier: 0.4  # castigo por distancia extra
 
       use_final_approach_orientation: false
-      smooth_path: false
+      smooth_path: true
       debug_visualizations: false
 
 # ================================
@@ -317,6 +317,26 @@ global_costmap:
         lethal_override_cost: 254
       always_send_full_costmap: true
 
+
+# ================================
+# ROUTE SERVER
+# ================================
+route_server:
+  ros__parameters:
+    use_sim_time: true
+    base_frame: base_footprint
+    route_frame: map
+    graph_filepath: ""
+    costmap_topic: global_costmap/costmap_raw
+    path_density: 0.1
+    enable_nn_search: false
+    smooth_corners: true
+    smoothing_radius: 2.0
+    graph_file_loader: "GeoJsonGraphFileLoader"
+    edge_cost_functions: ["DistanceScorer"]
+    GeoJsonGraphFileLoader.plugin: "nav2_route::GeoJsonGraphFileLoader"
+    DistanceScorer.plugin: "nav2_route::DistanceScorer"
+
 # ================================
 # LIFECYCLE
 # ================================
@@ -332,3 +352,4 @@ lifecycle_manager_navigation:
       - bt_navigator
       - behavior_server
       - waypoint_follower
+      - route_server

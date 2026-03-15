@@ -77,6 +77,9 @@ def generate_launch_description():
     bt_xml = os.path.join(
         params_dir, "navigate_to_pose_w_replanning_and_recovery_no_spin.xml"
     )
+    route_bt_xml = os.path.join(
+        params_dir, "navigate_to_pose_route_server_no_stop.xml"
+    )
     bt_through_poses_xml = os.path.join(
         params_dir, "navigate_through_poses_w_replanning_and_recovery_no_spin.xml"
     )
@@ -84,7 +87,7 @@ def generate_launch_description():
         source_file=nav2_params,
         root_key="",
         param_rewrites={
-            "default_nav_to_pose_bt_xml": bt_xml,
+            "default_nav_to_pose_bt_xml": route_bt_xml,
             "default_nav_through_poses_bt_xml": bt_through_poses_xml,
         },
         convert_types=True,
@@ -248,6 +251,32 @@ def generate_launch_description():
             "autostart": "True",
         }.items(),
     )
+    route_server_cmd = Node(
+        package="nav2_route",
+        executable="route_server",
+        name="route_server",
+        output="screen",
+        parameters=[
+            configured_params,
+            {
+                "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
+                "route_frame": map_frame,
+            },
+        ],
+    )
+    route_server_lifecycle_cmd = Node(
+        package="nav2_lifecycle_manager",
+        executable="lifecycle_manager",
+        name="route_server_lifecycle_manager",
+        output="screen",
+        parameters=[
+            {
+                "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
+                "autostart": True,
+                "node_names": ["route_server"],
+            }
+        ],
+    )
     keepout_filter_mask_server_cmd = Node(
         package="nav2_map_server",
         executable="map_server",
@@ -325,6 +354,44 @@ def generate_launch_description():
                 "mask_width": 3000,
                 "mask_height": 3000,
                 "mask_resolution": 0.1,
+            }
+        ],
+    )
+    nav_command_server_cmd = Node(
+        package="navegacion_gps",
+        executable="nav_command_server",
+        name="nav_command_server",
+        output="screen",
+        parameters=[
+            {
+                "fromll_service": "/fromLL",
+                "fromll_service_fallback": "/navsat_transform/fromLL",
+                "fromll_wait_timeout_s": 2.0,
+                "map_frame": map_frame,
+                "gps_topic": gps_topic,
+                "cmd_vel_safe_topic": "/cmd_vel_safe",
+                "brake_topic": "/cmd_vel_safe",
+                "manual_cmd_topic": "/cmd_vel_safe",
+                "teleop_cmd_topic": "/cmd_vel_teleop",
+                "brake_publish_count": 5,
+                "brake_publish_interval_s": 0.1,
+                "manual_cmd_timeout_s": 0.4,
+                "manual_watchdog_hz": 10.0,
+                "nav_telemetry_hz": 5.0,
+                "telemetry_topic": "/nav_command_server/telemetry",
+                "set_goal_service": "/nav_command_server/set_goal_ll",
+                "cancel_goal_service": "/nav_command_server/cancel_goal",
+                "brake_service": "/nav_command_server/brake",
+                "set_manual_mode_service": "/nav_command_server/set_manual_mode",
+                "get_state_service": "/nav_command_server/get_state",
+                "navigate_to_pose_action": "navigate_to_pose",
+                "compute_and_track_route_action": "compute_and_track_route",
+                "follow_path_action": "follow_path",
+                "route_first_path_timeout_s": 2.0,
+                "set_route_graph_service": "/route_server/set_route_graph",
+                "route_graph_temp_filepath": "/tmp/nav_command_server_route_graph.geojson",
+                "route_nav_to_pose_bt_xml": route_bt_xml,
+                "legacy_nav_to_pose_bt_xml": bt_xml,
             }
         ],
     )
@@ -506,10 +573,13 @@ def generate_launch_description():
     ld.add_action(ekf_map_cmd)
     ld.add_action(navsat_transform_cmd)
     ld.add_action(navigation2_cmd)
+    ld.add_action(route_server_cmd)
+    ld.add_action(route_server_lifecycle_cmd)
     ld.add_action(keepout_filter_mask_server_cmd)
     ld.add_action(keepout_costmap_filter_info_server_cmd)
     ld.add_action(keepout_lifecycle_cmd)
     ld.add_action(zones_manager_cmd)
+    ld.add_action(nav_command_server_cmd)
     ld.add_action(nav_snapshot_server_cmd)
     ld.add_action(no_go_editor_cmd)
     ld.add_action(rviz_cmd)
