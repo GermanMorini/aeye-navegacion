@@ -315,7 +315,7 @@ global_costmap:
         transform_tolerance: 1.0
         override_lethal_cost: True
         lethal_override_cost: 254
-      always_send_full_costmap: false
+      always_send_full_costmap: true
 
 # ================================
 # LIFECYCLE

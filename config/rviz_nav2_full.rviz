@@ -6,7 +6,7 @@ Panels:
       Expanded:
         - /Plan1
       Splitter Ratio: 0.5
-    Tree Height: 367
+    Tree Height: 443
   - Class: rviz_common/Tool Properties
     Expanded: ~
     Name: Tool Properties
@@ -584,9 +584,9 @@ Visualization Manager:
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: -26.337587356567383
-        Y: -14.110328674316406
-        Z: 7.829424858093262
+        X: 0.2541065216064453
+        Y: 0.3226874768733978
+        Z: -40.61719512939453
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
@@ -595,7 +595,7 @@ Visualization Manager:
       Pitch: 1.5697963237762451
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz_default_plugins)
-      Yaw: 4.701374530792236
+      Yaw: 4.706374645233154
     Saved: ~
 Window Geometry:
   Displays:

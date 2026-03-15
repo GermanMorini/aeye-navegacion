@@ -319,10 +319,12 @@ def generate_launch_description():
                 "degrade_edge_cost": 40,
                 "degrade_min_cost": 1,
                 "degrade_use_l2": True,
-                "mask_origin_mode": "centered",
-                "mask_width": 500,
-                "mask_height": 500,
-                "mask_resolution": 0.5,
+                "mask_origin_mode": "explicit",
+                "mask_origin_x": -150.0,
+                "mask_origin_y": -150.0,
+                "mask_width": 3000,
+                "mask_height": 3000,
+                "mask_resolution": 0.1,
             }
         ],
     )

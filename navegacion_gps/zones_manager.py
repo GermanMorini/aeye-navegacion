@@ -12,6 +12,7 @@ import yaml
 from ament_index_python.packages import get_package_share_directory
 from geographic_msgs.msg import GeoPoint
 from geometry_msgs.msg import Pose, Quaternion
+from nav2_msgs.srv import ClearEntireCostmap
 from nav2_msgs.srv import LoadMap
 from nav_msgs.msg import MapMetaData
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
@@ -102,6 +103,11 @@ class ZonesManagerNode(Node):
 
         self.declare_parameter("load_map_service", "/keepout_filter_mask_server/load_map")
         self.declare_parameter("load_map_wait_timeout_s", 8.0)
+        self.declare_parameter("clear_global_after_reload", True)
+        self.declare_parameter(
+            "clear_global_costmap_service", "/global_costmap/clear_entirely_global_costmap"
+        )
+        self.declare_parameter("clear_global_costmap_wait_timeout_s", 2.0)
         self.declare_parameter("set_geojson_service", "/zones_manager/set_geojson")
         self.declare_parameter("get_state_service", "/zones_manager/get_state")
         self.declare_parameter(
@@ -119,12 +125,12 @@ class ZonesManagerNode(Node):
         self.declare_parameter("mask_image_file", "")
         self.declare_parameter("mask_yaml_file", "")
 
-        self.declare_parameter("mask_origin_mode", "centered")
-        self.declare_parameter("mask_origin_x", 0.0)
-        self.declare_parameter("mask_origin_y", 0.0)
-        self.declare_parameter("mask_width", 500)
-        self.declare_parameter("mask_height", 500)
-        self.declare_parameter("mask_resolution", 0.5)
+        self.declare_parameter("mask_origin_mode", "explicit")
+        self.declare_parameter("mask_origin_x", -150.0)
+        self.declare_parameter("mask_origin_y", -150.0)
+        self.declare_parameter("mask_width", 3000)
+        self.declare_parameter("mask_height", 3000)
+        self.declare_parameter("mask_resolution", 0.1)
 
         self.fromll_service = str(self.get_parameter("fromll_service").value)
         self.fromll_service_fallback = str(
@@ -143,6 +149,15 @@ class ZonesManagerNode(Node):
         self.load_map_service = str(self.get_parameter("load_map_service").value)
         self.load_map_wait_timeout_s = max(
             0.5, float(self.get_parameter("load_map_wait_timeout_s").value)
+        )
+        self.clear_global_after_reload = bool(
+            self.get_parameter("clear_global_after_reload").value
+        )
+        self.clear_global_costmap_service = str(
+            self.get_parameter("clear_global_costmap_service").value
+        )
+        self.clear_global_costmap_wait_timeout_s = max(
+            0.2, float(self.get_parameter("clear_global_costmap_wait_timeout_s").value)
         )
         self.set_geojson_service = str(self.get_parameter("set_geojson_service").value)
         self.get_state_service = str(self.get_parameter("get_state_service").value)
@@ -218,6 +233,11 @@ class ZonesManagerNode(Node):
             self.load_map_service,
             callback_group=self._client_group,
         )
+        self._clear_global_costmap_client = self.create_client(
+            ClearEntireCostmap,
+            self.clear_global_costmap_service,
+            callback_group=self._client_group,
+        )
 
         self._set_geojson_srv = self.create_service(
             SetZonesGeoJson,
@@ -246,6 +266,12 @@ class ZonesManagerNode(Node):
             f"load_map_service={self.load_map_service})"
         )
         self.get_logger().info(
+            "Global costmap clear config "
+            f"(enabled={self.clear_global_after_reload}, "
+            f"service={self.clear_global_costmap_service}, "
+            f"timeout_s={self.clear_global_costmap_wait_timeout_s:.2f})"
+        )
+        self.get_logger().info(
             "Keepout degrade config "
             f"(enabled={self.degrade_enabled}, radius_m={self.degrade_radius_m}, "
             f"edge_cost={self.degrade_edge_cost}, min_cost={self.degrade_min_cost}, "
@@ -268,28 +294,24 @@ class ZonesManagerNode(Node):
         return default_dir
 
     def _sanitize_mask_grid_params(self) -> None:
-        if self.mask_origin_mode not in ("centered", "explicit"):
+        if self.mask_origin_mode != "explicit":
             self.get_logger().warning(
-                f"mask_origin_mode='{self.mask_origin_mode}' invalid; forcing 'centered'"
+                f"mask_origin_mode='{self.mask_origin_mode}' unsupported; forcing 'explicit'"
             )
-            self.mask_origin_mode = "centered"
+            self.mask_origin_mode = "explicit"
         if self.mask_width <= 0:
-            self.get_logger().warning(f"mask_width={self.mask_width} invalid; forcing 500")
-            self.mask_width = 500
+            self.get_logger().warning(f"mask_width={self.mask_width} invalid; forcing 3000")
+            self.mask_width = 3000
         if self.mask_height <= 0:
-            self.get_logger().warning(f"mask_height={self.mask_height} invalid; forcing 500")
-            self.mask_height = 500
+            self.get_logger().warning(f"mask_height={self.mask_height} invalid; forcing 3000")
+            self.mask_height = 3000
         if self.mask_resolution <= 0.0 or not np.isfinite(self.mask_resolution):
             self.get_logger().warning(
-                f"mask_resolution={self.mask_resolution} invalid; forcing 0.5"
+                f"mask_resolution={self.mask_resolution} invalid; forcing 0.1"
             )
-            self.mask_resolution = 0.5
+            self.mask_resolution = 0.1
 
     def _effective_mask_origin(self) -> Tuple[float, float]:
-        if self.mask_origin_mode == "centered":
-            half_extent_x = 0.5 * float(self.mask_width) * float(self.mask_resolution)
-            half_extent_y = 0.5 * float(self.mask_height) * float(self.mask_resolution)
-            return (-half_extent_x, -half_extent_y)
         return (float(self.mask_origin_x), float(self.mask_origin_y))
 
     def _sanitize_degrade_params(self) -> None:
@@ -554,6 +576,23 @@ class ZonesManagerNode(Node):
             return False, f"load_map returned result={int(res.result)}"
         return True, ""
 
+    def _call_clear_global_costmap(self) -> Tuple[bool, str]:
+        if not self.clear_global_after_reload:
+            return True, ""
+        if not self._clear_global_costmap_client.wait_for_service(
+            timeout_sec=float(self.clear_global_costmap_wait_timeout_s)
+        ):
+            return False, f"service unavailable: {self.clear_global_costmap_service}"
+
+        req = ClearEntireCostmap.Request()
+        future = self._clear_global_costmap_client.call_async(req)
+        res = self._wait_for_future(
+            future, timeout_sec=float(self.clear_global_costmap_wait_timeout_s)
+        )
+        if res is None:
+            return False, f"timeout calling {self.clear_global_costmap_service}"
+        return True, ""
+
     def _save_geojson_to_disk(self, geojson_doc: Dict[str, Any]) -> Tuple[bool, str]:
         try:
             self.geojson_file.parent.mkdir(parents=True, exist_ok=True)
@@ -629,9 +668,17 @@ class ZonesManagerNode(Node):
         )
 
         map_reloaded = False
+        global_cleared = False
         ok_reload, err_reload = self._call_load_map()
         if ok_reload:
             map_reloaded = True
+            ok_clear, err_clear = self._call_clear_global_costmap()
+            if ok_clear:
+                global_cleared = True
+            else:
+                self.get_logger().warning(
+                    "global costmap clear failed after load_map: " + str(err_clear)
+                )
         else:
             self.get_logger().warning(f"load_map failed: {err_reload}")
 
@@ -644,13 +691,27 @@ class ZonesManagerNode(Node):
         with self._lock:
             self._geojson_doc = copy.deepcopy(geojson_doc)
             self._geojson_text = geojson_text
-            self._mask_ready = bool(map_reloaded)
-            self._mask_source = "map_server_load_map" if map_reloaded else "mask_files_only"
+            applied = bool(map_reloaded and global_cleared)
+            self._mask_ready = applied
+            if applied and self.clear_global_after_reload:
+                self._mask_source = "map_server_load_map+global_costmap_clear"
+            elif map_reloaded:
+                self._mask_source = "map_server_load_map"
+            else:
+                self._mask_source = "mask_files_only"
 
         if not map_reloaded:
             return (
                 False,
                 "mask files written but load_map failed",
+                False,
+                feature_count,
+                polygon_count,
+            )
+        if self.clear_global_after_reload and not global_cleared:
+            return (
+                False,
+                "mask loaded but global costmap clear failed",
                 False,
                 feature_count,
                 polygon_count,
