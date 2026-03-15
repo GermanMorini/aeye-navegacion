@@ -197,7 +197,7 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
     use_navsat = LaunchConfiguration("use_navsat")
     use_collision_monitor = LaunchConfiguration("use_collision_monitor")
-    use_frame_id_stripper = LaunchConfiguration("use_frame_id_stripper")
+    use_gazebo_utils = LaunchConfiguration("use_gazebo_utils")
     rviz_config = LaunchConfiguration("rviz_config")
     use_joint_state_bridge = LaunchConfiguration("use_joint_state_bridge")
     world_name = LaunchConfiguration("world_name")
@@ -243,10 +243,10 @@ def generate_launch_description():
         default_value="True",
         description="Whether to start collision monitor",
     )
-    declare_use_frame_id_stripper_cmd = DeclareLaunchArgument(
-        "use_frame_id_stripper",
+    declare_use_gazebo_utils_cmd = DeclareLaunchArgument(
+        "use_gazebo_utils",
         default_value="True",
-        description="Whether to strip model prefixes from sensor and odom frame_ids",
+        description="Whether to run gazebo_utils (frame normalization + cmd bridge)",
     )
     declare_use_joint_state_bridge_cmd = DeclareLaunchArgument(
         "use_joint_state_bridge",
@@ -545,10 +545,10 @@ def generate_launch_description():
         ],
         condition=IfCondition(use_collision_monitor),
     )
-    frame_id_stripper_cmd = Node(
+    gazebo_utils_cmd = Node(
         package="navegacion_gps",
-        executable="frame_id_stripper",
-        name="frame_id_stripper",
+        executable="gazebo_utils",
+        name="gazebo_utils",
         output="screen",
         parameters=[
             {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
@@ -586,8 +586,11 @@ def generate_launch_description():
             {"ultrasound_front_right_frame_id": "front_right_ultrasound"},
             {"odom_frame_id": "odom"},
             {"base_link_frame_id": "base_footprint"},
+            {"enable_cmd_vel_final_bridge": True},
+            {"cmd_vel_final_in_topic": "/cmd_vel_final"},
+            {"cmd_vel_gazebo_out_topic": "/cmd_vel_gazebo"},
         ],
-        condition=IfCondition(use_frame_id_stripper),
+        condition=IfCondition(use_gazebo_utils),
     )
     lidar_to_scan_cmd = Node(
         package="pointcloud_to_laserscan",
@@ -612,7 +615,7 @@ def generate_launch_description():
     ld.add_action(declare_rviz_config_cmd)
     ld.add_action(declare_use_navsat_cmd)
     ld.add_action(declare_use_collision_monitor_cmd)
-    ld.add_action(declare_use_frame_id_stripper_cmd)
+    ld.add_action(declare_use_gazebo_utils_cmd)
     ld.add_action(declare_use_joint_state_bridge_cmd)
     ld.add_action(declare_world_cmd)
     ld.add_action(declare_world_name_cmd)
@@ -639,7 +642,7 @@ def generate_launch_description():
     ld.add_action(rviz_cmd)
     ld.add_action(mapviz_cmd)
     ld.add_action(collision_monitor_cmd)
-    ld.add_action(frame_id_stripper_cmd)
+    ld.add_action(gazebo_utils_cmd)
     ld.add_action(lidar_to_scan_cmd)
     ld.add_action(collision_monitor_lifecycle_cmd)
 

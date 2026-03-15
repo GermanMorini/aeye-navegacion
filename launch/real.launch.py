@@ -96,7 +96,7 @@ def generate_launch_description():
     use_mapviz = LaunchConfiguration("use_mapviz")
     use_navsat = LaunchConfiguration("use_navsat")
     use_collision_monitor = LaunchConfiguration("use_collision_monitor")
-    use_frame_id_stripper = LaunchConfiguration("use_frame_id_stripper")
+    use_gazebo_utils = LaunchConfiguration("use_gazebo_utils")
     use_pointcloud_to_laserscan = LaunchConfiguration("use_pointcloud_to_laserscan")
     start_pixhawk = LaunchConfiguration("start_pixhawk")
     start_lidar = LaunchConfiguration("start_lidar")
@@ -147,10 +147,10 @@ def generate_launch_description():
         default_value="True",
         description="Whether to start collision monitor",
     )
-    declare_use_frame_id_stripper_cmd = DeclareLaunchArgument(
-        "use_frame_id_stripper",
+    declare_use_gazebo_utils_cmd = DeclareLaunchArgument(
+        "use_gazebo_utils",
         default_value="False",
-        description="Whether to strip model prefixes from sensor and odom frame_ids",
+        description="Whether to run gazebo_utils for frame normalization",
     )
     declare_use_pointcloud_to_laserscan_cmd = DeclareLaunchArgument(
         "use_pointcloud_to_laserscan",
@@ -419,10 +419,10 @@ def generate_launch_description():
         condition=IfCondition(use_collision_monitor),
     )
 
-    frame_id_stripper_cmd = Node(
+    gazebo_utils_cmd = Node(
         package="navegacion_gps",
-        executable="frame_id_stripper",
-        name="frame_id_stripper",
+        executable="gazebo_utils",
+        name="gazebo_utils",
         output="screen",
         parameters=[
             {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
@@ -435,8 +435,9 @@ def generate_launch_description():
             {"lidar_frame_id": "lidar_link"},
             {"odom_frame_id": "odom"},
             {"base_link_frame_id": "base_footprint"},
+            {"enable_cmd_vel_final_bridge": False},
         ],
-        condition=IfCondition(use_frame_id_stripper),
+        condition=IfCondition(use_gazebo_utils),
     )
 
     lidar_to_scan_cmd = Node(
@@ -487,7 +488,7 @@ def generate_launch_description():
     ld.add_action(declare_use_mapviz_cmd)
     ld.add_action(declare_use_navsat_cmd)
     ld.add_action(declare_use_collision_monitor_cmd)
-    ld.add_action(declare_use_frame_id_stripper_cmd)
+    ld.add_action(declare_use_gazebo_utils_cmd)
     ld.add_action(declare_use_pointcloud_to_laserscan_cmd)
     ld.add_action(declare_start_pixhawk_cmd)
     ld.add_action(declare_start_lidar_cmd)
@@ -514,7 +515,7 @@ def generate_launch_description():
     ld.add_action(rviz_cmd)
     ld.add_action(mapviz_cmd)
     ld.add_action(collision_monitor_cmd)
-    ld.add_action(frame_id_stripper_cmd)
+    ld.add_action(gazebo_utils_cmd)
     ld.add_action(lidar_to_scan_cmd)
     ld.add_action(collision_monitor_lifecycle_cmd)
 

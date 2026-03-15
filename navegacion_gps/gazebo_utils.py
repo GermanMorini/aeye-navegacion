@@ -1,12 +1,14 @@
 import rclpy
-from rclpy.node import Node
+from geometry_msgs.msg import Twist
+from interfaces.msg import CmdVelFinal
 from nav_msgs.msg import Odometry
+from rclpy.node import Node
 from sensor_msgs.msg import Imu, LaserScan, NavSatFix, PointCloud2
 
 
-class FrameIdStripper(Node):
+class GazeboUtilsNode(Node):
     def __init__(self):
-        super().__init__("frame_id_stripper")
+        super().__init__("gazebo_utils")
         self.declare_parameter("strip_prefix", True)
 
         self.declare_parameter("imu_in_topic", "/imu/data_raw")
@@ -67,8 +69,20 @@ class FrameIdStripper(Node):
         self.declare_parameter("odom_out_topic", "/odom")
         self.declare_parameter("odom_frame_id", "odom")
         self.declare_parameter("base_link_frame_id", "base_footprint")
+        self.declare_parameter("enable_cmd_vel_final_bridge", False)
+        self.declare_parameter("cmd_vel_final_in_topic", "/cmd_vel_final")
+        self.declare_parameter("cmd_vel_gazebo_out_topic", "/cmd_vel_gazebo")
 
         self.strip_prefix = self.get_parameter("strip_prefix").value
+        self.enable_cmd_vel_final_bridge = bool(
+            self.get_parameter("enable_cmd_vel_final_bridge").value
+        )
+        self.cmd_vel_final_in_topic = str(
+            self.get_parameter("cmd_vel_final_in_topic").value
+        )
+        self.cmd_vel_gazebo_out_topic = str(
+            self.get_parameter("cmd_vel_gazebo_out_topic").value
+        )
 
         self.imu_frame_id = self.get_parameter("imu_frame_id").value
         self.gps_frame_id = self.get_parameter("gps_frame_id").value
@@ -185,6 +199,24 @@ class FrameIdStripper(Node):
         )
         self.create_subscription(Odometry, odom_in_topic, self._odom_cb, 10)
 
+        self.cmd_vel_gazebo_pub = None
+        if self.enable_cmd_vel_final_bridge:
+            self.cmd_vel_gazebo_pub = self.create_publisher(
+                Twist, self.cmd_vel_gazebo_out_topic, 10
+            )
+            self.create_subscription(
+                CmdVelFinal,
+                self.cmd_vel_final_in_topic,
+                self._cmd_vel_final_cb,
+                10,
+            )
+            self.get_logger().info(
+                "Gazebo cmd bridge enabled "
+                f"({self.cmd_vel_final_in_topic} -> {self.cmd_vel_gazebo_out_topic})"
+            )
+        else:
+            self.get_logger().info("Gazebo cmd bridge disabled")
+
     def _strip(self, frame_id: str) -> str:
         if not self.strip_prefix:
             return frame_id
@@ -244,10 +276,27 @@ class FrameIdStripper(Node):
         msg.child_frame_id = self._resolve_frame(msg.child_frame_id, self.base_link_frame_id)
         self.odom_pub.publish(msg)
 
+    def _publish_cmd_vel_gazebo(self, linear_x: float, angular_z: float) -> None:
+        if self.cmd_vel_gazebo_pub is None:
+            return
+        twist = Twist()
+        twist.linear.x = float(linear_x)
+        twist.angular.z = float(angular_z)
+        self.cmd_vel_gazebo_pub.publish(twist)
+
+    def _cmd_vel_final_cb(self, msg: CmdVelFinal) -> None:
+        if int(msg.brake_pct) > 0:
+            self._publish_cmd_vel_gazebo(0.0, 0.0)
+            return
+        self._publish_cmd_vel_gazebo(
+            float(msg.twist.linear.x),
+            float(msg.twist.angular.z),
+        )
+
 
 def main():
     rclpy.init()
-    node = FrameIdStripper()
+    node = GazeboUtilsNode()
     rclpy.spin(node)
 
 

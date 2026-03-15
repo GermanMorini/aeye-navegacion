@@ -35,7 +35,7 @@ setup(
             'interactive_waypoint_follower = navegacion_gps.interactive_waypoint_follower:main',
             'gps_waypoint_logger = navegacion_gps.gps_waypoint_logger:main',
             'teleop = navegacion_gps.teleop:main',
-            'frame_id_stripper = navegacion_gps.frame_id_stripper:main',
+            'gazebo_utils = navegacion_gps.gazebo_utils:main',
             'yaml_waypoints_from_ll = navegacion_gps.yaml_waypoints_from_ll:main',
             'zones_manager = navegacion_gps.zones_manager:main',
             'nav_command_server = navegacion_gps.nav_command_server:main',

@@ -13,7 +13,7 @@ Demo de navegacion GPS con ROS 2 + Nav2. Usa robot_localization (EKF + navsat_tr
   - `interactive_waypoint_follower.py`: sigue waypoints clickeados en Mapviz (frame `wgs84`).
   - `yaml_waypoints_from_ll.py`: convierte YAML lat/lon con `/fromLL` y manda todos juntos al `follow_waypoints`.
   - `gps_waypoint_logger.py`: GUI para registrar waypoints GPS.
-  - `frame_id_stripper.py`: reescribe `frame_id` de sensores/odom para quitar prefijos.
+  - `gazebo_utils.py`: reescribe `frame_id` de sensores/odom y adapta `/cmd_vel_final` a `/cmd_vel_gazebo` para simulación.
   - `utils/gps_utils.py`: conversiones GeoPose y quaternion.
 - `launch/`: lanzadores principales.
   - `simulacion.launch.py`: stack completo (Gazebo + EKF + Nav2 + RViz/Mapviz).

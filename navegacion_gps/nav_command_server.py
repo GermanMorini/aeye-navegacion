@@ -10,6 +10,7 @@ from action_msgs.msg import GoalStatus
 from geographic_msgs.msg import GeoPoint
 from geometry_msgs.msg import PoseStamped, Quaternion, Twist
 from nav2_msgs.action import FollowWaypoints, NavigateThroughPoses
+from nav2_msgs.msg import CollisionMonitorState
 from rclpy.action import ActionClient
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
@@ -17,7 +18,7 @@ from rclpy.node import Node
 from robot_localization.srv import FromLL
 from sensor_msgs.msg import NavSatFix
 
-from interfaces.msg import NavTelemetry
+from interfaces.msg import CmdVelFinal, NavTelemetry
 from interfaces.srv import (
     BrakeNav,
     CancelNavGoal,
@@ -39,6 +40,8 @@ class NavCommandServerNode(Node):
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("gps_topic", "/gps/fix")
         self.declare_parameter("cmd_vel_safe_topic", "/cmd_vel_safe")
+        self.declare_parameter("cmd_vel_final_topic", "/cmd_vel_final")
+        self.declare_parameter("collision_monitor_state_topic", "/collision_monitor_state")
         self.declare_parameter("brake_topic", "/cmd_vel_safe")
         self.declare_parameter("manual_cmd_topic", "/cmd_vel_safe")
         self.declare_parameter("teleop_cmd_topic", "/cmd_vel_teleop")
@@ -72,6 +75,10 @@ class NavCommandServerNode(Node):
         self.map_frame = str(self.get_parameter("map_frame").value)
         self.gps_topic = str(self.get_parameter("gps_topic").value)
         self.cmd_vel_safe_topic = str(self.get_parameter("cmd_vel_safe_topic").value)
+        self.cmd_vel_final_topic = str(self.get_parameter("cmd_vel_final_topic").value)
+        self.collision_monitor_state_topic = str(
+            self.get_parameter("collision_monitor_state_topic").value
+        )
         self.brake_topic = str(self.get_parameter("brake_topic").value)
         self.manual_cmd_topic = str(self.get_parameter("manual_cmd_topic").value)
         self.teleop_cmd_topic = str(self.get_parameter("teleop_cmd_topic").value)
@@ -104,16 +111,18 @@ class NavCommandServerNode(Node):
         self._lock = threading.Lock()
         self._current_goal_handle = None
         self._manual_enabled = False
-        self._last_manual_cmd = Twist()
+        self._last_manual_cmd = CmdVelFinal()
         self._last_manual_cmd_time: Optional[float] = None
         self._manual_watchdog_stop_sent = False
         self._last_cmd_vel_safe: Optional[Twist] = None
+        self._is_navigating = False
+        self._auto_mode = "idle"
+        self._collision_stop_active = False
         self._last_robot_pose: Optional[Dict[str, float]] = None
         self._last_telemetry_sent: Optional[float] = None
         self._loop_waypoint_poses: List[PoseStamped] = []
         self._loop_original_poses: List[PoseStamped] = []
-        self._loop_reduced_poses: List[PoseStamped] = []
-        self._loop_send_reduced_next = True
+        self._loop_restart_poses: List[PoseStamped] = []
         self._loop_enabled = False
 
         # Service callbacks are mutually exclusive; clients/actions are reentrant to avoid
@@ -182,14 +191,21 @@ class NavCommandServerNode(Node):
             callback_group=self._service_group,
         )
 
-        self._brake_pub = self.create_publisher(Twist, self.brake_topic, 10)
-        self._manual_cmd_pub = self.create_publisher(Twist, self.manual_cmd_topic, 10)
+        self._cmd_vel_final_pub = self.create_publisher(
+            CmdVelFinal, self.cmd_vel_final_topic, 10
+        )
         self._gps_sub = self.create_subscription(NavSatFix, self.gps_topic, self._on_gps_fix, 10)
         self._cmd_vel_sub = self.create_subscription(
             Twist, self.cmd_vel_safe_topic, self._on_cmd_vel_safe, 10
         )
         self._teleop_cmd_sub = self.create_subscription(
-            Twist, self.teleop_cmd_topic, self._on_teleop_cmd, 10
+            CmdVelFinal, self.teleop_cmd_topic, self._on_teleop_cmd, 10
+        )
+        self._collision_state_sub = self.create_subscription(
+            CollisionMonitorState,
+            self.collision_monitor_state_topic,
+            self._on_collision_monitor_state,
+            10,
         )
 
         self._manual_watchdog_timer = self.create_timer(
@@ -200,6 +216,7 @@ class NavCommandServerNode(Node):
             f"(set_goal={self.set_goal_service}, cancel={self.cancel_goal_service}, "
             f"brake={self.brake_service}, telemetry={self.telemetry_topic}, "
             f"teleop_topic={self.teleop_cmd_topic}, "
+            f"cmd_vel_final_topic={self.cmd_vel_final_topic}, "
             f"follow_waypoints_action={self.follow_waypoints_action}, "
             f"navigate_through_poses_action={self.navigate_through_poses_action})"
         )
@@ -310,13 +327,59 @@ class NavCommandServerNode(Node):
     def _manual_control_payload_locked(self) -> Dict[str, Any]:
         return {
             "enabled": bool(self._manual_enabled),
-            "linear_x_cmd": float(self._last_manual_cmd.linear.x),
-            "angular_z_cmd": float(self._last_manual_cmd.angular.z),
+            "linear_x_cmd": float(self._last_manual_cmd.twist.linear.x),
+            "angular_z_cmd": float(self._last_manual_cmd.twist.angular.z),
         }
+
+    @staticmethod
+    def _build_cmd_vel_final(linear_x: float, angular_z: float, brake_pct: int) -> CmdVelFinal:
+        msg = CmdVelFinal()
+        msg.twist.linear.x = float(linear_x)
+        msg.twist.angular.z = float(angular_z)
+        msg.brake_pct = int(max(0, min(100, int(brake_pct))))
+        return msg
+
+    def _publish_cmd_vel_final(self, msg: CmdVelFinal) -> None:
+        self._cmd_vel_final_pub.publish(msg)
+
+    def _publish_stop(self, brake_pct: int) -> None:
+        self._publish_cmd_vel_final(
+            self._build_cmd_vel_final(linear_x=0.0, angular_z=0.0, brake_pct=brake_pct)
+        )
+
+    def _publish_brake_sequence(self, brake_pct: int) -> None:
+        for index in range(self.brake_publish_count):
+            self._publish_stop(brake_pct=brake_pct)
+            if index + 1 < self.brake_publish_count and self.brake_publish_interval_s > 0.0:
+                time.sleep(self.brake_publish_interval_s)
+
+    def _activate_manual_takeover_if_needed(self) -> None:
+        with self._lock:
+            already_manual = bool(self._manual_enabled)
+        if already_manual:
+            return
+        ok, err, _ = self.set_manual_mode(True)
+        if not ok:
+            self.get_logger().warning(f"Manual takeover failed: {err}")
+
+    def _cancel_goal_for_manual_takeover_async(self) -> None:
+        def _run_cancel() -> None:
+            cancel_ok, cancel_msg = self.cancel_current_goal(clear_loop_config=True)
+            if not cancel_ok and cancel_msg != "no active goal":
+                self.get_logger().warning(
+                    f"Manual mode: failed to cancel goal ({cancel_msg}), continuing"
+                )
+
+        cancel_thread = threading.Thread(
+            target=_run_cancel,
+            daemon=True,
+            name="nav_cmd_manual_cancel",
+        )
+        cancel_thread.start()
 
     def _fill_get_state_response(self, response: GetNavState.Response) -> None:
         with self._lock:
-            goal_active = self._current_goal_handle is not None
+            goal_active = self._is_navigating
             cmd_vel_safe = self._cmd_vel_safe_payload_locked()
             manual_control = self._manual_control_payload_locked()
             robot_pose = self._last_robot_pose
@@ -347,7 +410,7 @@ class NavCommandServerNode(Node):
                 return
             self._last_telemetry_sent = now
 
-            goal_active = self._current_goal_handle is not None
+            goal_active = self._is_navigating
             manual_control = self._manual_control_payload_locked()
             cmd_vel_safe = self._cmd_vel_safe_payload_locked()
             robot_pose = self._last_robot_pose
@@ -379,31 +442,70 @@ class NavCommandServerNode(Node):
     def _on_cmd_vel_safe(self, msg: Twist) -> None:
         with self._lock:
             self._last_cmd_vel_safe = msg
+            manual_enabled = bool(self._manual_enabled)
+            is_navigating = bool(self._is_navigating)
+            collision_stop_active = bool(self._collision_stop_active)
+
+        if manual_enabled or (not is_navigating):
+            self._publish_telemetry(force=False)
+            return
+
+        if collision_stop_active:
+            self._publish_stop(brake_pct=100)
+            self._publish_telemetry(force=False)
+            return
+
+        self._publish_cmd_vel_final(
+            self._build_cmd_vel_final(
+                linear_x=float(msg.linear.x),
+                angular_z=float(msg.angular.z),
+                brake_pct=0,
+            )
+        )
         self._publish_telemetry(force=False)
 
-    def _on_teleop_cmd(self, msg: Twist) -> None:
-        ok, err = self.set_manual_cmd(float(msg.linear.x), float(msg.angular.z))
+    def _on_collision_monitor_state(self, msg: CollisionMonitorState) -> None:
+        stop_active = int(msg.action_type) == int(CollisionMonitorState.STOP)
+        with self._lock:
+            self._collision_stop_active = stop_active
+            manual_enabled = bool(self._manual_enabled)
+            is_navigating = bool(self._is_navigating)
+        if (not manual_enabled) and is_navigating and stop_active:
+            self._publish_brake_sequence(brake_pct=100)
+        self._publish_telemetry(force=False)
+
+    def _on_teleop_cmd(self, msg: CmdVelFinal) -> None:
+        self._activate_manual_takeover_if_needed()
+        ok, err = self.set_manual_cmd(
+            linear_x=float(msg.twist.linear.x),
+            angular_z=float(msg.twist.angular.z),
+            brake_pct=int(msg.brake_pct),
+        )
         if (not ok) and (err != "manual control is disabled"):
             self.get_logger().warning(
                 "Teleop cmd rejected "
-                f"(linear_x={float(msg.linear.x):.3f}, angular_z={float(msg.angular.z):.3f}, "
+                f"(linear_x={float(msg.twist.linear.x):.3f}, "
+                f"angular_z={float(msg.twist.angular.z):.3f}, "
+                f"brake_pct={int(msg.brake_pct)}, "
                 f"error='{err}')"
             )
 
-    def _publish_manual_twist(self, linear_x: float, angular_z: float) -> None:
-        cmd = Twist()
-        cmd.linear.x = float(linear_x)
-        cmd.angular.z = float(angular_z)
-        self._manual_cmd_pub.publish(cmd)
+    def _publish_manual_cmd(self, linear_x: float, angular_z: float, brake_pct: int) -> None:
+        self._publish_cmd_vel_final(
+            self._build_cmd_vel_final(
+                linear_x=linear_x,
+                angular_z=angular_z,
+                brake_pct=brake_pct,
+            )
+        )
 
     def _publish_manual_stop(self) -> None:
-        self._publish_manual_twist(0.0, 0.0)
+        self._publish_manual_cmd(linear_x=0.0, angular_z=0.0, brake_pct=0)
 
     def _clear_loop_config_locked(self) -> None:
         self._loop_waypoint_poses = []
         self._loop_original_poses = []
-        self._loop_reduced_poses = []
-        self._loop_send_reduced_next = True
+        self._loop_restart_poses = []
         self._loop_enabled = False
 
     def _build_pose_from_ll(self, lat: float, lon: float, yaw_deg: float) -> Optional[PoseStamped]:
@@ -439,7 +541,7 @@ class NavCommandServerNode(Node):
         poses_list = list(poses)
         if len(poses_list) <= 1:
             return poses_list
-        return [poses_list[-1], poses_list[0]]
+        return poses_list[1:] + [poses_list[0]]
 
     def _send_follow_waypoints_goal(
         self, poses: Sequence[PoseStamped], loop_enabled: bool, reason: str
@@ -470,6 +572,8 @@ class NavCommandServerNode(Node):
             self._current_goal_handle = goal_handle
             self._loop_waypoint_poses = poses_list
             self._loop_enabled = bool(loop_enabled and (len(poses_list) > 1))
+            self._is_navigating = True
+            self._auto_mode = "loop" if self._loop_enabled else "point_to_point"
 
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(
@@ -515,6 +619,8 @@ class NavCommandServerNode(Node):
             self._current_goal_handle = goal_handle
             self._loop_waypoint_poses = poses_list
             self._loop_enabled = bool(loop_enabled and (len(poses_list) > 1))
+            self._is_navigating = True
+            self._auto_mode = "loop" if self._loop_enabled else "point_to_point"
 
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(
@@ -560,6 +666,8 @@ class NavCommandServerNode(Node):
 
         with self._lock:
             self._clear_loop_config_locked()
+            self._is_navigating = False
+            self._auto_mode = "idle"
 
         self.get_logger().info(
             f"SetNavGoalLL request (waypoints={len(waypoints)}, loop={bool(loop_enabled)})"
@@ -573,19 +681,21 @@ class NavCommandServerNode(Node):
             reason="set_goal_service",
         )
         if (not ok) or (not loop_enabled) or (len(poses) <= 1):
+            if not ok:
+                with self._lock:
+                    self._is_navigating = False
+                    self._auto_mode = "idle"
             return ok, err
 
         loop_restart_poses = self._build_loop_restart_poses(poses)
         with self._lock:
             self._loop_original_poses = list(poses)
-            self._loop_reduced_poses = loop_restart_poses
-            self._loop_waypoint_poses = loop_restart_poses
+            self._loop_restart_poses = loop_restart_poses
+            self._loop_waypoint_poses = list(loop_restart_poses)
             self._loop_enabled = True
-            self._loop_send_reduced_next = True
         self.get_logger().info(
             "Loop paths configured "
-            f"(original={len(self._loop_original_poses)}, reduced={len(loop_restart_poses)}, "
-            "next=reduced)"
+            f"(original={len(self._loop_original_poses)}, restart={len(loop_restart_poses)})"
         )
         return ok, err
 
@@ -603,23 +713,31 @@ class NavCommandServerNode(Node):
 
         restart_goal_poses: Optional[List[PoseStamped]] = None
         restart_reason = ""
-        sent_reduced = False
+        force_brake = False
         with self._lock:
+            auto_mode = str(self._auto_mode)
+            manual_enabled = bool(self._manual_enabled)
             self._current_goal_handle = None
             if (
-                status == GoalStatus.STATUS_SUCCEEDED
+                auto_mode == "loop"
+                and status == GoalStatus.STATUS_SUCCEEDED
                 and self._loop_enabled
-                and (not self._manual_enabled)
+                and (not manual_enabled)
                 and len(self._loop_original_poses) > 1
-                and len(self._loop_reduced_poses) > 1
+                and len(self._loop_restart_poses) > 1
             ):
-                if self._loop_send_reduced_next:
-                    restart_goal_poses = list(self._loop_reduced_poses)
-                    restart_reason = "loop_restart_reduced"
-                    sent_reduced = True
-                else:
-                    restart_goal_poses = list(self._loop_original_poses)
-                    restart_reason = "loop_restart_original"
+                restart_goal_poses = list(self._loop_restart_poses)
+                restart_reason = "loop_restart_rotated"
+            else:
+                self._is_navigating = False
+                self._auto_mode = "idle"
+                if auto_mode == "loop":
+                    self._clear_loop_config_locked()
+                    if (status != GoalStatus.STATUS_SUCCEEDED) and (not manual_enabled):
+                        force_brake = True
+                elif auto_mode == "point_to_point":
+                    if not manual_enabled:
+                        force_brake = True
 
         should_restart = restart_goal_poses is not None
         if should_restart:
@@ -630,11 +748,18 @@ class NavCommandServerNode(Node):
             )
             with self._lock:
                 if ok and self._loop_enabled and (not self._manual_enabled):
-                    self._loop_send_reduced_next = not sent_reduced
+                    self._is_navigating = True
+                    self._auto_mode = "loop"
                 else:
                     self._clear_loop_config_locked()
+                    self._is_navigating = False
+                    self._auto_mode = "idle"
+                    force_brake = not self._manual_enabled
             if not ok:
                 self.get_logger().warning(f"Loop restart failed: {err}")
+
+        if force_brake:
+            self._publish_brake_sequence(brake_pct=100)
 
         self.get_logger().info(
             f"{action_name} result received "
@@ -648,6 +773,8 @@ class NavCommandServerNode(Node):
             handle = self._current_goal_handle
             if clear_loop_config:
                 self._clear_loop_config_locked()
+                self._is_navigating = False
+                self._auto_mode = "idle"
         if handle is None:
             return False, "no active goal"
 
@@ -660,6 +787,8 @@ class NavCommandServerNode(Node):
             self._current_goal_handle = None
             if clear_loop_config:
                 self._clear_loop_config_locked()
+            self._is_navigating = False
+            self._auto_mode = "idle"
         self._publish_telemetry(force=True)
         return True, "cancelled"
 
@@ -668,14 +797,12 @@ class NavCommandServerNode(Node):
         cancel_msg = "no active goal"
         with self._lock:
             has_goal = self._current_goal_handle is not None
+            self._is_navigating = False
+            self._auto_mode = "idle"
         if has_goal:
             cancel_ok, cancel_msg = self.cancel_current_goal()
 
-        stop_cmd = Twist()
-        for index in range(self.brake_publish_count):
-            self._brake_pub.publish(stop_cmd)
-            if index + 1 < self.brake_publish_count and self.brake_publish_interval_s > 0.0:
-                time.sleep(self.brake_publish_interval_s)
+        self._publish_brake_sequence(brake_pct=100)
 
         self._publish_telemetry(force=True)
         if cancel_ok:
@@ -686,43 +813,45 @@ class NavCommandServerNode(Node):
         if enabled:
             with self._lock:
                 has_goal = self._current_goal_handle is not None
-            if has_goal:
-                cancel_ok, cancel_msg = self.cancel_current_goal()
-                if not cancel_ok:
-                    self.get_logger().warning(
-                        f"Manual mode: failed to cancel goal ({cancel_msg}), continuing"
-                    )
-
-            with self._lock:
                 self._manual_enabled = True
-                self._last_manual_cmd = Twist()
+                self._is_navigating = False
+                self._auto_mode = "idle"
+                self._last_manual_cmd = CmdVelFinal()
                 self._last_manual_cmd_time = None
                 self._manual_watchdog_stop_sent = False
+            if has_goal:
+                # Do not block manual takeover while waiting cancel ack from Nav2.
+                self._cancel_goal_for_manual_takeover_async()
+
             self._publish_manual_stop()
             self._publish_telemetry(force=True)
             return True, "manual control enabled", True
 
         with self._lock:
             self._manual_enabled = False
-            self._last_manual_cmd = Twist()
+            self._last_manual_cmd = CmdVelFinal()
             self._last_manual_cmd_time = None
             self._manual_watchdog_stop_sent = False
         self._publish_manual_stop()
         self._publish_telemetry(force=True)
         return True, "manual control disabled", False
 
-    def set_manual_cmd(self, linear_x: float, angular_z: float) -> Tuple[bool, str]:
+    def set_manual_cmd(
+        self, linear_x: float, angular_z: float, brake_pct: int
+    ) -> Tuple[bool, str]:
         if not np.isfinite(linear_x) or not np.isfinite(angular_z):
             return False, "invalid manual command values"
         now = time.monotonic()
+        clamped_brake = int(max(0, min(100, int(brake_pct))))
         with self._lock:
             if not self._manual_enabled:
                 return False, "manual control is disabled"
-            self._last_manual_cmd.linear.x = float(linear_x)
-            self._last_manual_cmd.angular.z = float(angular_z)
+            self._last_manual_cmd.twist.linear.x = float(linear_x)
+            self._last_manual_cmd.twist.angular.z = float(angular_z)
+            self._last_manual_cmd.brake_pct = clamped_brake
             self._last_manual_cmd_time = now
             self._manual_watchdog_stop_sent = False
-        self._publish_manual_twist(linear_x, angular_z)
+        self._publish_manual_cmd(linear_x, angular_z, clamped_brake)
         self._publish_telemetry(force=False)
         return True, "manual command published"
 
@@ -743,7 +872,7 @@ class NavCommandServerNode(Node):
         if stale and (not stop_sent):
             self._publish_manual_stop()
             with self._lock:
-                self._last_manual_cmd = Twist()
+                self._last_manual_cmd = CmdVelFinal()
                 self._manual_watchdog_stop_sent = True
             self._publish_telemetry(force=True)
 
