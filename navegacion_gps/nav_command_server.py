@@ -124,6 +124,9 @@ class NavCommandServerNode(Node):
         self._loop_original_poses: List[PoseStamped] = []
         self._loop_restart_poses: List[PoseStamped] = []
         self._loop_enabled = False
+        self._last_nav_result_status = int(GoalStatus.STATUS_UNKNOWN)
+        self._last_nav_result_text = "idle"
+        self._nav_result_event_id = 0
 
         # Service callbacks are mutually exclusive; clients/actions are reentrant to avoid
         # deadlocks when a service callback waits for a client future.
@@ -332,6 +335,45 @@ class NavCommandServerNode(Node):
         }
 
     @staticmethod
+    def _goal_status_label(status: Optional[int]) -> str:
+        status_int = int(status) if status is not None else int(GoalStatus.STATUS_UNKNOWN)
+        labels = {
+            int(GoalStatus.STATUS_UNKNOWN): "unknown",
+            int(GoalStatus.STATUS_ACCEPTED): "accepted",
+            int(GoalStatus.STATUS_EXECUTING): "executing",
+            int(GoalStatus.STATUS_CANCELING): "canceling",
+            int(GoalStatus.STATUS_SUCCEEDED): "succeeded",
+            int(GoalStatus.STATUS_CANCELED): "canceled",
+            int(GoalStatus.STATUS_ABORTED): "aborted",
+        }
+        return labels.get(status_int, f"status_{status_int}")
+
+    def _set_nav_result_locked(
+        self,
+        status: int,
+        text: str,
+        increment_event: bool = True,
+    ) -> None:
+        self._last_nav_result_status = int(status)
+        self._last_nav_result_text = str(text)
+        if increment_event:
+            current = int(getattr(self, "_nav_result_event_id", 0))
+            self._nav_result_event_id = current + 1
+
+    def _nav_result_payload_locked(self) -> Dict[str, Any]:
+        return {
+            "status": int(
+                getattr(
+                    self,
+                    "_last_nav_result_status",
+                    int(GoalStatus.STATUS_UNKNOWN),
+                )
+            ),
+            "text": str(getattr(self, "_last_nav_result_text", "")),
+            "event_id": int(getattr(self, "_nav_result_event_id", 0)),
+        }
+
+    @staticmethod
     def _build_cmd_vel_final(linear_x: float, angular_z: float, brake_pct: int) -> CmdVelFinal:
         msg = CmdVelFinal()
         msg.twist.linear.x = float(linear_x)
@@ -400,6 +442,14 @@ class NavCommandServerNode(Node):
         if handle is None:
             self._publish_telemetry(force=True)
             return
+        with self._lock:
+            NavCommandServerNode._set_nav_result_locked(
+                self,
+                int(GoalStatus.STATUS_CANCELING),
+                f"{reason}: cancel requested",
+                increment_event=True,
+            )
+        self._publish_telemetry(force=True)
 
         def _run_cancel() -> None:
             ok, msg = self._cancel_goal_handle_blocking(handle)
@@ -465,6 +515,7 @@ class NavCommandServerNode(Node):
             manual_control = self._manual_control_payload_locked()
             cmd_vel_safe = self._cmd_vel_safe_payload_locked()
             robot_pose = self._last_robot_pose
+            nav_result = self._nav_result_payload_locked()
 
         msg = NavTelemetry()
         msg.goal_active = bool(goal_active)
@@ -480,6 +531,9 @@ class NavCommandServerNode(Node):
         else:
             msg.robot_lat = float(robot_pose["lat"])
             msg.robot_lon = float(robot_pose["lon"])
+        msg.nav_result_status = int(nav_result["status"])
+        msg.nav_result_text = str(nav_result["text"])
+        msg.nav_result_event_id = int(nav_result["event_id"])
         self._telemetry_pub.publish(msg)
 
     def _on_gps_fix(self, msg: NavSatFix) -> None:
@@ -625,6 +679,12 @@ class NavCommandServerNode(Node):
             self._loop_enabled = bool(loop_enabled and (len(poses_list) > 1))
             self._is_navigating = True
             self._auto_mode = "loop" if self._loop_enabled else "point_to_point"
+            NavCommandServerNode._set_nav_result_locked(
+                self,
+                int(GoalStatus.STATUS_EXECUTING),
+                "FollowWaypoints goal accepted",
+                increment_event=True,
+            )
 
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(
@@ -672,6 +732,12 @@ class NavCommandServerNode(Node):
             self._loop_enabled = bool(loop_enabled and (len(poses_list) > 1))
             self._is_navigating = True
             self._auto_mode = "loop" if self._loop_enabled else "point_to_point"
+            NavCommandServerNode._set_nav_result_locked(
+                self,
+                int(GoalStatus.STATUS_EXECUTING),
+                "NavigateThroughPoses goal accepted",
+                increment_event=True,
+            )
 
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(
@@ -736,6 +802,12 @@ class NavCommandServerNode(Node):
                 with self._lock:
                     self._is_navigating = False
                     self._auto_mode = "idle"
+                    NavCommandServerNode._set_nav_result_locked(
+                        self,
+                        int(GoalStatus.STATUS_ABORTED),
+                        f"set goal failed: {err}",
+                        increment_event=True,
+                    )
             return ok, err
 
         loop_restart_poses = self._build_loop_restart_poses(poses)
@@ -791,6 +863,13 @@ class NavCommandServerNode(Node):
                         force_brake = True
 
         should_restart = restart_goal_poses is not None
+        status_code = int(status) if status is not None else int(GoalStatus.STATUS_UNKNOWN)
+        result_text = (
+            f"{action_name} result: {NavCommandServerNode._goal_status_label(status_code)}"
+        )
+        if missed_waypoints:
+            result_text += f" (missed={missed_waypoints})"
+
         if should_restart:
             ok, err = self._send_nav_goal_for_poses(
                 poses=restart_goal_poses,
@@ -801,13 +880,33 @@ class NavCommandServerNode(Node):
                 if ok and self._loop_enabled and (not self._manual_enabled):
                     self._is_navigating = True
                     self._auto_mode = "loop"
+                    NavCommandServerNode._set_nav_result_locked(
+                        self,
+                        int(GoalStatus.STATUS_EXECUTING),
+                        f"{action_name}: loop restart active",
+                        increment_event=True,
+                    )
                 else:
                     self._clear_loop_config_locked()
                     self._is_navigating = False
                     self._auto_mode = "idle"
                     force_brake = not self._manual_enabled
+                    NavCommandServerNode._set_nav_result_locked(
+                        self,
+                        int(GoalStatus.STATUS_ABORTED),
+                        f"{action_name}: loop restart failed ({err})",
+                        increment_event=True,
+                    )
             if not ok:
                 self.get_logger().warning(f"Loop restart failed: {err}")
+        else:
+            with self._lock:
+                NavCommandServerNode._set_nav_result_locked(
+                    self,
+                    status_code,
+                    result_text,
+                    increment_event=True,
+                )
 
         if force_brake:
             self._publish_brake_sequence(brake_pct=100)
@@ -857,6 +956,13 @@ class NavCommandServerNode(Node):
                 self._last_manual_cmd = CmdVelFinal()
                 self._last_manual_cmd_time = None
                 self._manual_watchdog_stop_sent = False
+                if has_goal:
+                    NavCommandServerNode._set_nav_result_locked(
+                        self,
+                        int(GoalStatus.STATUS_CANCELING),
+                        "manual mode enabled: canceling active goal",
+                        increment_event=True,
+                    )
             if has_goal:
                 # Do not block manual takeover while waiting cancel ack from Nav2.
                 self._cancel_goal_for_manual_takeover_async()
