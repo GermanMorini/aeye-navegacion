@@ -106,7 +106,7 @@ def generate_launch_description():
     ws_port = LaunchConfiguration("ws_port")
     gps_topic = LaunchConfiguration("gps_topic")
     map_frame = LaunchConfiguration("map_frame")
-    pixhawk_yaw_correction_rad = LaunchConfiguration("pixhawk_yaw_correction_rad")
+    pixhawk_yaw_correction_deg = LaunchConfiguration("pixhawk_yaw_correction_deg")
 
     declare_use_sim_time_cmd = DeclareLaunchArgument(
         "use_sim_time",
@@ -199,9 +199,9 @@ def generate_launch_description():
         description="Global map frame for navigation web backend",
     )
     declare_pixhawk_yaw_correction_cmd = DeclareLaunchArgument(
-        "pixhawk_yaw_correction_rad",
-        default_value="1.5708",
-        description="Yaw correction sent to pixhawk_driver (radians)",
+        "pixhawk_yaw_correction_deg",
+        default_value="90.0",
+        description="Yaw correction sent to pixhawk_driver (degrees)",
     )
 
     ekf_odom_cmd = Node(
@@ -502,7 +502,7 @@ def generate_launch_description():
         ),
         launch_arguments={
             "launch_web": launch_web,
-            "yaw_correction_rad": pixhawk_yaw_correction_rad,
+            "yaw_correction_deg": pixhawk_yaw_correction_deg,
         }.items(),
         condition=IfCondition(start_pixhawk),
     )
