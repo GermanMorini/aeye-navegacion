@@ -106,6 +106,7 @@ def generate_launch_description():
     ws_port = LaunchConfiguration("ws_port")
     gps_topic = LaunchConfiguration("gps_topic")
     map_frame = LaunchConfiguration("map_frame")
+    pixhawk_yaw_correction_rad = LaunchConfiguration("pixhawk_yaw_correction_rad")
 
     declare_use_sim_time_cmd = DeclareLaunchArgument(
         "use_sim_time",
@@ -196,6 +197,11 @@ def generate_launch_description():
         "map_frame",
         default_value="map",
         description="Global map frame for navigation web backend",
+    )
+    declare_pixhawk_yaw_correction_cmd = DeclareLaunchArgument(
+        "pixhawk_yaw_correction_rad",
+        default_value="1.5708",
+        description="Yaw correction sent to pixhawk_driver (radians)",
     )
 
     ekf_odom_cmd = Node(
@@ -328,6 +334,36 @@ def generate_launch_description():
             }
         ],
     )
+    nav_command_server_cmd = Node(
+        package="navegacion_gps",
+        executable="nav_command_server",
+        name="nav_command_server",
+        output="screen",
+        parameters=[
+            {
+                "fromll_service": "/fromLL",
+                "fromll_service_fallback": "/navsat_transform/fromLL",
+                "fromll_wait_timeout_s": 2.0,
+                "map_frame": map_frame,
+                "gps_topic": gps_topic,
+                "cmd_vel_safe_topic": "/cmd_vel_safe",
+                "brake_topic": "/cmd_vel_safe",
+                "manual_cmd_topic": "/cmd_vel_safe",
+                "teleop_cmd_topic": "/cmd_vel_teleop",
+                "brake_publish_count": 5,
+                "brake_publish_interval_s": 0.1,
+                "manual_cmd_timeout_s": 0.4,
+                "manual_watchdog_hz": 10.0,
+                "nav_telemetry_hz": 5.0,
+                "telemetry_topic": "/nav_command_server/telemetry",
+                "set_goal_service": "/nav_command_server/set_goal_ll",
+                "cancel_goal_service": "/nav_command_server/cancel_goal",
+                "brake_service": "/nav_command_server/brake",
+                "set_manual_mode_service": "/nav_command_server/set_manual_mode",
+                "get_state_service": "/nav_command_server/get_state",
+            }
+        ],
+    )
     nav_snapshot_server_cmd = Node(
         package="navegacion_gps",
         executable="nav_snapshot_server",
@@ -361,6 +397,9 @@ def generate_launch_description():
             "ws_port": ws_port,
             "gps_topic": gps_topic,
             "map_frame": map_frame,
+            "launch_zones_manager": "false",
+            "launch_nav_command_server": "false",
+            "launch_nav_snapshot_server": "false",
             "teleop_cmd_topic": "/cmd_vel_teleop",
             "zones_set_geojson_service": "/zones_manager/set_geojson",
             "zones_get_state_service": "/zones_manager/get_state",
@@ -461,7 +500,10 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(
             os.path.join(sensores_dir, "launch", "pixhawk.launch.py")
         ),
-        launch_arguments={"launch_web": launch_web}.items(),
+        launch_arguments={
+            "launch_web": launch_web,
+            "yaw_correction_rad": pixhawk_yaw_correction_rad,
+        }.items(),
         condition=IfCondition(start_pixhawk),
     )
     camera_cmd = Node(
@@ -498,6 +540,7 @@ def generate_launch_description():
     ld.add_action(declare_ws_port_cmd)
     ld.add_action(declare_gps_topic_cmd)
     ld.add_action(declare_map_frame_cmd)
+    ld.add_action(declare_pixhawk_yaw_correction_cmd)
     ld.add_action(OpaqueFunction(function=_build_robot_state_publisher))
     ld.add_action(pixhawk_cmd)
     ld.add_action(camera_cmd)
@@ -510,6 +553,7 @@ def generate_launch_description():
     ld.add_action(keepout_costmap_filter_info_server_cmd)
     ld.add_action(keepout_lifecycle_cmd)
     ld.add_action(zones_manager_cmd)
+    ld.add_action(nav_command_server_cmd)
     ld.add_action(nav_snapshot_server_cmd)
     ld.add_action(no_go_editor_cmd)
     ld.add_action(rviz_cmd)
