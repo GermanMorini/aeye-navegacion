@@ -353,6 +353,67 @@ class NavCommandServerNode(Node):
             if index + 1 < self.brake_publish_count and self.brake_publish_interval_s > 0.0:
                 time.sleep(self.brake_publish_interval_s)
 
+    def _publish_brake_sequence_async(self, brake_pct: int, skip_first: bool = False) -> None:
+        publish_count = int(self.brake_publish_count)
+        if skip_first:
+            publish_count = max(0, publish_count - 1)
+        if publish_count <= 0:
+            return
+
+        def _run() -> None:
+            if skip_first and self.brake_publish_interval_s > 0.0:
+                time.sleep(self.brake_publish_interval_s)
+            for index in range(publish_count):
+                self._publish_stop(brake_pct=brake_pct)
+                if index + 1 < publish_count and self.brake_publish_interval_s > 0.0:
+                    time.sleep(self.brake_publish_interval_s)
+
+        thread = threading.Thread(
+            target=_run,
+            daemon=True,
+            name="nav_cmd_brake_seq",
+        )
+        thread.start()
+
+    def _detach_goal_handle_locked(self, clear_loop_config: bool = True) -> Any:
+        handle = self._current_goal_handle
+        self._current_goal_handle = None
+        if clear_loop_config:
+            self._clear_loop_config_locked()
+        self._is_navigating = False
+        self._auto_mode = "idle"
+        return handle
+
+    def _cancel_goal_handle_blocking(self, handle: Any) -> Tuple[bool, str]:
+        if handle is None:
+            return False, "no active goal"
+        try:
+            future = handle.cancel_goal_async()
+            result = self._wait_for_future(future, timeout_sec=2.0)
+        except Exception as exc:
+            return False, f"cancel goal call failed: {exc}"
+        if result is None:
+            return False, "timeout cancelling goal"
+        return True, "cancelled"
+
+    def _cancel_goal_async(self, handle: Any, reason: str) -> None:
+        if handle is None:
+            self._publish_telemetry(force=True)
+            return
+
+        def _run_cancel() -> None:
+            ok, msg = self._cancel_goal_handle_blocking(handle)
+            if not ok and msg != "no active goal":
+                self.get_logger().warning(f"{reason}: failed to cancel goal ({msg})")
+            self._publish_telemetry(force=True)
+
+        cancel_thread = threading.Thread(
+            target=_run_cancel,
+            daemon=True,
+            name="nav_cmd_cancel_goal_async",
+        )
+        cancel_thread.start()
+
     def _activate_manual_takeover_if_needed(self) -> None:
         with self._lock:
             already_manual = bool(self._manual_enabled)
@@ -363,19 +424,9 @@ class NavCommandServerNode(Node):
             self.get_logger().warning(f"Manual takeover failed: {err}")
 
     def _cancel_goal_for_manual_takeover_async(self) -> None:
-        def _run_cancel() -> None:
-            cancel_ok, cancel_msg = self.cancel_current_goal(clear_loop_config=True)
-            if not cancel_ok and cancel_msg != "no active goal":
-                self.get_logger().warning(
-                    f"Manual mode: failed to cancel goal ({cancel_msg}), continuing"
-                )
-
-        cancel_thread = threading.Thread(
-            target=_run_cancel,
-            daemon=True,
-            name="nav_cmd_manual_cancel",
-        )
-        cancel_thread.start()
+        with self._lock:
+            handle = self._detach_goal_handle_locked(clear_loop_config=True)
+        self._cancel_goal_async(handle, reason="manual mode takeover")
 
     def _fill_get_state_response(self, response: GetNavState.Response) -> None:
         with self._lock:
@@ -770,27 +821,14 @@ class NavCommandServerNode(Node):
 
     def cancel_current_goal(self, clear_loop_config: bool = True) -> Tuple[bool, str]:
         with self._lock:
-            handle = self._current_goal_handle
-            if clear_loop_config:
-                self._clear_loop_config_locked()
-                self._is_navigating = False
-                self._auto_mode = "idle"
+            handle = self._detach_goal_handle_locked(clear_loop_config=clear_loop_config)
         if handle is None:
+            self._publish_telemetry(force=True)
             return False, "no active goal"
 
-        future = handle.cancel_goal_async()
-        result = self._wait_for_future(future, timeout_sec=2.0)
-        if result is None:
-            return False, "timeout cancelling goal"
-
-        with self._lock:
-            self._current_goal_handle = None
-            if clear_loop_config:
-                self._clear_loop_config_locked()
-            self._is_navigating = False
-            self._auto_mode = "idle"
+        ok, msg = self._cancel_goal_handle_blocking(handle)
         self._publish_telemetry(force=True)
-        return True, "cancelled"
+        return ok, msg
 
     def apply_brake(self) -> Tuple[bool, str]:
         cancel_ok = True
@@ -943,11 +981,23 @@ class NavCommandServerNode(Node):
         _request: CancelNavGoal.Request,
         response: CancelNavGoal.Response,
     ) -> CancelNavGoal.Response:
-        ok, err = self.cancel_current_goal()
-        response.ok = bool(ok)
-        response.error = "" if ok else str(err)
+        with self._lock:
+            manual_enabled = bool(self._manual_enabled)
+            handle = self._detach_goal_handle_locked(clear_loop_config=True)
+
+        self._publish_telemetry(force=True)
+
+        # In auto, stop immediately before asynchronous cancel to prevent any leftover velocity.
+        if not manual_enabled:
+            self._publish_stop(brake_pct=100)
+            self._publish_brake_sequence_async(brake_pct=100, skip_first=True)
+
+        self._cancel_goal_async(handle, reason="cancel_goal service")
+
+        response.ok = True
+        response.error = ""
         self.get_logger().info(
-            f"CancelNavGoal response (ok={response.ok}, error='{response.error}')"
+            f"CancelNavGoal response (ok={response.ok}, manual={manual_enabled})"
         )
         return response
 
