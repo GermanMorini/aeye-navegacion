@@ -1,65 +1,38 @@
 # AGENTS.md
 
 Role
-- You are a ROS 2 Humble expert with strong Nav2 + Gazebo (gz sim) knowledge.
-- Prefer minimal, safe changes and keep the ROS 2 launch + parameter model consistent.
+- You are editing the `navegacion_gps` package in a ROS 2 Humble workspace.
+- Prefer small, safe changes and keep launch arguments, YAML params, topics, and frames aligned.
 
-Repo map (quick)
-- `navegacion_gps/`: Python nodes (waypoint followers, GPS logger, Pixhawk driver, utils).
-- `launch/`: main entrypoints for sim, localization, and Nav2.
-- `config/`: Nav2, robot_localization, RViz, Mapviz, and demo waypoints.
+Quick map
+- `launch/`: canonical entry points are `simulacion.launch.py`, `real.launch.py`, `rviz_real.launch.py`.
+- `navegacion_gps/`: active nodes are `gazebo_utils.py`, `zones_manager.py`, `nav_command_server.py`, `nav_snapshot_server.py`.
+- `config/`: Nav2, collision monitor, robot_localization, keepout mask assets, RViz.
 - `models/`, `worlds/`: simulation assets.
-- `tools/`: helper scripts to start the demo (package-local).
-- Workspace root `../../`: Docker files, entrypoint, and container helper scripts.
 
-Container context (workspace root ../../)
-- `../../docker-compose.yml`: service `ros2`, container name `ros2`, host network, X11 mounts.
-- `../../Dockerfile`: ROS 2 Humble + Nav2, robot_localization, ros_gz, mapviz, mavros.
-- `../../entrypoint.sh`: sources `/opt/ros/humble/setup.bash` and `/ros2_ws/install/setup.bash`.
-- `../../.bashrc`: colcon argcomplete, `TURTLEBOT3_MODEL=waffle`, sources workspace if built.
-- Workspace mounts: `../../src` -> `/ros2_ws/src`, plus `../../build|install|log` to `/ros2_ws/*`.
+Runtime truth
+- `/cmd_vel_safe` is the filtered Nav2 output.
+- `/cmd_vel_teleop` uses `interfaces/msg/CmdVelFinal`.
+- `nav_command_server` publishes `/cmd_vel_final`.
+- `controller_server` consumes `/cmd_vel_final`.
+- Localization stack expects `/imu/data`, `/gps/fix`, `/odom` and publishes `/odometry/local`, `/odometry/gps`.
 
-Container helper scripts (../../tools)
-- `../../tools/exec.sh`: shell or command inside container `ros2`.
-- `../../tools/root-exec.sh`: root shell inside container `ros2`.
-- `../../tools/compile-ros.sh`: build workspace or selected packages inside container.
-- `../../tools/create_pkg.sh`: create ROS 2 package (defaults: ament_python, rclpy).
+Launch guidance
+- `simulacion.launch.py` is the full simulation entry point.
+- `real.launch.py` is the real-robot bringup entry point.
+- `rviz_real.launch.py` is visualization only.
+- Do not reintroduce references to removed launches such as `navegacion.launch.py`, `dual_ekf_navsat.launch.py`, or `mapviz.launch.py`.
 
-Default workflows
-- Build in container: `../../tools/compile-ros.sh navegacion_gps` (or no args for full).
-- Exec in container: `../../tools/exec.sh <cmd>` (no args opens a shell).
-- Source (inside container): `source /opt/ros/humble/setup.bash && source /ros2_ws/install/setup.bash`
-- Main demo: `ros2 launch navegacion_gps gps_waypoint_follower.launch.py use_rviz:=True use_mapviz:=True`
-- Sim only: `ros2 launch navegacion_gps gazebo_gps_world.launch.py`
-- Localization: `ros2 launch navegacion_gps dual_ekf_navsat.launch.py`
-- Mapviz: `ros2 launch navegacion_gps mapviz.launch.py`
-- Tools wrapper: `./tools/start_nav2_gps_demo.sh [logged|interactive|logger] [waypoints.yaml]`
+Editing guidance
+- When changing a topic or frame, update:
+  - launch arguments,
+  - YAML config,
+  - README if user-facing behavior changes.
+- Keep `zones_manager`, `nav_command_server`, and `nav_snapshot_server` service names stable unless explicitly requested.
+- Avoid broad refactors in `models/` or `worlds/` unless needed for the task.
 
-Key topics and frames
-- Topics: `/gps/fix` (NavSatFix), `/imu` (Imu), `/odom`, `/scan`.
-- Manual teleop stream: `/cmd_vel_teleop` (`geometry_msgs/Twist`) -> `nav_command_server`.
-- TF: `map -> odom -> base_link` (or `base_footprint` if configured).
-
-Config edit guidance
-- GPS + EKF sources and frames live in `config/dual_ekf_navsat_params.yaml`.
-- Nav2 tuning without maps uses `config/nav2_no_map_params.yaml`.
-- Demo waypoints live in `config/demo_waypoints.yaml`.
-- Update both YAML params and launch remaps together when changing topic or frame names.
-
-Launch edit guidance
-- When adding new params, wire them as `DeclareLaunchArgument` with defaults.
-- Keep Gazebo and Nav2 launches loosely coupled (use remaps/args, not hard-coded names).
-
-Nav2 + robot_localization expectations
-- `navsat_transform_node` needs valid IMU orientation and GPS fixes.
-- If TF breaks, check `dual_ekf_navsat_params.yaml` and remaps in `launch/dual_ekf_navsat.launch.py`.
-
-Testing and validation
-- If asked to validate: `colcon test --packages-select navegacion_gps`.
-- At minimum, run a launch that exercises the edited files and confirm topics/TF.
-
-Style and safety
-- Prefer `rg` for search and keep edits localized.
-- Avoid changing `worlds/` or `models/` unless requested.
-- Avoid changing `../../Dockerfile` or `../../docker-compose.yml` unless requested.
-- Keep files ASCII-only unless a file already uses non-ASCII.
+Validation
+- Preferred validation path is inside the Docker workspace:
+  - `./tools/compile-ros.sh navegacion_gps`
+  - `ros2 launch navegacion_gps real.launch.py --show-args`
+  - `ros2 launch navegacion_gps simulacion.launch.py --show-args`

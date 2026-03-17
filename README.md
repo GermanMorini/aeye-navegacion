@@ -1,156 +1,116 @@
-## navegacion_gps
+# navegacion_gps
 
-Demo de navegacion GPS con ROS 2 + Nav2. Usa robot_localization (EKF + navsat_transform) para fusionar GPS/IMU/odometria y Nav2 para seguir waypoints geograficos (lat/lon/yaw). Incluye simulacion con Gazebo y herramientas para registrar y seguir waypoints.
+Paquete de navegación del workspace. Integra Nav2, `robot_localization`, herramientas para zonas de exclusión y un backend ROS para control manual y snapshots de navegación.
 
-### Requisitos
-- ROS 2 Humble (o compatible).
-- Paquetes ROS 2: `navigation2`, `nav2_bringup`, `nav2_simple_commander`, `nav2_msgs`, `robot_localization`, `mapviz`, `mapviz_plugins`, `tile_map`, `geographic_msgs`, `ros_gz_sim`, `ros_gz_bridge`.
-- Simulacion: `gz sim` (Gazebo).
-- Python: `python3-yaml`, `tkinter` (para el logger GUI). `pymavlink` se usa en `sensores`.
+## Ejecutables reales
+- `gazebo_utils`
+- `zones_manager`
+- `nav_command_server`
+- `nav_snapshot_server`
 
-### Estructura del proyecto
-- `navegacion_gps/`: nodos Python.
-  - `interactive_waypoint_follower.py`: sigue waypoints clickeados en Mapviz (frame `wgs84`).
-  - `yaml_waypoints_from_ll.py`: convierte YAML lat/lon con `/fromLL` y manda todos juntos al `follow_waypoints`.
-  - `gps_waypoint_logger.py`: GUI para registrar waypoints GPS.
-  - `gazebo_utils.py`: reescribe `frame_id` de sensores/odom y adapta `/cmd_vel_final` a `/cmd_vel_gazebo` para simulación.
-  - `utils/gps_utils.py`: conversiones GeoPose y quaternion.
-- `launch/`: lanzadores principales.
-  - `simulacion.launch.py`: stack completo (Gazebo + EKF + Nav2 + RViz/Mapviz).
-  - `navegacion.launch.py`: stack Nav2 sin simulacion (EKF + Nav2 + RViz/Mapviz).
-  - `dual_ekf_navsat.launch.py`: EKF + navsat_transform (robot_localization).
-  - `mapviz.launch.py`: Mapviz + initialize_origin (usa `config/mapviz_gps.mvc`).
-- `config/`: parametros Nav2 y robot_localization.
-- `worlds/`: mundos de simulacion (`pasillos_obstaculos.world`, `tugbot_depot.world`, `harmonic_world.world`, `default.sdf`, `vacio.world`).
-- `tools/`: scripts de inicio.
-- `docker-compose.yml`, `Dockerfile`: entorno en contenedor (ver notas abajo).
+Este checkout no incluye los antiguos nodos de waypoints interactivos, logger GUI ni teleop de teclado.
 
-### Flujo general
-1) `simulacion.launch.py` levanta Gazebo, el robot y el bridge.
-2) `dual_ekf_navsat.launch.py` (incluido) fusiona `/odom`, `/imu/data`, `/gps/fix` y publica odometrias.
-3) `navigation_launch.py` (Nav2) usa esos frames para planificar y seguir rutas.
-4) Opcionalmente: RViz y/o Mapviz para visualizacion e interaccion.
+## Launches reales
+- `ros2 launch navegacion_gps simulacion.launch.py`
+  - Gazebo Sim + bridge ROS/GZ + robot_localization + Nav2 + zonas + backend web opcional
+- `ros2 launch navegacion_gps real.launch.py`
+  - robot_localization + Nav2 + sensores reales opcionales + zonas + backend web opcional
+- `ros2 launch navegacion_gps rviz_real.launch.py`
+  - RViz + `robot_state_publisher` usando el URDF real
 
-### Topicos y frames esperados
-Minimo para operar con GPS:
-- `/gps/fix` (`sensor_msgs/NavSatFix`)
-- `/imu/data` (`sensor_msgs/Imu`)
-- `/odom` (odometria base)
-- `/scan_3d` (PointCloud2 para costmaps)
-- `/odometry/local` (odometria filtrada del EKF)
-- `/cmd_vel` (entrada de control) y `/cmd_vel_steer` (bridge hacia Gazebo)
-- `/cmd_vel_teleop` (`geometry_msgs/Twist`, stream manual desde UI/gateway web)
+## Flujo de control
+- Nav2 publica `/cmd_vel`.
+- `nav2_collision_monitor` publica `/cmd_vel_safe`.
+- `nav_command_server` recibe `/cmd_vel_safe` y comandos manuales en `/cmd_vel_teleop`.
+- `nav_command_server` publica `/cmd_vel_final` (`interfaces/msg/CmdVelFinal`).
+- En simulación, `gazebo_utils` puede adaptar `/cmd_vel_final` a `/cmd_vel_gazebo`.
+- En hardware real, `controller_server` consume `/cmd_vel_final`.
 
-Frames tipicos:
-- `map` -> `odom` -> `base_footprint` -> `base_link`
-- `base_footprint` se usa en `dual_ekf_navsat_params.yaml` (ajustar si tu robot usa otro frame).
+## Nodos del paquete
+### `zones_manager`
+- Gestiona zonas no transitables a partir de GeoJSON.
+- Genera y recarga la máscara `keepout`.
+- Servicios:
+  - `/zones_manager/set_geojson`
+  - `/zones_manager/get_state`
+  - `/zones_manager/reload_from_disk`
 
-### Dimensiones del robot (models/cuatri.urdf)
-- Distancia entre ejes (wheelbase): 0.94 m.
-- Separacion entre ruedas traseras (track): 0.75 m.
-- Radio de rueda: 0.24 m.
-- Cuerpo (base_link) visual: 1.20 x 0.60 x 0.25 m.
+### `nav_command_server`
+- Backend ROS para órdenes geográficas y control manual.
+- Publica telemetría en `/nav_command_server/telemetry`.
+- Servicios:
+  - `/nav_command_server/set_goal_ll`
+  - `/nav_command_server/cancel_goal`
+  - `/nav_command_server/brake`
+  - `/nav_command_server/set_manual_mode`
+  - `/nav_command_server/get_state`
+- Acciones cliente:
+  - `follow_waypoints`
+  - `navigate_through_poses`
 
-### Formato de waypoints
-Archivo YAML como `config/default-waypoints.yaml`:
-```yaml
-waypoints:
-  - latitude: 38.161491054181276
-    longitude: -122.45464431092836
-    yaw: 0.0
-  - latitude: 38.161587576524845
-    longitude: -122.4547994038464
-    yaw: 1.57
-```
+### `nav_snapshot_server`
+- Compone snapshots PNG del estado local de navegación.
+- Servicio:
+  - `/nav_snapshot_server/get_nav_snapshot`
 
-### Uso en host (sin contenedor)
+### `gazebo_utils`
+- Normaliza `frame_id` y tópicos de sensores bridged desde Gazebo Sim.
+- Puede puentear `/cmd_vel_final` hacia `/cmd_vel_gazebo` en simulación.
+
+## Tópicos y frames principales
+- Entradas de localización:
+  - `/imu/data`
+  - `/gps/fix`
+  - `/odom`
+- Salidas de localización:
+  - `/odometry/local`
+  - `/odometry/gps`
+- Percepción:
+  - `/scan_3d`
+  - `/scan`
+- Control:
+  - `/cmd_vel_safe` (`geometry_msgs/msg/Twist`)
+  - `/cmd_vel_teleop` (`interfaces/msg/CmdVelFinal`)
+  - `/cmd_vel_final` (`interfaces/msg/CmdVelFinal`)
+
+Frames esperados:
+- `map -> odom -> base_footprint`
+
+## Dependencias funcionales
+- Nav2:
+  - `nav2_bringup`
+  - `nav2_collision_monitor`
+  - `nav2_map_server`
+  - `nav2_lifecycle_manager`
+- Localización:
+  - `robot_localization`
+- Simulación:
+  - `ros_gz_sim`
+  - `ros_gz_bridge`
+- Costmaps:
+  - `pointcloud_to_laserscan`
+
+## Uso dentro del contenedor
+Build:
 ```bash
-colcon build --symlink-install
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-ros2 launch navegacion_gps simulacion.launch.py use_rviz:=True use_mapviz:=True
+./tools/compile-ros.sh navegacion_gps
 ```
-Sin simulacion:
+
+Real:
 ```bash
-ros2 launch navegacion_gps navegacion.launch.py use_rviz:=True use_mapviz:=True
+./tools/exec.sh "source /opt/ros/humble/setup.bash && source /ros2_ws/install/setup.bash && ros2 launch navegacion_gps real.launch.py"
 ```
-Por defecto el `collision_monitor` se lanza (`use_collision_monitor:=True`); para desactivarlo:
+
+Simulación:
 ```bash
-ros2 launch navegacion_gps simulacion.launch.py use_collision_monitor:=False
+./tools/exec.sh "source /opt/ros/humble/setup.bash && source /ros2_ws/install/setup.bash && ros2 launch navegacion_gps simulacion.launch.py"
 ```
 
-Enviar waypoints:
+RViz para real:
 ```bash
-ros2 run navegacion_gps yaml_waypoints_from_ll /ruta/a/waypoints.yaml
-ros2 run navegacion_gps interactive_waypoint_follower
-ros2 run navegacion_gps gps_waypoint_logger
+./tools/exec.sh "source /opt/ros/humble/setup.bash && source /ros2_ws/install/setup.bash && ros2 launch navegacion_gps rviz_real.launch.py"
 ```
 
-### Mapviz
-Lanza Mapviz con:
-```bash
-ros2 launch navegacion_gps simulacion.launch.py use_mapviz:=True
-```
-El config `config/mapviz_gps.mvc` incluye tiles y el click en `wgs84` (`/clicked_point`).
-
-Teleop manual:
-```bash
-ros2 run navegacion_gps teleop
-```
-Nota: el modelo Ackermann no gira en el sitio; manten velocidad lineal (W/X)
-y cambia direccion con A/D.
-
-Control manual web:
-- `web_zone_server` publica comandos manuales continuos en `/cmd_vel_teleop`.
-- `nav_command_server` consume `/cmd_vel_teleop` y re-publica comando efectivo en `manual_cmd_topic` (default `/cmd_vel_safe`) con watchdog por timeout.
-
-### Uso con el script de tools
-El script detecta si el contenedor esta corriendo y entra con `docker exec`.
-```bash
-./tools/start_nav2_gps_demo.sh
-./tools/start_nav2_gps_demo.sh logged /ruta/a/waypoints.yaml
-./tools/start_nav2_gps_demo.sh interactive
-./tools/start_nav2_gps_demo.sh logger config/default-waypoints.yaml
-```
-
-Si tu contenedor o workspace interno tienen otro nombre:
-```bash
-CONTAINER=mi_contenedor WS_IN_CONTAINER=/ros2_ws ./tools/start_nav2_gps_demo.sh
-```
-
-### Ajustes para GPS real (Pixhawk u otro)
-Si tus topicos o frames no coinciden, ajusta:
-- `config/dual_ekf_navsat_params.yaml` (sources: `odom0`, `imu0`, `odom1`).
-- Remaps en `launch/dual_ekf_navsat.launch.py`.
-
-Verifica que tu nodo publique:
-- `NavSatFix` en `/gps/fix`.
-- `Imu` en `/imu/data` con orientacion valida.
-Si queres usar el lector de Pixhawk:
-```bash
-ros2 run sensores sensores --ros-args \
-  -p serial_port:=/dev/ttyACM0 -p baudrate:=921600
-```
-O lanzar todo junto (driver + localization + nav2):
-```bash
-ros2 launch navegacion_gps gps_waypoint_follower_pixhawk.launch.py \
-  serial_port:=/dev/ttyACM0 baudrate:=921600
-```
-
-### Notas sobre Docker
-El `docker-compose.yml` y el `Dockerfile` actuales fueron creados para otro paquete
-(`ros2_humble`). Para usar este repo dentro del contenedor:
-- Monta el repo en `/ros2_ws/src/navegacion_gps`.
-- Compila con `colcon build --packages-select navegacion_gps`.
-
-Ejemplo de volumen en `docker-compose.yml`:
-```
-- ./:/ros2_ws/src/navegacion_gps:rw
-```
-
-### Troubleshooting
-- `package not found`: asegurate de haber corrido `colcon build` y `source install/setup.bash`.
-- No hay GPS: valida `ros2 topic echo /gps/fix` y `ros2 topic echo /imu/data`.
-- TF roto: revisa frames en `dual_ekf_navsat_params.yaml` y el arbol TF con `ros2 run tf2_tools view_frames`.
-- Mapviz sin tiles: requiere acceso a red para descargar mapas.
-- Mapviz no publica `wgs84`: revisa `initialize_origin` y el frame `origin`.
+## Notas
+- `mapviz_gps.mvc` existe en la raíz del workspace y se copia en la imagen Docker, pero este paquete ya no expone un `mapviz.launch.py` dedicado.
+- Si actualizas nombres de tópicos o frames, cambia también launches, YAML de Nav2 y YAML de `robot_localization`.

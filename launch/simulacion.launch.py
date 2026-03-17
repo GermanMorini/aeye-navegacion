@@ -199,10 +199,7 @@ def generate_launch_description():
     use_collision_monitor = LaunchConfiguration("use_collision_monitor")
     use_gazebo_utils = LaunchConfiguration("use_gazebo_utils")
     rviz_config = LaunchConfiguration("rviz_config")
-    use_joint_state_bridge = LaunchConfiguration("use_joint_state_bridge")
-    world_name = LaunchConfiguration("world_name")
     world = LaunchConfiguration("world")
-    model_name = LaunchConfiguration("model_name")
     ws_host = LaunchConfiguration("ws_host")
     ws_port = LaunchConfiguration("ws_port")
     gps_topic = LaunchConfiguration("gps_topic")
@@ -628,7 +625,12 @@ def generate_launch_description():
     ld.add_action(declare_gps_topic_cmd)
     ld.add_action(declare_map_frame_cmd)
     ld.add_action(gz_sim_cmd)
-    ld.add_action(OpaqueFunction(function=_build_gz_bridge, kwargs={"bridge_config": bridge_config}))
+    ld.add_action(
+        OpaqueFunction(
+            function=_build_gz_bridge,
+            kwargs={"bridge_config": bridge_config},
+        )
+    )
     ld.add_action(OpaqueFunction(function=_build_joint_state_bridge))
     ld.add_action(OpaqueFunction(function=_spawn_robot))
     ld.add_action(ekf_odom_cmd)

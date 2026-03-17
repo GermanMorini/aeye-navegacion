@@ -8,6 +8,7 @@ package_name = 'navegacion_gps'
 def regular_files(pattern: str):
     return [path for path in glob(pattern) if os.path.isfile(path)]
 
+
 setup(
     name=package_name,
     version='0.0.1',
@@ -32,11 +33,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'interactive_waypoint_follower = navegacion_gps.interactive_waypoint_follower:main',
-            'gps_waypoint_logger = navegacion_gps.gps_waypoint_logger:main',
-            'teleop = navegacion_gps.teleop:main',
             'gazebo_utils = navegacion_gps.gazebo_utils:main',
-            'yaml_waypoints_from_ll = navegacion_gps.yaml_waypoints_from_ll:main',
             'zones_manager = navegacion_gps.zones_manager:main',
             'nav_command_server = navegacion_gps.nav_command_server:main',
             'nav_snapshot_server = navegacion_gps.nav_snapshot_server:main',

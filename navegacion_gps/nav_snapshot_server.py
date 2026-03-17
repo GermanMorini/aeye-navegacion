@@ -170,7 +170,8 @@ class NavSnapshotServerNode(Node):
 
         if elapsed_ms > float(self.snapshot_timeout_ms):
             self.get_logger().warning(
-                f"Snapshot generation exceeded target ({elapsed_ms:.1f} ms > {self.snapshot_timeout_ms} ms)"
+                "Snapshot generation exceeded target "
+                f"({elapsed_ms:.1f} ms > {self.snapshot_timeout_ms} ms)"
             )
 
         response.ok = bool(ok)
@@ -197,7 +198,9 @@ class NavSnapshotServerNode(Node):
         response.image_png = list(payload["image_png"])
         self.get_logger().info(
             "GetNavSnapshot ok "
-            f"(elapsed_ms={elapsed_ms:.1f}, frame={response.frame_id}, size={response.width}x{response.height}, "
+            f"(elapsed_ms={elapsed_ms:.1f}, "
+            f"frame={response.frame_id}, "
+            f"size={response.width}x{response.height}, "
             f"png_bytes={len(response.image_png)})"
         )
         return response
@@ -820,7 +823,7 @@ class NavSnapshotServerNode(Node):
         x0 = canvas.shape[1] - inset_px - margin
         if x0 < 0 or y0 < 0:
             return False
-        canvas[y0 : y0 + inset_px, x0 : x0 + inset_px] = inset
+        canvas[y0:y0 + inset_px, x0:x0 + inset_px] = inset
         cv2.rectangle(
             canvas,
             (x0, y0),
