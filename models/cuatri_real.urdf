@@ -375,7 +375,7 @@
         <noise>
           <type>gaussian</type>
           <mean>0.0</mean>
-          <stddev>0.03</stddev>
+          <stddev>0.003</stddev>
         </noise>
       </lidar>
     </sensor>
@@ -388,14 +388,14 @@
       <topic>/imu/data</topic>
       <imu>
         <angular_velocity>
-          <x><noise type="gaussian"><mean>0.0</mean><stddev>2e-4</stddev></noise></x>
-          <y><noise type="gaussian"><mean>0.0</mean><stddev>2e-4</stddev></noise></y>
-          <z><noise type="gaussian"><mean>0.0</mean><stddev>2e-4</stddev></noise></z>
+          <x><noise type="gaussian"><mean>0.0</mean><stddev>2e-5</stddev></noise></x>
+          <y><noise type="gaussian"><mean>0.0</mean><stddev>2e-5</stddev></noise></y>
+          <z><noise type="gaussian"><mean>0.0</mean><stddev>2e-5</stddev></noise></z>
         </angular_velocity>
         <linear_acceleration>
-          <x><noise type="gaussian"><mean>0.0</mean><stddev>1.7e-2</stddev></noise></x>
-          <y><noise type="gaussian"><mean>0.0</mean><stddev>1.7e-2</stddev></noise></y>
-          <z><noise type="gaussian"><mean>0.0</mean><stddev>1.7e-2</stddev></noise></z>
+          <x><noise type="gaussian"><mean>0.0</mean><stddev>1.7e-3</stddev></noise></x>
+          <y><noise type="gaussian"><mean>0.0</mean><stddev>1.7e-3</stddev></noise></y>
+          <z><noise type="gaussian"><mean>0.0</mean><stddev>1.7e-3</stddev></noise></z>
         </linear_acceleration>
       </imu>
     </sensor>
@@ -411,19 +411,19 @@
           <horizontal>
             <noise type="gaussian">
               <mean>0.0</mean>
-              <stddev>0.000005</stddev> </noise>
+              <stddev>0.0000005</stddev> </noise>
           </horizontal>
           <vertical>
             <noise type="gaussian">
               <mean>0.0</mean>
-              <stddev>0.0000125</stddev> </noise>
+              <stddev>0.00000125</stddev> </noise>
           </vertical>
         </position_sensing>
         <velocity_sensing>
           <horizontal>
             <noise type="gaussian">
               <mean>0.0</mean>
-              <stddev>0.0000025</stddev>
+              <stddev>0.00000025</stddev>
             </noise>
           </horizontal>
         </velocity_sensing>

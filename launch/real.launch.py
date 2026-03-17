@@ -98,7 +98,7 @@ def generate_launch_description():
     use_collision_monitor = LaunchConfiguration("use_collision_monitor")
     use_gazebo_utils = LaunchConfiguration("use_gazebo_utils")
     use_pointcloud_to_laserscan = LaunchConfiguration("use_pointcloud_to_laserscan")
-    start_pixhawk = LaunchConfiguration("start_pixhawk")
+    start_mavros = LaunchConfiguration("start_mavros")
     start_lidar = LaunchConfiguration("start_lidar")
     launch_web = LaunchConfiguration("launch_web")
     lidar_config_path = LaunchConfiguration("lidar_config_path")
@@ -106,7 +106,6 @@ def generate_launch_description():
     ws_port = LaunchConfiguration("ws_port")
     gps_topic = LaunchConfiguration("gps_topic")
     map_frame = LaunchConfiguration("map_frame")
-    pixhawk_yaw_correction_deg = LaunchConfiguration("pixhawk_yaw_correction_deg")
 
     declare_use_sim_time_cmd = DeclareLaunchArgument(
         "use_sim_time",
@@ -158,10 +157,10 @@ def generate_launch_description():
         default_value="True",
         description="Whether to start pointcloud_to_laserscan",
     )
-    declare_start_pixhawk_cmd = DeclareLaunchArgument(
-        "start_pixhawk",
+    declare_start_mavros_cmd = DeclareLaunchArgument(
+        "start_mavros",
         default_value="True",
-        description="Start sensores Pixhawk driver",
+        description="Start MAVROS node for Pixhawk telemetry",
     )
     declare_start_lidar_cmd = DeclareLaunchArgument(
         "start_lidar",
@@ -190,7 +189,7 @@ def generate_launch_description():
     )
     declare_gps_topic_cmd = DeclareLaunchArgument(
         "gps_topic",
-        default_value="/gps/fix",
+        default_value="/mavros/global_position/raw/fix",
         description="GPS topic used by web console backend/gateway",
     )
     declare_map_frame_cmd = DeclareLaunchArgument(
@@ -198,12 +197,6 @@ def generate_launch_description():
         default_value="map",
         description="Global map frame for navigation web backend",
     )
-    declare_pixhawk_yaw_correction_cmd = DeclareLaunchArgument(
-        "pixhawk_yaw_correction_deg",
-        default_value="90.0",
-        description="Yaw correction sent to pixhawk_driver (degrees)",
-    )
-
     ekf_odom_cmd = Node(
         package="robot_localization",
         executable="ekf_node",
@@ -235,8 +228,8 @@ def generate_launch_description():
             {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
         ],
         remappings=[
-            ("imu/data", "imu/data"),
-            ("gps/fix", "gps/fix"),
+            ("imu/data", "/mavros/imu/data"),
+            ("gps/fix", "/mavros/global_position/raw/fix"),
             ("gps/filtered", "gps/filtered"),
             ("odometry/gps", "odometry/gps"),
             ("odometry/filtered", "odometry/local"),
@@ -496,15 +489,14 @@ def generate_launch_description():
         condition=IfCondition(use_pointcloud_to_laserscan),
     )
 
-    pixhawk_cmd = IncludeLaunchDescription(
+    mavros_cmd = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(sensores_dir, "launch", "pixhawk.launch.py")
+            os.path.join(sensores_dir, "launch", "mavros.launch.py")
         ),
         launch_arguments={
             "launch_web": launch_web,
-            "yaw_correction_deg": pixhawk_yaw_correction_deg,
         }.items(),
-        condition=IfCondition(start_pixhawk),
+        condition=IfCondition(start_mavros),
     )
     camera_cmd = Node(
         package="sensores",
@@ -532,7 +524,7 @@ def generate_launch_description():
     ld.add_action(declare_use_collision_monitor_cmd)
     ld.add_action(declare_use_gazebo_utils_cmd)
     ld.add_action(declare_use_pointcloud_to_laserscan_cmd)
-    ld.add_action(declare_start_pixhawk_cmd)
+    ld.add_action(declare_start_mavros_cmd)
     ld.add_action(declare_start_lidar_cmd)
     ld.add_action(declare_launch_web_cmd)
     ld.add_action(declare_lidar_config_path_cmd)
@@ -540,9 +532,8 @@ def generate_launch_description():
     ld.add_action(declare_ws_port_cmd)
     ld.add_action(declare_gps_topic_cmd)
     ld.add_action(declare_map_frame_cmd)
-    ld.add_action(declare_pixhawk_yaw_correction_cmd)
     ld.add_action(OpaqueFunction(function=_build_robot_state_publisher))
-    ld.add_action(pixhawk_cmd)
+    ld.add_action(mavros_cmd)
     ld.add_action(camera_cmd)
     ld.add_action(lidar_cmd)
     ld.add_action(ekf_odom_cmd)

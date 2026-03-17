@@ -20,7 +20,7 @@ ekf_filter_node_odom:
     base_link_frame: base_footprint
     world_frame: odom
 
-    odom0: /odom
+    odom0: /mavros/local_position/odom
     odom0_config: [false, false, false,
                    false, false, false,
                    true,  false,  false,
@@ -30,7 +30,7 @@ ekf_filter_node_odom:
     odom0_relative: false
     odom0_queue_size: 10
 
-    imu0: /imu/data
+    imu0: /mavros/imu/data
     imu0_config: [false, false, false,
                   false, false, true,
                   false, false, false,
@@ -100,7 +100,7 @@ ekf_filter_node_map:
     odom0_queue_size: 10
 
     odom1: /odometry/gps
-    odom1_config: [false, false, false,
+    odom1_config: [true, true, false,
                    false, false, false,
                    false, false, false,
                    false, false, false,
@@ -111,7 +111,7 @@ ekf_filter_node_map:
     odom1_pose_rejection_threshold: 1.0
     dynamic_process_noise_covariance: true
 
-    imu0: /imu/data
+    imu0: /mavros/imu/data
     imu0_config: [false, false, false,
                   false, false, true,
                   false, false, false,
@@ -165,7 +165,7 @@ navsat_transform:
     gps_variance: 0.1
     frequency: 10.0
     delay: 0.0
-    magnetic_declination_radians: 0.0
+    magnetic_declination_radians: -0.122
     yaw_offset: 0.0
     zero_altitude: true
     broadcast_cartesian_transform: false
@@ -173,5 +173,5 @@ navsat_transform:
     # usar yaw de la odometria (y no de la IMU)
     use_odometry_yaw: false
     
-    wait_for_datum: true
-    datum: [-31.42948945234063, -64.10382880072703, 0.0] # Ejemplo: CIT, Córdoba, Argentina
+    wait_for_datum: false
+    # datum: [-31.42948945234063, -64.10382880072703, 0.0] # Ejemplo: CIT, Córdoba, Argentina
