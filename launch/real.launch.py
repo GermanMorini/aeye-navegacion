@@ -3,18 +3,12 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
-from nav2_common.launch import RewrittenYaml
-
-
-def _read_file(path):
-    with open(path, "r", encoding="utf-8") as file_handle:
-        return file_handle.read()
 
 
 def _resolve_config_file_path(package_share_dir: str, filename: str) -> str:
@@ -30,67 +24,24 @@ def _resolve_config_file_path(package_share_dir: str, filename: str) -> str:
     return str(default_path)
 
 
-def _build_robot_state_publisher(context):
-    use_rsp = LaunchConfiguration("use_robot_state_publisher").perform(context)
-    if use_rsp.lower() != "true":
-        return []
-
-    use_sim_time = LaunchConfiguration("use_sim_time").perform(context)
-    custom_urdf = LaunchConfiguration("custom_urdf").perform(context)
-    use_sim_time_bool = use_sim_time == "True"
-
-    robot_description = _read_file(custom_urdf)
-
-    return [
-        Node(
-            package="robot_state_publisher",
-            executable="robot_state_publisher",
-            name="robot_state_publisher",
-            output="screen",
-            parameters=[
-                {
-                    "use_sim_time": use_sim_time_bool,
-                    "robot_description": robot_description,
-                }
-            ],
-        )
-    ]
-
-
 def generate_launch_description():
-    bringup_dir = get_package_share_directory("nav2_bringup")
     gps_wpf_dir = get_package_share_directory("navegacion_gps")
     map_tools_dir = get_package_share_directory("map_tools")
     sensores_dir = get_package_share_directory("sensores")
-    params_dir = os.path.join(gps_wpf_dir, "config")
+
     zones_geojson_path = _resolve_config_file_path(gps_wpf_dir, "no_go_zones.geojson")
     keepout_mask_image_path = _resolve_config_file_path(gps_wpf_dir, "keepout_mask.pgm")
     keepout_mask_yaml_path = _resolve_config_file_path(gps_wpf_dir, "keepout_mask.yaml")
-
-    nav2_params = os.path.join(params_dir, "nav2_no_map_params.yaml")
-    rl_params_file = os.path.join(params_dir, "dual_ekf_navsat_params.yaml")
-    collision_monitor_params = os.path.join(params_dir, "collision_monitor.yaml")
-    lidar_to_scan_params = os.path.join(params_dir, "pointcloud_to_laserscan.yaml")
-    rviz_default = os.path.join(params_dir, "rviz_nav2_full.rviz")
+    rl_params_file = _resolve_config_file_path(gps_wpf_dir, "dual_ekf_navsat_params.yaml")
+    lidar_to_scan_params = _resolve_config_file_path(
+        gps_wpf_dir, "pointcloud_to_laserscan.yaml"
+    )
+    rviz_default = _resolve_config_file_path(gps_wpf_dir, "rviz_nav2_full.rviz")
     lidar_default_config = os.path.join(sensores_dir, "config", "rs16.yaml")
 
-    bt_xml = os.path.join(
-        params_dir, "navigate_to_pose_w_replanning_and_recovery_no_spin.xml"
-    )
-    bt_through_poses_xml = os.path.join(
-        params_dir, "navigate_through_poses_w_replanning_and_recovery_no_spin.xml"
-    )
-    configured_params = RewrittenYaml(
-        source_file=nav2_params,
-        root_key="",
-        param_rewrites={
-            "default_nav_to_pose_bt_xml": bt_xml,
-            "default_nav_through_poses_bt_xml": bt_through_poses_xml,
-        },
-        convert_types=True,
-    )
-
     use_sim_time = LaunchConfiguration("use_sim_time")
+    use_robot_state_publisher = LaunchConfiguration("use_robot_state_publisher")
+    custom_urdf = LaunchConfiguration("custom_urdf")
     use_rviz = LaunchConfiguration("use_rviz")
     rviz_config = LaunchConfiguration("rviz_config")
     use_mapviz = LaunchConfiguration("use_mapviz")
@@ -197,6 +148,20 @@ def generate_launch_description():
         default_value="map",
         description="Global map frame for navigation web backend",
     )
+
+    nav2_only_cmd = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(gps_wpf_dir, "launch", "nav2_only.launch.py")),
+        launch_arguments={
+            "use_sim_time": use_sim_time,
+            "map_frame": map_frame,
+            "use_collision_monitor": use_collision_monitor,
+            "use_rviz": use_rviz,
+            "rviz_config": rviz_config,
+            "use_robot_state_publisher": use_robot_state_publisher,
+            "custom_urdf": custom_urdf,
+        }.items(),
+    )
+
     ekf_odom_cmd = Node(
         package="robot_localization",
         executable="ekf_node",
@@ -237,63 +202,6 @@ def generate_launch_description():
         condition=IfCondition(use_navsat),
     )
 
-    navigation2_cmd = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(bringup_dir, "launch", "navigation_launch.py")
-        ),
-        launch_arguments={
-            "use_sim_time": use_sim_time,
-            "params_file": configured_params,
-            "autostart": "True",
-        }.items(),
-    )
-    keepout_filter_mask_server_cmd = Node(
-        package="nav2_map_server",
-        executable="map_server",
-        name="keepout_filter_mask_server",
-        output="screen",
-        parameters=[
-            {
-                "yaml_filename": keepout_mask_yaml_path,
-                "topic_name": "/keepout_filter_mask",
-                "frame_id": map_frame,
-            },
-            {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
-        ],
-    )
-    keepout_costmap_filter_info_server_cmd = Node(
-        package="nav2_map_server",
-        executable="costmap_filter_info_server",
-        name="keepout_costmap_filter_info_server",
-        output="screen",
-        parameters=[
-            {
-                "type": 0,
-                "filter_info_topic": "/costmap_filter_info",
-                "mask_topic": "/keepout_filter_mask",
-                "base": 0.0,
-                "multiplier": 1.0,
-            },
-            {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
-        ],
-    )
-    keepout_lifecycle_cmd = Node(
-        package="nav2_lifecycle_manager",
-        executable="lifecycle_manager",
-        name="lifecycle_manager_keepout_filters",
-        output="screen",
-        parameters=[
-            {
-                "autostart": True,
-                "bond_timeout": 4.0,
-                "node_names": [
-                    "keepout_filter_mask_server",
-                    "keepout_costmap_filter_info_server",
-                ],
-            },
-            {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
-        ],
-    )
     zones_manager_cmd = Node(
         package="navegacion_gps",
         executable="zones_manager",
@@ -381,6 +289,7 @@ def generate_launch_description():
             }
         ],
     )
+
     no_go_editor_cmd = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(map_tools_dir, "launch", "no_go_editor.launch.py")
@@ -400,22 +309,6 @@ def generate_launch_description():
         }.items(),
     )
 
-    rviz_cmd = Node(
-        package="rviz2",
-        executable="rviz2",
-        name="rviz2",
-        output="screen",
-        arguments=[
-            "-d",
-            rviz_config,
-            "--ros-args",
-            "-p",
-            PythonExpression(["'use_sim_time:=' + str(", use_sim_time, ")"]),
-        ],
-        parameters=[{"use_sim_time": ParameterValue(use_sim_time, value_type=bool)}],
-        condition=IfCondition(use_rviz),
-    )
-
     mapviz_cmd = Node(
         package="mapviz",
         executable="mapviz",
@@ -423,32 +316,6 @@ def generate_launch_description():
         output="screen",
         condition=IfCondition(use_mapviz),
         parameters=[{"use_sim_time": ParameterValue(use_sim_time, value_type=bool)}],
-    )
-
-    collision_monitor_cmd = Node(
-        package="nav2_collision_monitor",
-        executable="collision_monitor",
-        name="collision_monitor",
-        output="screen",
-        parameters=[
-            collision_monitor_params,
-            {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
-        ],
-        condition=IfCondition(use_collision_monitor),
-    )
-    collision_monitor_lifecycle_cmd = Node(
-        package="nav2_lifecycle_manager",
-        executable="lifecycle_manager",
-        name="collision_monitor_lifecycle_manager",
-        output="screen",
-        parameters=[
-            {
-                "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
-                "autostart": True,
-                "node_names": ["collision_monitor"],
-            }
-        ],
-        condition=IfCondition(use_collision_monitor),
     )
 
     gazebo_utils_cmd = Node(
@@ -482,10 +349,7 @@ def generate_launch_description():
             {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
             {"output_qos": "sensor_data"},
         ],
-        remappings=[
-            ("cloud_in", "/scan_3d"),
-            ("scan", "/scan"),
-        ],
+        remappings=[("cloud_in", "/scan_3d"), ("scan", "/scan")],
         condition=IfCondition(use_pointcloud_to_laserscan),
     )
 
@@ -498,6 +362,7 @@ def generate_launch_description():
         }.items(),
         condition=IfCondition(start_mavros),
     )
+
     camera_cmd = Node(
         package="sensores",
         executable="camara",
@@ -532,26 +397,20 @@ def generate_launch_description():
     ld.add_action(declare_ws_port_cmd)
     ld.add_action(declare_gps_topic_cmd)
     ld.add_action(declare_map_frame_cmd)
-    ld.add_action(OpaqueFunction(function=_build_robot_state_publisher))
+
+    ld.add_action(nav2_only_cmd)
     ld.add_action(mavros_cmd)
     ld.add_action(camera_cmd)
     ld.add_action(lidar_cmd)
     ld.add_action(ekf_odom_cmd)
     ld.add_action(ekf_map_cmd)
     ld.add_action(navsat_transform_cmd)
-    ld.add_action(navigation2_cmd)
-    ld.add_action(keepout_filter_mask_server_cmd)
-    ld.add_action(keepout_costmap_filter_info_server_cmd)
-    ld.add_action(keepout_lifecycle_cmd)
     ld.add_action(zones_manager_cmd)
     ld.add_action(nav_command_server_cmd)
     ld.add_action(nav_snapshot_server_cmd)
     ld.add_action(no_go_editor_cmd)
-    ld.add_action(rviz_cmd)
     ld.add_action(mapviz_cmd)
-    ld.add_action(collision_monitor_cmd)
     ld.add_action(gazebo_utils_cmd)
     ld.add_action(lidar_to_scan_cmd)
-    ld.add_action(collision_monitor_lifecycle_cmd)
 
     return ld
