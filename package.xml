@@ -27,6 +27,7 @@
   <depend>pointcloud_to_laserscan</depend>
   <depend>nav_msgs</depend>
   <depend>std_msgs</depend>
+  <depend>diagnostic_msgs</depend>
   <depend>tf2_ros</depend>
   <depend>visualization_msgs</depend>
   <depend>interfaces</depend>

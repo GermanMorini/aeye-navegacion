@@ -10,6 +10,7 @@ from navegacion_gps.nav_command_server import NavCommandServerNode
 
 class _FakeArbNode:
     _build_cmd_vel_final = staticmethod(NavCommandServerNode._build_cmd_vel_final)
+    _diag_level_value = staticmethod(NavCommandServerNode._diag_level_value)
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -19,9 +20,12 @@ class _FakeArbNode:
         self._current_goal_handle = None
         self._last_cmd_vel_safe = None
         self._collision_stop_active = False
+        self._last_collision_stop_active = False
         self._last_manual_cmd = CmdVelFinal()
         self._last_manual_cmd_time = None
         self._manual_watchdog_stop_sent = False
+        self._failure_code = ""
+        self._failure_component = ""
         self.manual_cmd_timeout_s = 0.1
         self.brake_publish_count = 1
         self.brake_publish_interval_s = 0.0
@@ -29,6 +33,7 @@ class _FakeArbNode:
         self.published = []
         self.telemetry_forced = []
         self.cancel_calls = 0
+        self.events = []
 
     def _publish_cmd_vel_final(self, msg: CmdVelFinal) -> None:
         self.published.append(
@@ -54,6 +59,22 @@ class _FakeArbNode:
 
     def _publish_telemetry(self, force: bool = False) -> None:
         self.telemetry_forced.append(bool(force))
+
+    def _set_failure_locked(self, code: str = "", component: str = "") -> None:
+        self._failure_code = str(code)
+        self._failure_component = str(component)
+
+    def _publish_event(self, severity, component, code, message, *, details=None):
+        self.events.append(
+            {
+                "severity": self._diag_level_value(severity),
+                "component": str(component),
+                "code": str(code),
+                "message": str(message),
+                "details": dict(details or {}),
+            }
+        )
+        return len(self.events)
 
     def cancel_current_goal(self):
         self.cancel_calls += 1

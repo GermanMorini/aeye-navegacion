@@ -37,6 +37,7 @@ setup(
             'zones_manager = navegacion_gps.zones_manager:main',
             'nav_command_server = navegacion_gps.nav_command_server:main',
             'nav_snapshot_server = navegacion_gps.nav_snapshot_server:main',
+            'nav_observability = navegacion_gps.nav_observability:main',
         ],
     },
 )

@@ -298,6 +298,18 @@ def generate_launch_description():
             }
         ],
     )
+    nav_observability_cmd = Node(
+        package="navegacion_gps",
+        executable="nav_observability",
+        name="nav_observability",
+        output="screen",
+        parameters=[
+            {
+                "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
+                "publish_hz": 2.0,
+            }
+        ],
+    )
 
     no_go_editor_cmd = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -434,6 +446,7 @@ def generate_launch_description():
     ld.add_action(zones_manager_cmd)
     ld.add_action(nav_command_server_cmd)
     ld.add_action(nav_snapshot_server_cmd)
+    ld.add_action(nav_observability_cmd)
     ld.add_action(no_go_editor_cmd)
     ld.add_action(mapviz_cmd)
     ld.add_action(gazebo_utils_cmd)

@@ -27,12 +27,16 @@ class _FakeLogger:
     def __init__(self):
         self.info_msgs = []
         self.warn_msgs = []
+        self.error_msgs = []
 
     def info(self, msg: str) -> None:
         self.info_msgs.append(str(msg))
 
     def warning(self, msg: str) -> None:
         self.warn_msgs.append(str(msg))
+
+    def error(self, msg: str) -> None:
+        self.error_msgs.append(str(msg))
 
 
 class _FakeResultFuture:
@@ -49,6 +53,8 @@ class _FakeResultFuture:
 
 
 class _FakeLoopNode:
+    _diag_level_value = staticmethod(NavCommandServerNode._diag_level_value)
+
     def __init__(self):
         self._lock = threading.Lock()
         self._current_goal_handle = object()
@@ -59,12 +65,16 @@ class _FakeLoopNode:
         self._manual_enabled = False
         self._is_navigating = True
         self._auto_mode = "loop"
+        self._active_action = "navigate_through_poses"
+        self._failure_code = ""
+        self._failure_component = ""
 
         self._send_ok = True
         self._send_err = ""
         self.sent_calls = []
         self.telemetry_forced = []
         self.brake_calls = []
+        self.events = []
         self.logger = _FakeLogger()
 
     def _send_nav_goal_for_poses(self, poses, loop_enabled, reason):
@@ -82,6 +92,29 @@ class _FakeLoopNode:
 
     def _publish_brake_sequence(self, brake_pct: int) -> None:
         self.brake_calls.append(int(brake_pct))
+
+    def _set_failure_locked(self, code: str = "", component: str = "") -> None:
+        self._failure_code = str(code)
+        self._failure_component = str(component)
+
+    def _publish_event(self, severity, component, code, message, *, details=None):
+        severity_value = self._diag_level_value(severity)
+        self.events.append(
+            {
+                "severity": severity_value,
+                "component": str(component),
+                "code": str(code),
+                "message": str(message),
+                "details": dict(details or {}),
+            }
+        )
+        if severity_value >= 2:
+            self.logger.error(str(message))
+        elif severity_value >= 1:
+            self.logger.warning(str(message))
+        else:
+            self.logger.info(str(message))
+        return len(self.events)
 
     def get_logger(self):
         return self.logger

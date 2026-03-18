@@ -57,10 +57,47 @@ Este checkout no incluye los antiguos nodos de waypoints interactivos, logger GU
 - Servicio:
   - `/nav_snapshot_server/get_nav_snapshot`
 
+### `nav_observability`
+- Publica diagnósticos ROS 2 agregados en `/diagnostics`.
+- Resume salud de:
+  - GPS
+  - localización
+  - flujo de comandos Nav2
+  - `collision_monitor`
+  - `nav_command_server`
+  - `controller_server`
+- Reutiliza `/nav_command_server/telemetry`, `/nav_command_server/events` y los JSON de `/controller/status` y `/controller/telemetry`.
+
 ### `gazebo_utils`
 - Normaliza `frame_id` y tópicos de sensores bridged desde Gazebo Sim.
 - Puede puentear `/cmd_vel_final` hacia `/cmd_vel_gazebo` en simulación.
 - En `realism_mode:=true` desactiva el bridge de ultrasounds y usa una emulación de actuador alineada con el robot real.
+
+## Observabilidad y debugging
+- Telemetría de navegación:
+  - `/nav_command_server/telemetry`
+- Eventos discretos:
+  - `/nav_command_server/events`
+- Diagnósticos ROS 2:
+  - `/diagnostics`
+- Web de control:
+  - `Active Alerts` muestra diagnósticos `WARN` y `ERROR` que llegan desde el backend
+  - `Recent Events` muestra la secuencia reciente de decisiones y fallas publicada por navegación
+
+Eventos de navegación relevantes:
+- `GOAL_REQUESTED`
+- `GOAL_ACCEPTED`
+- `GOAL_REJECTED`
+- `GOAL_CANCELLED`
+- `GOAL_RESULT_SUCCEEDED`
+- `GOAL_RESULT_ABORTED`
+- `LOOP_RESTART_FAILED`
+- `FROMLL_FAILED`
+- `ACTION_SERVER_UNAVAILABLE`
+- `MANUAL_TAKEOVER`
+- `MANUAL_WATCHDOG_STOP`
+- `COLLISION_STOP_ACTIVE`
+- `BRAKE_APPLIED`
 
 ## Tópicos y frames principales
 - Entradas de localización:
@@ -140,6 +177,28 @@ RViz para real:
 ```bash
 ./tools/exec.sh "source /opt/ros/humble/setup.bash && source /ros2_ws/install/setup.bash && ros2 launch navegacion_gps rviz_real.launch.py"
 ```
+
+Rosbag manual de debugging:
+```bash
+./tools/record_nav_debug_bag.sh
+```
+
+Rosbag manual con perfil más amplio de Nav2:
+```bash
+./tools/record_nav_debug_bag.sh full_nav2
+```
+
+Replay mínimo:
+```bash
+./tools/exec.sh "source /opt/ros/humble/setup.bash && source /ros2_ws/install/setup.bash && ros2 bag info /ros2_ws/bags/<bag_dir>"
+./tools/exec.sh "source /opt/ros/humble/setup.bash && source /ros2_ws/install/setup.bash && ros2 bag play /ros2_ws/bags/<bag_dir> --clock"
+```
+
+Qué mirar primero cuando falla:
+- `/diagnostics` para ver qué subsistema quedó en `WARN` o `ERROR`
+- `/nav_command_server/events` para la secuencia de decisiones y fallas
+- `/controller/status` y `/controller/telemetry` para `estop`, `failsafe` y fuente de control
+- `/gps/fix`, `/odometry/local`, `/cmd_vel_safe` y `/cmd_vel_final` para reconstruir la cadena completa
 
 ## Notas
 - `mapviz_gps.mvc` existe en la raíz del workspace y se copia en la imagen Docker, pero este paquete ya no expone un `mapviz.launch.py` dedicado.
