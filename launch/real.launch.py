@@ -3,10 +3,10 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -22,6 +22,17 @@ def _resolve_config_file_path(package_share_dir: str, filename: str) -> str:
     except IndexError:
         pass
     return str(default_path)
+
+
+def _validate_telemetry_backend(context):
+    telemetry_backend = LaunchConfiguration("telemetry_backend").perform(context)
+    valid_backends = {"mavros", "pixhawk_driver"}
+    if telemetry_backend not in valid_backends:
+        raise RuntimeError(
+            "telemetry_backend must be one of "
+            f"{sorted(valid_backends)}, got {telemetry_backend!r}"
+        )
+    return []
 
 
 def generate_launch_description():
@@ -49,7 +60,7 @@ def generate_launch_description():
     use_collision_monitor = LaunchConfiguration("use_collision_monitor")
     use_gazebo_utils = LaunchConfiguration("use_gazebo_utils")
     use_pointcloud_to_laserscan = LaunchConfiguration("use_pointcloud_to_laserscan")
-    start_mavros = LaunchConfiguration("start_mavros")
+    telemetry_backend = LaunchConfiguration("telemetry_backend")
     start_lidar = LaunchConfiguration("start_lidar")
     launch_web = LaunchConfiguration("launch_web")
     lidar_config_path = LaunchConfiguration("lidar_config_path")
@@ -108,10 +119,10 @@ def generate_launch_description():
         default_value="True",
         description="Whether to start pointcloud_to_laserscan",
     )
-    declare_start_mavros_cmd = DeclareLaunchArgument(
-        "start_mavros",
-        default_value="True",
-        description="Start MAVROS node for Pixhawk telemetry",
+    declare_telemetry_backend_cmd = DeclareLaunchArgument(
+        "telemetry_backend",
+        default_value="mavros",
+        description="Pixhawk telemetry backend: mavros or pixhawk_driver",
     )
     declare_start_lidar_cmd = DeclareLaunchArgument(
         "start_lidar",
@@ -140,7 +151,7 @@ def generate_launch_description():
     )
     declare_gps_topic_cmd = DeclareLaunchArgument(
         "gps_topic",
-        default_value="/mavros/global_position/raw/fix",
+        default_value="/gps/fix",
         description="GPS topic used by web console backend/gateway",
     )
     declare_map_frame_cmd = DeclareLaunchArgument(
@@ -193,8 +204,6 @@ def generate_launch_description():
             {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
         ],
         remappings=[
-            ("imu/data", "/mavros/imu/data"),
-            ("gps/fix", "/mavros/global_position/raw/fix"),
             ("gps/filtered", "gps/filtered"),
             ("odometry/gps", "odometry/gps"),
             ("odometry/filtered", "odometry/local"),
@@ -359,8 +368,23 @@ def generate_launch_description():
         ),
         launch_arguments={
             "launch_web": launch_web,
+            "launch_legacy_compat": "true",
         }.items(),
-        condition=IfCondition(start_mavros),
+        condition=IfCondition(
+            PythonExpression(["'", telemetry_backend, "' == 'mavros'"])
+        ),
+    )
+
+    pixhawk_cmd = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(sensores_dir, "launch", "pixhawk.launch.py")
+        ),
+        launch_arguments={
+            "launch_web": launch_web,
+        }.items(),
+        condition=IfCondition(
+            PythonExpression(["'", telemetry_backend, "' == 'pixhawk_driver'"])
+        ),
     )
 
     camera_cmd = Node(
@@ -389,7 +413,7 @@ def generate_launch_description():
     ld.add_action(declare_use_collision_monitor_cmd)
     ld.add_action(declare_use_gazebo_utils_cmd)
     ld.add_action(declare_use_pointcloud_to_laserscan_cmd)
-    ld.add_action(declare_start_mavros_cmd)
+    ld.add_action(declare_telemetry_backend_cmd)
     ld.add_action(declare_start_lidar_cmd)
     ld.add_action(declare_launch_web_cmd)
     ld.add_action(declare_lidar_config_path_cmd)
@@ -397,9 +421,11 @@ def generate_launch_description():
     ld.add_action(declare_ws_port_cmd)
     ld.add_action(declare_gps_topic_cmd)
     ld.add_action(declare_map_frame_cmd)
+    ld.add_action(OpaqueFunction(function=_validate_telemetry_backend))
 
     ld.add_action(nav2_only_cmd)
     ld.add_action(mavros_cmd)
+    ld.add_action(pixhawk_cmd)
     ld.add_action(camera_cmd)
     ld.add_action(lidar_cmd)
     ld.add_action(ekf_odom_cmd)

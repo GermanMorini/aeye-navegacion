@@ -14,8 +14,8 @@ ekf_filter_node_odom:
     base_link_frame: base_footprint
     world_frame: odom
 
-    # odom0: /odom
-    odom0: /mavros/local_position/odom
+    # Legacy input contract: /odom comes from pixhawk_driver or mavros_compat_bridge
+    odom0: /odom
     odom0_config: [false, false, false,
                    false, false, false,
                    true,  true,  false,
@@ -25,8 +25,7 @@ ekf_filter_node_odom:
     odom0_differential: false
     odom0_relative: false
 
-    # imu0: /imu/data
-    imu0: /mavros/imu/data
+    imu0: /imu/data
     imu0_config: [false, false, false,
                   false, false, true,
                   false, false, false,
@@ -105,8 +104,7 @@ ekf_filter_node_map:
     odom1_differential: false
     odom1_relative: false
 
-    # imu0: /imu/data
-    imu0: /mavros/imu/data
+    imu0: /imu/data
     imu0_config: [false, false, false,
                   false, false, true,
                   false, false, false,
@@ -159,7 +157,7 @@ navsat_transform:
     zero_altitude: true
     broadcast_utm_transform: true
     publish_filtered_gps: false
-    use_odometry_yaw: false
+    use_odometry_yaw: true
     # wait_for_datum: false
     wait_for_datum: true
     datum: [-31.4858037, -64.2410570, 0.0] # Ejemplo: CIT, Córdoba, Argentina
