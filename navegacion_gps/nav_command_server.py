@@ -15,6 +15,7 @@ from rclpy.action import ActionClient
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from robot_localization.srv import FromLL
 from sensor_msgs.msg import NavSatFix
 
@@ -197,7 +198,9 @@ class NavCommandServerNode(Node):
         self._cmd_vel_final_pub = self.create_publisher(
             CmdVelFinal, self.cmd_vel_final_topic, 10
         )
-        self._gps_sub = self.create_subscription(NavSatFix, self.gps_topic, self._on_gps_fix, 10)
+        self._gps_sub = self.create_subscription(
+            NavSatFix, self.gps_topic, self._on_gps_fix, qos_profile_sensor_data
+        )
         self._cmd_vel_sub = self.create_subscription(
             Twist, self.cmd_vel_safe_topic, self._on_cmd_vel_safe, 10
         )
