@@ -84,13 +84,13 @@ def generate_launch_description():
         convert_types=True,
     )
 
-    # Force real-time for Nav2 stack regardless of launch argument.
-    nav2_use_sim_time = False
     use_sim_time = LaunchConfiguration("use_sim_time")
+    nav2_use_sim_time = ParameterValue(use_sim_time, value_type=bool)
     map_frame = LaunchConfiguration("map_frame")
     use_collision_monitor = LaunchConfiguration("use_collision_monitor")
     use_rviz = LaunchConfiguration("use_rviz")
     rviz_config = LaunchConfiguration("rviz_config")
+    collision_monitor_params_path = LaunchConfiguration("collision_monitor_params")
 
     declare_use_sim_time_cmd = DeclareLaunchArgument(
         "use_sim_time",
@@ -117,6 +117,11 @@ def generate_launch_description():
         default_value=rviz_default,
         description="Path to the RViz config file",
     )
+    declare_collision_monitor_params_cmd = DeclareLaunchArgument(
+        "collision_monitor_params",
+        default_value=collision_monitor_params,
+        description="Path to the collision_monitor YAML config file",
+    )
     declare_use_robot_state_publisher_cmd = DeclareLaunchArgument(
         "use_robot_state_publisher",
         default_value="False",
@@ -133,7 +138,7 @@ def generate_launch_description():
             os.path.join(bringup_dir, "launch", "navigation_launch.py")
         ),
         launch_arguments={
-            "use_sim_time": "False",
+            "use_sim_time": use_sim_time,
             "params_file": configured_params,
             "autostart": "True",
         }.items(),
@@ -193,7 +198,7 @@ def generate_launch_description():
         name="collision_monitor",
         output="screen",
         parameters=[
-            collision_monitor_params,
+            collision_monitor_params_path,
             {"use_sim_time": nav2_use_sim_time},
         ],
         condition=IfCondition(use_collision_monitor),
@@ -235,6 +240,7 @@ def generate_launch_description():
     ld.add_action(declare_use_collision_monitor_cmd)
     ld.add_action(declare_use_rviz_cmd)
     ld.add_action(declare_rviz_config_cmd)
+    ld.add_action(declare_collision_monitor_params_cmd)
     ld.add_action(declare_use_robot_state_publisher_cmd)
     ld.add_action(declare_custom_urdf_cmd)
 

@@ -13,6 +13,9 @@ Este checkout no incluye los antiguos nodos de waypoints interactivos, logger GU
 ## Launches reales
 - `ros2 launch navegacion_gps simulacion.launch.py`
   - Gazebo Sim + bridge ROS/GZ + robot_localization + Nav2 + zonas + backend web opcional
+  - `realism_mode:=true` por defecto: reutiliza `nav2_only.launch.py`, desactiva ultrasounds en `collision_monitor` y emula la lógica del actuador real
+  - En ese modo el GPS también se degrada hacia un comportamiento más realista: baja frecuencia de publicación, ruido horizontal/vertical y deriva lenta
+  - `realism_mode:=false`: preserva el flujo legacy de simulación con passthrough directo de `/cmd_vel_final`
 - `ros2 launch navegacion_gps real.launch.py`
   - robot_localization + Nav2 + backend de telemetría seleccionable (`mavros` por defecto, `pixhawk_driver` como fallback) + zonas + backend web opcional
 - `ros2 launch navegacion_gps rviz_real.launch.py`
@@ -23,7 +26,8 @@ Este checkout no incluye los antiguos nodos de waypoints interactivos, logger GU
 - `nav2_collision_monitor` publica `/cmd_vel_safe`.
 - `nav_command_server` recibe `/cmd_vel_safe` y comandos manuales en `/cmd_vel_teleop`.
 - `nav_command_server` publica `/cmd_vel_final` (`interfaces/msg/CmdVelFinal`).
-- En simulación, `gazebo_utils` puede adaptar `/cmd_vel_final` a `/cmd_vel_gazebo`.
+- En simulación legacy, `gazebo_utils` adapta `/cmd_vel_final` a `/cmd_vel_gazebo` por passthrough.
+- En simulación realista, `gazebo_utils` reutiliza la lógica de `controller_server.control_logic.command_from_cmd_vel` para aplicar clamp, deadband, velocidad mínima efectiva y mapeo de steering antes de publicar `/cmd_vel_gazebo`.
 - En hardware real, `controller_server` consume `/cmd_vel_final`.
 
 ## Nodos del paquete
@@ -56,6 +60,7 @@ Este checkout no incluye los antiguos nodos de waypoints interactivos, logger GU
 ### `gazebo_utils`
 - Normaliza `frame_id` y tópicos de sensores bridged desde Gazebo Sim.
 - Puede puentear `/cmd_vel_final` hacia `/cmd_vel_gazebo` en simulación.
+- En `realism_mode:=true` desactiva el bridge de ultrasounds y usa una emulación de actuador alineada con el robot real.
 
 ## Tópicos y frames principales
 - Entradas de localización:
@@ -116,6 +121,21 @@ Simulación:
 ./tools/exec.sh "source /opt/ros/humble/setup.bash && source /ros2_ws/install/setup.bash && ros2 launch navegacion_gps simulacion.launch.py"
 ```
 
+Simulación legacy:
+```bash
+./tools/exec.sh "source /opt/ros/humble/setup.bash && source /ros2_ws/install/setup.bash && ros2 launch navegacion_gps simulacion.launch.py realism_mode:=false"
+```
+
+Parámetros nuevos de la emulación del actuador en simulación:
+- `sim_max_forward_mps`
+- `sim_max_reverse_mps`
+- `sim_max_abs_angular_z`
+
+Parámetros principales del GPS realista en simulación:
+- `gps_realism_publish_rate_hz`
+- `gps_realism_horizontal_noise_stddev_m`
+- `gps_realism_vertical_noise_stddev_m`
+
 RViz para real:
 ```bash
 ./tools/exec.sh "source /opt/ros/humble/setup.bash && source /ros2_ws/install/setup.bash && ros2 launch navegacion_gps rviz_real.launch.py"
@@ -125,3 +145,4 @@ RViz para real:
 - `mapviz_gps.mvc` existe en la raíz del workspace y se copia en la imagen Docker, pero este paquete ya no expone un `mapviz.launch.py` dedicado.
 - Si actualizas nombres de tópicos o frames, cambia también launches, YAML de Nav2 y YAML de `robot_localization`.
 - El camino MAVROS no debe reintroducir `yaw_correction_deg`; cualquier ajuste de heading futuro debe hacerse desde configuración de localización y no en el bridge de compatibilidad.
+- La simulación realista usa el mismo `nav2_only.launch.py` que la navegación real para acercar el runtime de Nav2, keepout y `collision_monitor`.

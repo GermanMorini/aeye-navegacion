@@ -20,10 +20,15 @@ from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
+from launch.actions import (
+    DeclareLaunchArgument,
+    GroupAction,
+    IncludeLaunchDescription,
+    OpaqueFunction,
+)
 from launch.substitutions import LaunchConfiguration, PythonExpression, TextSubstitution
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.conditions import IfCondition
+from launch.conditions import IfCondition, UnlessCondition
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from nav2_common.launch import RewrittenYaml
@@ -171,16 +176,22 @@ def generate_launch_description():
     keepout_mask_image_path = _resolve_config_file_path(gps_wpf_dir, "keepout_mask.pgm")
     keepout_mask_yaml_path = _resolve_config_file_path(gps_wpf_dir, "keepout_mask.yaml")
     world_path = os.path.join(gps_wpf_dir, "worlds", "vacio.world")
-    nav2_params = os.path.join(params_dir, "nav2_no_map_params.yaml")
-    rl_params_file = os.path.join(params_dir, "dual_ekf_navsat_params.yaml")
-    collision_monitor_params = os.path.join(params_dir, "collision_monitor.yaml")
-    lidar_to_scan_params = os.path.join(params_dir, "pointcloud_to_laserscan.yaml")
-    bridge_config = os.path.join(params_dir, "bridge_config.yaml")
-    bt_xml = os.path.join(
-        params_dir, "navigate_to_pose_w_replanning_and_recovery_no_spin.xml"
+    nav2_only_launch = os.path.join(gps_wpf_dir, "launch", "nav2_only.launch.py")
+    nav2_params = _resolve_config_file_path(gps_wpf_dir, "nav2_no_map_params.yaml")
+    rl_params_file = _resolve_config_file_path(gps_wpf_dir, "dual_ekf_navsat_params.yaml")
+    collision_monitor_params = _resolve_config_file_path(gps_wpf_dir, "collision_monitor.yaml")
+    collision_monitor_lidar_only_params = _resolve_config_file_path(
+        gps_wpf_dir, "collision_monitor_lidar_only.yaml"
     )
-    bt_through_poses_xml = os.path.join(
-        params_dir, "navigate_through_poses_w_replanning_and_recovery_no_spin.xml"
+    lidar_to_scan_params = _resolve_config_file_path(
+        gps_wpf_dir, "pointcloud_to_laserscan.yaml"
+    )
+    bridge_config = _resolve_config_file_path(gps_wpf_dir, "bridge_config.yaml")
+    bt_xml = _resolve_config_file_path(
+        gps_wpf_dir, "navigate_to_pose_w_replanning_and_recovery_no_spin.xml"
+    )
+    bt_through_poses_xml = _resolve_config_file_path(
+        gps_wpf_dir, "navigate_through_poses_w_replanning_and_recovery_no_spin.xml"
     )
     configured_params = RewrittenYaml(
         source_file=nav2_params,
@@ -198,6 +209,14 @@ def generate_launch_description():
     use_navsat = LaunchConfiguration("use_navsat")
     use_collision_monitor = LaunchConfiguration("use_collision_monitor")
     use_gazebo_utils = LaunchConfiguration("use_gazebo_utils")
+    realism_mode = LaunchConfiguration("realism_mode")
+    gps_realism_publish_rate_hz = LaunchConfiguration("gps_realism_publish_rate_hz")
+    gps_realism_horizontal_noise_stddev_m = LaunchConfiguration(
+        "gps_realism_horizontal_noise_stddev_m"
+    )
+    gps_realism_vertical_noise_stddev_m = LaunchConfiguration(
+        "gps_realism_vertical_noise_stddev_m"
+    )
     rviz_config = LaunchConfiguration("rviz_config")
     world = LaunchConfiguration("world")
     ws_host = LaunchConfiguration("ws_host")
@@ -244,6 +263,26 @@ def generate_launch_description():
         "use_gazebo_utils",
         default_value="True",
         description="Whether to run gazebo_utils (frame normalization + cmd bridge)",
+    )
+    declare_realism_mode_cmd = DeclareLaunchArgument(
+        "realism_mode",
+        default_value="True",
+        description="Use the real Nav2 stack and realistic actuator emulation in simulation",
+    )
+    declare_gps_realism_publish_rate_hz_cmd = DeclareLaunchArgument(
+        "gps_realism_publish_rate_hz",
+        default_value="5.0",
+        description="GPS publish rate for realistic simulation mode",
+    )
+    declare_gps_realism_horizontal_noise_stddev_m_cmd = DeclareLaunchArgument(
+        "gps_realism_horizontal_noise_stddev_m",
+        default_value="0.35",
+        description="GPS horizontal white noise stddev in meters for realistic simulation mode",
+    )
+    declare_gps_realism_vertical_noise_stddev_m_cmd = DeclareLaunchArgument(
+        "gps_realism_vertical_noise_stddev_m",
+        default_value="0.75",
+        description="GPS vertical white noise stddev in meters for realistic simulation mode",
     )
     declare_use_joint_state_bridge_cmd = DeclareLaunchArgument(
         "use_joint_state_bridge",
@@ -335,6 +374,25 @@ def generate_launch_description():
             "params_file": configured_params,
             "autostart": "True",
         }.items(),
+        condition=UnlessCondition(realism_mode),
+    )
+    realistic_nav2_cmd = GroupAction(
+        actions=[
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(nav2_only_launch),
+                launch_arguments={
+                    "use_sim_time": use_sim_time,
+                    "map_frame": map_frame,
+                    "use_collision_monitor": use_collision_monitor,
+                    "use_rviz": "False",
+                    "use_robot_state_publisher": "False",
+                    "custom_urdf": LaunchConfiguration("custom_urdf"),
+                    "collision_monitor_params": collision_monitor_lidar_only_params,
+                }.items(),
+            )
+        ],
+        scoped=True,
+        condition=IfCondition(realism_mode),
     )
     keepout_filter_mask_server_cmd = Node(
         package="nav2_map_server",
@@ -349,6 +407,7 @@ def generate_launch_description():
             },
             {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
         ],
+        condition=UnlessCondition(realism_mode),
     )
     keepout_costmap_filter_info_server_cmd = Node(
         package="nav2_map_server",
@@ -365,6 +424,7 @@ def generate_launch_description():
             },
             {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
         ],
+        condition=UnlessCondition(realism_mode),
     )
     keepout_lifecycle_cmd = Node(
         package="nav2_lifecycle_manager",
@@ -382,6 +442,7 @@ def generate_launch_description():
             },
             {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
         ],
+        condition=UnlessCondition(realism_mode),
     )
     zones_manager_cmd = Node(
         package="navegacion_gps",
@@ -529,7 +590,17 @@ def generate_launch_description():
             collision_monitor_params,
             {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
         ],
-        condition=IfCondition(use_collision_monitor),
+        condition=IfCondition(
+            PythonExpression(
+                [
+                    "'",
+                    use_collision_monitor,
+                    "'.lower() in ['true', '1'] and '",
+                    realism_mode,
+                    "'.lower() not in ['true', '1']",
+                ]
+            )
+        ),
     )
     collision_monitor_lifecycle_cmd = Node(
         package="nav2_lifecycle_manager",
@@ -543,7 +614,17 @@ def generate_launch_description():
                 "node_names": ["collision_monitor"],
             }
         ],
-        condition=IfCondition(use_collision_monitor),
+        condition=IfCondition(
+            PythonExpression(
+                [
+                    "'",
+                    use_collision_monitor,
+                    "'.lower() in ['true', '1'] and '",
+                    realism_mode,
+                    "'.lower() not in ['true', '1']",
+                ]
+            )
+        ),
     )
     gazebo_utils_cmd = Node(
         package="navegacion_gps",
@@ -555,6 +636,32 @@ def generate_launch_description():
             {"imu_in_topic": "/imu/data_raw", "imu_out_topic": "/imu/data"},
             {"gps_in_topic": "/gps/fix_raw", "gps_out_topic": "/gps/fix"},
             {"lidar_in_topic": "/scan_3d_raw", "lidar_out_topic": "/scan_3d"},
+            {"use_realistic_gps": ParameterValue(realism_mode, value_type=bool)},
+            {
+                "gps_publish_rate_hz": ParameterValue(
+                    gps_realism_publish_rate_hz, value_type=float
+                )
+            },
+            {
+                "gps_horizontal_noise_stddev_m": ParameterValue(
+                    gps_realism_horizontal_noise_stddev_m, value_type=float
+                )
+            },
+            {
+                "gps_vertical_noise_stddev_m": ParameterValue(
+                    gps_realism_vertical_noise_stddev_m, value_type=float
+                )
+            },
+            {"gps_publish_jitter_stddev_s": 0.03},
+            {"gps_bias_walk_stddev_m_per_sqrt_s": 0.02},
+            {
+                "enable_ultrasound_bridge": ParameterValue(
+                    PythonExpression(
+                        ["'", realism_mode, "'.lower() not in ['true', '1']"]
+                    ),
+                    value_type=bool,
+                )
+            },
             {
                 "ultrasound_rear_center_in_topic": "/ultrasound/rear_center_raw",
                 "ultrasound_rear_center_out_topic": "/ultrasound/rear_center",
@@ -587,8 +694,20 @@ def generate_launch_description():
             {"odom_frame_id": "odom"},
             {"base_link_frame_id": "base_footprint"},
             {"enable_cmd_vel_final_bridge": True},
+            {"use_realistic_cmd_vel_bridge": ParameterValue(realism_mode, value_type=bool)},
             {"cmd_vel_final_in_topic": "/cmd_vel_final"},
             {"cmd_vel_gazebo_out_topic": "/cmd_vel_gazebo"},
+            {"max_speed_mps": 4.0},
+            {"max_reverse_mps": 1.30},
+            {"vx_deadband_mps": 0.10},
+            {"vx_min_effective_mps": 0.75},
+            {"max_abs_angular_z": 0.4},
+            {"invert_steer_from_cmd_vel": False},
+            {"auto_drive_enabled": True},
+            {"reverse_brake_pct": 20},
+            {"sim_max_forward_mps": 4.0},
+            {"sim_max_reverse_mps": 1.30},
+            {"sim_max_abs_angular_z": 0.4},
         ],
         condition=IfCondition(use_gazebo_utils),
     )
@@ -616,6 +735,10 @@ def generate_launch_description():
     ld.add_action(declare_use_navsat_cmd)
     ld.add_action(declare_use_collision_monitor_cmd)
     ld.add_action(declare_use_gazebo_utils_cmd)
+    ld.add_action(declare_realism_mode_cmd)
+    ld.add_action(declare_gps_realism_publish_rate_hz_cmd)
+    ld.add_action(declare_gps_realism_horizontal_noise_stddev_m_cmd)
+    ld.add_action(declare_gps_realism_vertical_noise_stddev_m_cmd)
     ld.add_action(declare_use_joint_state_bridge_cmd)
     ld.add_action(declare_world_cmd)
     ld.add_action(declare_world_name_cmd)
@@ -637,6 +760,7 @@ def generate_launch_description():
     ld.add_action(ekf_map_cmd)
     ld.add_action(navsat_transform_cmd)
     ld.add_action(navigation2_cmd)
+    ld.add_action(realistic_nav2_cmd)
     ld.add_action(keepout_filter_mask_server_cmd)
     ld.add_action(keepout_costmap_filter_info_server_cmd)
     ld.add_action(keepout_lifecycle_cmd)

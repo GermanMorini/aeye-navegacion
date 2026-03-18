@@ -1,5 +1,8 @@
+import random
+
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
+from sensor_msgs.msg import NavSatFix
 
 from interfaces.msg import CmdVelFinal
 from navegacion_gps.gazebo_utils import GazeboUtilsNode
@@ -16,8 +19,21 @@ class _FakePublisher:
 class _FakeCmdBridgeNode:
     def __init__(self, enabled: bool) -> None:
         self.cmd_vel_gazebo_pub = _FakePublisher() if enabled else None
+        self.use_realistic_cmd_vel_bridge = False
+        self.max_speed_mps = 4.0
+        self.max_reverse_mps = 1.3
+        self.vx_deadband_mps = 0.10
+        self.vx_min_effective_mps = 0.75
+        self.max_abs_angular_z = 0.4
+        self.invert_steer_from_cmd_vel = False
+        self.auto_drive_enabled = True
+        self.reverse_brake_pct = 20
+        self.sim_max_forward_mps = 4.0
+        self.sim_max_reverse_mps = 1.3
+        self.sim_max_abs_angular_z = 0.4
 
     _publish_cmd_vel_gazebo = GazeboUtilsNode._publish_cmd_vel_gazebo
+    _translate_cmd_vel_final_to_gazebo = GazeboUtilsNode._translate_cmd_vel_final_to_gazebo
 
 
 class _FakeFrameNode:
@@ -29,6 +45,33 @@ class _FakeFrameNode:
         self.odom_frame_id = "odom"
         self.base_link_frame_id = "base_footprint"
         self.odom_pub = _FakePublisher()
+
+
+class _FakeGpsNode:
+    _strip = GazeboUtilsNode._strip
+    _resolve_frame = GazeboUtilsNode._resolve_frame
+    _get_reference_time_ns = GazeboUtilsNode._get_reference_time_ns
+    _advance_gps_bias = GazeboUtilsNode._advance_gps_bias
+    _schedule_next_gps_publish = GazeboUtilsNode._schedule_next_gps_publish
+    _apply_realistic_gps = GazeboUtilsNode._apply_realistic_gps
+    _gps_cb = GazeboUtilsNode._gps_cb
+
+    def __init__(self) -> None:
+        self.strip_prefix = True
+        self.gps_frame_id = "gps_link"
+        self.gps_pub = _FakePublisher()
+        self.use_realistic_gps = True
+        self.gps_publish_rate_hz = 5.0
+        self.gps_publish_jitter_stddev_s = 0.0
+        self.gps_horizontal_noise_stddev_m = 0.35
+        self.gps_vertical_noise_stddev_m = 0.75
+        self.gps_bias_walk_stddev_m_per_sqrt_s = 0.02
+        self._gps_random = random.Random(123)
+        self._gps_next_publish_time_ns = 0
+        self._gps_last_publish_time_ns = None
+        self._gps_bias_north_m = 0.0
+        self._gps_bias_east_m = 0.0
+        self._gps_bias_alt_m = 0.0
 
 
 def test_cmd_vel_final_without_brake_is_forwarded() -> None:
@@ -47,8 +90,72 @@ def test_cmd_vel_final_without_brake_is_forwarded() -> None:
     assert float(published.angular.z) == -0.4
 
 
+def test_realistic_bridge_applies_min_effective_speed() -> None:
+    node = _FakeCmdBridgeNode(enabled=True)
+    node.use_realistic_cmd_vel_bridge = True
+    msg = CmdVelFinal()
+    msg.twist.linear.x = 0.2
+    msg.twist.angular.z = 0.0
+    msg.brake_pct = 0
+
+    GazeboUtilsNode._cmd_vel_final_cb(node, msg)
+
+    published = node.cmd_vel_gazebo_pub.messages[-1]
+    assert float(published.linear.x) == 0.75
+    assert float(published.angular.z) == 0.0
+
+
+def test_realistic_bridge_applies_deadband_and_zeroes_small_reverse() -> None:
+    node = _FakeCmdBridgeNode(enabled=True)
+    node.use_realistic_cmd_vel_bridge = True
+    msg = CmdVelFinal()
+    msg.twist.linear.x = -0.05
+    msg.twist.angular.z = 0.0
+    msg.brake_pct = 0
+
+    GazeboUtilsNode._cmd_vel_final_cb(node, msg)
+
+    published = node.cmd_vel_gazebo_pub.messages[-1]
+    assert float(published.linear.x) == 0.0
+    assert float(published.angular.z) == 0.0
+
+
+def test_realistic_bridge_clamps_speed_and_angular_mapping() -> None:
+    node = _FakeCmdBridgeNode(enabled=True)
+    node.use_realistic_cmd_vel_bridge = True
+    node.sim_max_forward_mps = 3.0
+    node.sim_max_abs_angular_z = 0.6
+    msg = CmdVelFinal()
+    msg.twist.linear.x = 8.0
+    msg.twist.angular.z = 1.0
+    msg.brake_pct = 0
+
+    GazeboUtilsNode._cmd_vel_final_cb(node, msg)
+
+    published = node.cmd_vel_gazebo_pub.messages[-1]
+    assert float(published.linear.x) == 3.0
+    assert float(published.angular.z) == 0.6
+
+
+def test_realistic_bridge_clamps_reverse_speed() -> None:
+    node = _FakeCmdBridgeNode(enabled=True)
+    node.use_realistic_cmd_vel_bridge = True
+    node.sim_max_reverse_mps = 1.0
+    msg = CmdVelFinal()
+    msg.twist.linear.x = -2.2
+    msg.twist.angular.z = -0.4
+    msg.brake_pct = 0
+
+    GazeboUtilsNode._cmd_vel_final_cb(node, msg)
+
+    published = node.cmd_vel_gazebo_pub.messages[-1]
+    assert float(published.linear.x) == -1.0
+    assert float(published.angular.z) == -0.4
+
+
 def test_cmd_vel_final_with_brake_publishes_zero_twist() -> None:
     node = _FakeCmdBridgeNode(enabled=True)
+    node.use_realistic_cmd_vel_bridge = True
     msg = CmdVelFinal()
     msg.twist.linear.x = 0.9
     msg.twist.angular.z = 0.2
@@ -85,3 +192,53 @@ def test_odom_callback_preserves_frame_normalization_logic() -> None:
     published = node.odom_pub.messages[-1]
     assert published.header.frame_id == "odom"
     assert published.child_frame_id == "base_footprint"
+
+
+def test_realistic_gps_adds_noise_and_covariance() -> None:
+    node = _FakeGpsNode()
+    msg = NavSatFix()
+    msg.header.stamp.sec = 10
+    msg.header.frame_id = "model::gps_link"
+    msg.latitude = -31.4858037
+    msg.longitude = -64.2410570
+    msg.altitude = 0.0
+
+    GazeboUtilsNode._gps_cb(node, msg)
+
+    assert len(node.gps_pub.messages) == 1
+    published = node.gps_pub.messages[-1]
+    assert published.header.frame_id == "gps_link"
+    assert published.latitude != msg.latitude
+    assert published.longitude != msg.longitude
+    assert published.position_covariance_type == NavSatFix.COVARIANCE_TYPE_DIAGONAL_KNOWN
+    assert published.position_covariance[0] == 0.35**2
+    assert published.position_covariance[8] == 0.75**2
+
+
+def test_realistic_gps_throttles_publish_rate() -> None:
+    node = _FakeGpsNode()
+    node.gps_horizontal_noise_stddev_m = 0.0
+    node.gps_vertical_noise_stddev_m = 0.0
+
+    msg1 = NavSatFix()
+    msg1.header.stamp.sec = 10
+    msg1.latitude = -31.4858037
+    msg1.longitude = -64.2410570
+
+    msg2 = NavSatFix()
+    msg2.header.stamp.sec = 10
+    msg2.header.stamp.nanosec = 100_000_000
+    msg2.latitude = -31.4858037
+    msg2.longitude = -64.2410570
+
+    msg3 = NavSatFix()
+    msg3.header.stamp.sec = 10
+    msg3.header.stamp.nanosec = 250_000_000
+    msg3.latitude = -31.4858037
+    msg3.longitude = -64.2410570
+
+    GazeboUtilsNode._gps_cb(node, msg1)
+    GazeboUtilsNode._gps_cb(node, msg2)
+    GazeboUtilsNode._gps_cb(node, msg3)
+
+    assert len(node.gps_pub.messages) == 2
