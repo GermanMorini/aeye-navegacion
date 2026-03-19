@@ -105,6 +105,23 @@ def test_realistic_bridge_applies_min_effective_speed() -> None:
     assert float(published.angular.z) == 0.0
 
 
+def test_realistic_bridge_preserves_curvature_when_min_effective_speed_applies() -> None:
+    node = _FakeCmdBridgeNode(enabled=True)
+    node.use_realistic_cmd_vel_bridge = True
+    node.vx_deadband_mps = 0.01
+    node.vx_min_effective_mps = 0.5
+    msg = CmdVelFinal()
+    msg.twist.linear.x = 0.1
+    msg.twist.angular.z = 0.08
+    msg.brake_pct = 0
+
+    GazeboUtilsNode._cmd_vel_final_cb(node, msg)
+
+    published = node.cmd_vel_gazebo_pub.messages[-1]
+    assert float(published.linear.x) == 0.5
+    assert float(published.angular.z) == 0.4
+
+
 def test_realistic_bridge_applies_deadband_and_zeroes_small_reverse() -> None:
     node = _FakeCmdBridgeNode(enabled=True)
     node.use_realistic_cmd_vel_bridge = True

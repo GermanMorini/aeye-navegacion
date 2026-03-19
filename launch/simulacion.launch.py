@@ -324,7 +324,6 @@ def generate_launch_description():
     use_rviz = LaunchConfiguration("use_rviz")
     use_mapviz = LaunchConfiguration("use_mapviz")
     use_sim_time = LaunchConfiguration("use_sim_time")
-    use_navsat = LaunchConfiguration("use_navsat")
     use_collision_monitor = LaunchConfiguration("use_collision_monitor")
     use_gazebo_utils = LaunchConfiguration("use_gazebo_utils")
     realism_mode = LaunchConfiguration("realism_mode")

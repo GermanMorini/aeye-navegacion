@@ -9,10 +9,12 @@
 
   <depend>navigation2</depend>
   <depend>nav2_bringup</depend>
+  <depend>nav2_controller</depend>
   <depend>nav2_collision_monitor</depend>
   <depend>nav2_msgs</depend>
   <depend>nav2_map_server</depend>
   <depend>nav2_lifecycle_manager</depend>
+  <depend>nav2_velocity_smoother</depend>
   <depend>robot_localization</depend>
   <depend>geographic_msgs</depend>
   <depend>mapviz</depend>
@@ -34,6 +36,7 @@
   <depend>interfaces</depend>
   <depend>ros_gz_sim</depend>
   <depend>ros_gz_bridge</depend>
+  <depend>rosgraph_msgs</depend>
   <exec_depend>python3-yaml</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-opencv</exec_depend>

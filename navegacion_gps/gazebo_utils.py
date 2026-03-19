@@ -43,19 +43,23 @@ def _fallback_command_from_cmd_vel(
     min_effective = min(max(float(vx_min_effective_mps), 0.0), max_speed)
 
     linear = float(linear_x)
+    steer_angular = float(angular_z)
     speed = 0.0
     if linear > 0.0:
-        speed = min(max(linear, 0.0), max_speed)
+        requested_speed = min(max(linear, 0.0), max_speed)
+        speed = requested_speed
         if speed < deadband:
             speed = 0.0
         elif speed < min_effective:
+            if requested_speed > 1.0e-6:
+                steer_angular *= min_effective / requested_speed
             speed = min_effective
     elif linear < 0.0:
         reverse_speed = min(max(abs(linear), 0.0), max_reverse)
         speed = 0.0 if reverse_speed < deadband else -reverse_speed
 
     angular_scale = max(0.01, abs(float(max_abs_angular_z)))
-    steer_ratio = min(max(float(angular_z) / angular_scale, -1.0), 1.0)
+    steer_ratio = min(max(steer_angular / angular_scale, -1.0), 1.0)
     steer_pct = int(round(steer_ratio * 100.0))
     if bool(invert_steer):
         steer_pct = -steer_pct

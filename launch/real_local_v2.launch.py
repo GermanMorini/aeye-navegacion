@@ -1,0 +1,215 @@
+import os
+from pathlib import Path
+
+from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    OpaqueFunction,
+    TimerAction,
+)
+from launch.conditions import IfCondition
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
+
+
+def _read_file(path: str) -> str:
+    with open(path, "r", encoding="utf-8") as file_handle:
+        return file_handle.read()
+
+
+def _resolve_config_file_path(package_share_dir: str, filename: str) -> str:
+    package_share_path = Path(package_share_dir)
+    default_path = package_share_path / "config" / filename
+    try:
+        workspace_root = package_share_path.parents[3]
+        source_path = workspace_root / "src" / "navegacion_gps" / "config" / filename
+        if source_path.parent.exists():
+            return str(source_path)
+    except IndexError:
+        pass
+    return str(default_path)
+
+
+def _build_robot_state_publisher(context):
+    custom_urdf = LaunchConfiguration("custom_urdf").perform(context)
+    use_sim_time = LaunchConfiguration("use_sim_time").perform(context) == "True"
+    robot_description = _read_file(custom_urdf)
+    return [
+        Node(
+            package="robot_state_publisher",
+            executable="robot_state_publisher",
+            name="robot_state_publisher",
+            output="screen",
+            parameters=[
+                {
+                    "use_sim_time": use_sim_time,
+                    "robot_description": robot_description,
+                }
+            ],
+        )
+    ]
+
+
+def generate_launch_description():
+    gps_wpf_dir = get_package_share_directory("navegacion_gps")
+    sensores_dir = get_package_share_directory("sensores")
+    default_rviz = os.path.join(gps_wpf_dir, "config", "rviz_local_v2.rviz")
+
+    lidar_to_scan_params = _resolve_config_file_path(
+        gps_wpf_dir, "pointcloud_to_laserscan.yaml"
+    )
+
+    use_sim_time = LaunchConfiguration("use_sim_time")
+    wheelbase_m = LaunchConfiguration("wheelbase_m")
+    lidar_config_path = LaunchConfiguration("lidar_config_path")
+    fcu_url = LaunchConfiguration("fcu_url")
+    use_cyclone_dds = LaunchConfiguration("use_cyclone_dds")
+    nav_start_delay_s = LaunchConfiguration("nav_start_delay_s")
+    use_rviz = LaunchConfiguration("use_rviz")
+    rviz_config = LaunchConfiguration("rviz_config")
+    vx_deadband_mps = LaunchConfiguration("vx_deadband_mps")
+    vx_min_effective_mps = LaunchConfiguration("vx_min_effective_mps")
+    localization_params_file = LaunchConfiguration("localization_params_file")
+    nav2_params_file = LaunchConfiguration("nav2_params_file")
+    collision_monitor_params_file = LaunchConfiguration("collision_monitor_params_file")
+    pose_covariance_xy = LaunchConfiguration("pose_covariance_xy")
+    pose_covariance_yaw = LaunchConfiguration("pose_covariance_yaw")
+    twist_covariance_vx = LaunchConfiguration("twist_covariance_vx")
+    twist_covariance_vy = LaunchConfiguration("twist_covariance_vy")
+    twist_covariance_yaw_rate = LaunchConfiguration("twist_covariance_yaw_rate")
+
+    return LaunchDescription(
+        [
+            DeclareLaunchArgument("use_sim_time", default_value="False"),
+            DeclareLaunchArgument("wheelbase_m", default_value="0.94"),
+            DeclareLaunchArgument(
+                "custom_urdf",
+                default_value=os.path.join(gps_wpf_dir, "models", "cuatri_real.urdf"),
+            ),
+            DeclareLaunchArgument(
+                "lidar_config_path",
+                default_value=os.path.join(sensores_dir, "config", "rs16.yaml"),
+            ),
+            DeclareLaunchArgument("fcu_url", default_value="/dev/ttyACM0:921600"),
+            DeclareLaunchArgument("use_cyclone_dds", default_value="false"),
+            DeclareLaunchArgument("nav_start_delay_s", default_value="4.0"),
+            DeclareLaunchArgument("use_rviz", default_value="True"),
+            DeclareLaunchArgument("rviz_config", default_value=default_rviz),
+            DeclareLaunchArgument("vx_deadband_mps", default_value="0.01"),
+            DeclareLaunchArgument("vx_min_effective_mps", default_value="0.5"),
+            DeclareLaunchArgument(
+                "localization_params_file",
+                default_value=os.path.join(gps_wpf_dir, "config", "localization_v2.yaml"),
+            ),
+            DeclareLaunchArgument(
+                "nav2_params_file",
+                default_value=os.path.join(gps_wpf_dir, "config", "nav2_local_v2_params.yaml"),
+            ),
+            DeclareLaunchArgument(
+                "collision_monitor_params_file",
+                default_value=os.path.join(gps_wpf_dir, "config", "collision_monitor_v2.yaml"),
+            ),
+            DeclareLaunchArgument("pose_covariance_xy", default_value="0.05"),
+            DeclareLaunchArgument("pose_covariance_yaw", default_value="0.1"),
+            DeclareLaunchArgument("twist_covariance_vx", default_value="0.05"),
+            DeclareLaunchArgument("twist_covariance_vy", default_value="0.01"),
+            DeclareLaunchArgument("twist_covariance_yaw_rate", default_value="0.1"),
+            OpaqueFunction(function=_build_robot_state_publisher),
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    os.path.join(sensores_dir, "launch", "mavros.launch.py")
+                ),
+                launch_arguments={
+                    "launch_web": "false",
+                    "launch_legacy_compat": "false",
+                    "fcu_url": fcu_url,
+                }.items(),
+            ),
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    os.path.join(sensores_dir, "launch", "rs16.launch.py")
+                ),
+                launch_arguments={
+                    "config_path": lidar_config_path,
+                    "use_cyclone_dds": use_cyclone_dds,
+                }.items(),
+            ),
+            Node(
+                package="pointcloud_to_laserscan",
+                executable="pointcloud_to_laserscan_node",
+                name="pointcloud_to_laserscan",
+                output="screen",
+                parameters=[
+                    lidar_to_scan_params,
+                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+                    {"output_qos": "sensor_data"},
+                ],
+                remappings=[("cloud_in", "/scan_3d"), ("scan", "/scan")],
+            ),
+            Node(
+                package="controller_server",
+                executable="controller_server_node",
+                name="vehicle_controller_server",
+                output="screen",
+                parameters=[
+                    {
+                        "serial_port": "/dev/serial0",
+                        "serial_baud": 115200,
+                        "serial_tx_hz": 50.0,
+                        "max_reverse_mps": 1.30,
+                        "max_abs_angular_z": 0.4,
+                        "vx_deadband_mps": ParameterValue(
+                            vx_deadband_mps, value_type=float
+                        ),
+                        "vx_min_effective_mps": ParameterValue(
+                            vx_min_effective_mps, value_type=float
+                        ),
+                        "invert_steer_from_cmd_vel": True,
+                    }
+                ],
+            ),
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    os.path.join(gps_wpf_dir, "launch", "localization_v2.launch.py")
+                ),
+                launch_arguments={
+                    "use_sim_time": use_sim_time,
+                    "wheelbase_m": wheelbase_m,
+                    "localization_params_file": localization_params_file,
+                    "pose_covariance_xy": pose_covariance_xy,
+                    "pose_covariance_yaw": pose_covariance_yaw,
+                    "twist_covariance_vx": twist_covariance_vx,
+                    "twist_covariance_vy": twist_covariance_vy,
+                    "twist_covariance_yaw_rate": twist_covariance_yaw_rate,
+                }.items(),
+            ),
+            TimerAction(
+                period=nav_start_delay_s,
+                actions=[
+                    IncludeLaunchDescription(
+                        PythonLaunchDescriptionSource(
+                            os.path.join(gps_wpf_dir, "launch", "nav_local_v2.launch.py")
+                        ),
+                        launch_arguments={
+                            "use_sim_time": use_sim_time,
+                            "nav2_params_file": nav2_params_file,
+                            "collision_monitor_params_file": collision_monitor_params_file,
+                        }.items(),
+                    )
+                ],
+            ),
+            Node(
+                package="rviz2",
+                executable="rviz2",
+                name="rviz2",
+                output="screen",
+                arguments=["-d", rviz_config],
+                parameters=[{"use_sim_time": ParameterValue(use_sim_time, value_type=bool)}],
+                condition=IfCondition(use_rviz),
+            ),
+        ]
+    )

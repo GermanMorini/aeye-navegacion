@@ -9,7 +9,7 @@ import rclpy
 from action_msgs.msg import GoalStatus
 from diagnostic_msgs.msg import DiagnosticStatus, KeyValue
 from geographic_msgs.msg import GeoPoint
-from geometry_msgs.msg import PointStamped, PoseStamped, Quaternion, Twist
+from geometry_msgs.msg import PoseStamped, Quaternion, Twist
 from nav2_msgs.action import FollowWaypoints, NavigateThroughPoses
 from nav2_msgs.msg import CollisionMonitorState
 from rclpy.action import ActionClient

@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import rclpy
 from diagnostic_msgs.msg import DiagnosticArray
@@ -83,7 +83,9 @@ def _tail_file(path: Path, line_count: int = 80) -> str:
     return "\n".join(lines[-line_count:])
 
 
-def _cleanup_launch_process(proc: Optional[subprocess.Popen[Any]], *, timeout_s: float = 20.0) -> None:
+def _cleanup_launch_process(
+    proc: Optional[subprocess.Popen[Any]], *, timeout_s: float = 20.0
+) -> None:
     if proc is None:
         return
     if proc.poll() is not None:
@@ -198,7 +200,9 @@ class BenchmarkProbe(Node):
             timeout_s=timeout_s,
         )
 
-    def lookup_xy(self, target_frame: str, source_frame: str, timeout_s: float = 1.0) -> tuple[float, float]:
+    def lookup_xy(
+        self, target_frame: str, source_frame: str, timeout_s: float = 1.0
+    ) -> tuple[float, float]:
         transform = self.tf_buffer.lookup_transform(
             target_frame,
             source_frame,
@@ -259,7 +263,9 @@ class BenchmarkProbe(Node):
     def sample_idle_drift(self, duration_s: float) -> dict[str, Any]:
         samples: list[dict[str, Any]] = []
         end = time.time() + duration_s + 4.0
-        while time.time() < end and len(samples) < max(2, int(duration_s / IDLE_SAMPLE_INTERVAL_S)):
+        while time.time() < end and len(samples) < max(
+            2, int(duration_s / IDLE_SAMPLE_INTERVAL_S)
+        ):
             rclpy.spin_once(self, timeout_sec=0.1)
             if self.gps_fix is None or self.odom_local is None or self.odom_gps is None:
                 continue
@@ -323,11 +329,21 @@ class BenchmarkProbe(Node):
             "last_sample": last,
             "drift_m": {
                 "map_odom": global_fusion_drift,
-                "map_base": _distance_xy(tuple(first["map_base_xy"]), tuple(last["map_base_xy"])),
-                "odom_base": _distance_xy(tuple(first["odom_base_xy"]), tuple(last["odom_base_xy"])),
-                "fromll_map": _distance_xy(tuple(first["fromll_map_xy"]), tuple(last["fromll_map_xy"])),
-                "fromll_odom": _distance_xy(tuple(first["fromll_odom_xy"]), tuple(last["fromll_odom_xy"])),
-                "odom_gps": _distance_xy(tuple(first["odom_gps_xy"]), tuple(last["odom_gps_xy"])),
+                "map_base": _distance_xy(
+                    tuple(first["map_base_xy"]), tuple(last["map_base_xy"])
+                ),
+                "odom_base": _distance_xy(
+                    tuple(first["odom_base_xy"]), tuple(last["odom_base_xy"])
+                ),
+                "fromll_map": _distance_xy(
+                    tuple(first["fromll_map_xy"]), tuple(last["fromll_map_xy"])
+                ),
+                "fromll_odom": _distance_xy(
+                    tuple(first["fromll_odom_xy"]), tuple(last["fromll_odom_xy"])
+                ),
+                "odom_gps": _distance_xy(
+                    tuple(first["odom_gps_xy"]), tuple(last["odom_gps_xy"])
+                ),
             },
             "odometry_gps_covariance": {
                 "first": first["odom_gps_covariance"],

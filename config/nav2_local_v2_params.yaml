@@ -1,0 +1,114 @@
+controller_server:
+  ros__parameters:
+    use_sim_time: false
+    controller_frequency: 20.0
+    transform_tolerance: 0.3
+    odom_topic: /odometry/local
+    robot_base_frame: base_footprint
+    progress_checker_plugins: ["progress_checker"]
+    goal_checker_plugins: ["general_goal_checker"]
+    current_goal_checker: "general_goal_checker"
+    controller_plugins: ["FollowPath"]
+
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.1
+      movement_time_allowance: 5.0
+
+    general_goal_checker:
+      plugin: "nav2_controller::PositionGoalChecker"
+      stateful: true
+      xy_goal_tolerance: 0.2
+
+    FollowPath:
+      plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
+      desired_linear_vel: 0.8
+      lookahead_dist: 0.8
+      min_lookahead_dist: 0.4
+      max_lookahead_dist: 1.6
+      lookahead_time: 0.8
+      use_velocity_scaled_lookahead_dist: true
+      min_approach_linear_velocity: 0.2
+      approach_velocity_scaling_dist: 1.0
+      use_regulated_linear_velocity_scaling: true
+      use_cost_regulated_linear_velocity_scaling: true
+      regulated_linear_scaling_min_radius: 2.4
+      regulated_linear_scaling_min_speed: 0.2
+      use_collision_detection: true
+      max_allowed_time_to_collision_up_to_carrot: 0.75
+      use_rotate_to_heading: false
+      allow_reversing: true
+      max_angular_accel: 3.0
+      transform_tolerance: 0.2
+      use_interpolation: true
+      max_robot_pose_search_dist: 4.0
+      cost_scaling_dist: 1.0
+      cost_scaling_gain: 1.0
+      inflation_cost_scaling_factor: 3.0
+
+velocity_smoother:
+  ros__parameters:
+    use_sim_time: false
+    smoothing_frequency: 15.0
+    feedback: "CLOSED_LOOP"
+    enable_stamped_cmd_vel: false
+    odom_topic: /odometry/local
+    robot_base_frame: base_footprint
+    max_velocity: [0.8, 0.0, 0.4]
+    min_velocity: [-0.8, 0.0, -0.4]
+    max_accel: [0.8, 0.0, 0.8]
+    max_decel: [-1.5, 0.0, -0.8]
+    deadband_velocity: [0.05, 0.0, 0.05]
+    velocity_timeout: 0.5
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      use_sim_time: false
+      update_frequency: 5.0
+      publish_frequency: 2.0
+      global_frame: odom
+      robot_base_frame: base_footprint
+      rolling_window: true
+      width: 20
+      height: 20
+      resolution: 0.1
+      transform_tolerance: 1.0
+      footprint: "[[1.19,0.46],[1.19,-0.46],[-0.25,-0.46],[-0.25,0.46]]"
+      footprint_padding: 0.0
+      plugins: ["voxel_layer", "inflation_layer"]
+      track_unknown_space: false
+
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        inflation_radius: 1.2
+        cost_scaling_factor: 2.0
+
+      voxel_layer:
+        plugin: "nav2_costmap_2d::VoxelLayer"
+        enabled: true
+        publish_voxel_map: true
+        footprint_clearing_enabled: true
+        origin_z: 0.0
+        z_resolution: 0.05
+        z_voxels: 16
+        max_obstacle_height: 1.6
+        min_obstacle_height: 0.0
+        mark_threshold: 0
+        unknown_threshold: 15
+        combination_method: 1
+        observation_sources: scan
+        scan:
+          topic: /scan
+          max_obstacle_height: 1.6
+          min_obstacle_height: 0.0
+          obstacle_max_range: 20.0
+          obstacle_min_range: 0.0
+          raytrace_max_range: 20.0
+          raytrace_min_range: 0.0
+          inf_is_valid: true
+          observation_persistence: 0.6
+          expected_update_rate: 0.0
+          clearing: true
+          marking: true
+          data_type: "LaserScan"
