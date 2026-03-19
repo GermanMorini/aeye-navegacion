@@ -19,6 +19,8 @@ class SimDriveTelemetryNode(Node):
         self.declare_parameter("drive_telemetry_topic", "/controller/drive_telemetry")
         self.declare_parameter("front_left_steer_joint", "front_left_steer_joint")
         self.declare_parameter("front_right_steer_joint", "front_right_steer_joint")
+        self.declare_parameter("wheelbase_m", 0.94)
+        self.declare_parameter("steer_from_odom_min_speed_mps", 0.05)
 
         odom_topic = str(self.get_parameter("odom_topic").value)
         joint_states_topic = str(self.get_parameter("joint_states_topic").value)
@@ -30,6 +32,10 @@ class SimDriveTelemetryNode(Node):
         )
         self._front_right_steer_joint = str(
             self.get_parameter("front_right_steer_joint").value
+        )
+        self._wheelbase_m = max(1.0e-6, float(self.get_parameter("wheelbase_m").value))
+        self._steer_from_odom_min_speed_mps = max(
+            0.0, float(self.get_parameter("steer_from_odom_min_speed_mps").value)
         )
 
         self._latest_steer_rad: Optional[float] = None
@@ -57,7 +63,15 @@ class SimDriveTelemetryNode(Node):
     def _on_odom(self, msg: Odometry) -> None:
         linear_x = float(msg.twist.twist.linear.x)
         linear_y = float(msg.twist.twist.linear.y)
+        angular_z = float(msg.twist.twist.angular.z)
         speed_mps = math.hypot(linear_x, linear_y)
+        steer_rad = self._latest_steer_rad
+        signed_speed_mps = float(linear_x)
+        if abs(signed_speed_mps) >= self._steer_from_odom_min_speed_mps:
+            steer_rad = math.atan2(
+                self._wheelbase_m * angular_z,
+                signed_speed_mps,
+            )
         telemetry = DriveTelemetry()
         telemetry.stamp = msg.header.stamp
         telemetry.ready = True
@@ -66,11 +80,11 @@ class SimDriveTelemetryNode(Node):
         telemetry.estop = False
         telemetry.reverse_requested = linear_x < 0.0
         telemetry.speed_valid = math.isfinite(speed_mps)
-        telemetry.steer_valid = self._latest_steer_rad is not None
+        telemetry.steer_valid = steer_rad is not None and math.isfinite(float(steer_rad))
         telemetry.control_source = "SIM"
         telemetry.speed_mps_measured = float(speed_mps) if telemetry.speed_valid else 0.0
         telemetry.steer_deg_measured = (
-            math.degrees(float(self._latest_steer_rad))
+            math.degrees(float(steer_rad))
             if telemetry.steer_valid
             else 0.0
         )

@@ -8,6 +8,7 @@ Panels:
         - /TF1
         - /RobotModel1
         - /LaserScan1
+        - /Goal Path1
         - /Odometry1
       Splitter Ratio: 0.5
     Tree Height: 420
@@ -190,6 +191,33 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /odometry/local
+      Value: true
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz_default_plugins/Path
+      Color: 0; 255; 120
+      Enabled: true
+      Head Diameter: 0.18
+      Head Length: 0.12
+      Length: 0.12
+      Line Style: Lines
+      Line Width: 0.08
+      Name: Goal Path
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0.03
+      Pose Color: 255; 255; 255
+      Pose Style: None
+      Radius: 0.03
+      Shaft Diameter: 0.06
+      Shaft Length: 0.1
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /goal_pose_path
       Value: true
     - Angle Tolerance: 0.1
       Class: rviz_default_plugins/Odometry

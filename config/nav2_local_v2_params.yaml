@@ -18,26 +18,26 @@ controller_server:
     general_goal_checker:
       plugin: "nav2_controller::PositionGoalChecker"
       stateful: true
-      xy_goal_tolerance: 0.2
+      xy_goal_tolerance: 0.5
 
     FollowPath:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-      desired_linear_vel: 0.8
+      desired_linear_vel: 0.5
       lookahead_dist: 0.8
       min_lookahead_dist: 0.4
       max_lookahead_dist: 1.6
       lookahead_time: 0.8
       use_velocity_scaled_lookahead_dist: true
-      min_approach_linear_velocity: 0.2
+      min_approach_linear_velocity: 0.5
       approach_velocity_scaling_dist: 1.0
       use_regulated_linear_velocity_scaling: true
       use_cost_regulated_linear_velocity_scaling: true
       regulated_linear_scaling_min_radius: 2.4
-      regulated_linear_scaling_min_speed: 0.2
+      regulated_linear_scaling_min_speed: 0.5
       use_collision_detection: true
       max_allowed_time_to_collision_up_to_carrot: 0.75
       use_rotate_to_heading: false
-      allow_reversing: true
+      allow_reversing: false
       max_angular_accel: 3.0
       transform_tolerance: 0.2
       use_interpolation: true
@@ -54,8 +54,8 @@ velocity_smoother:
     enable_stamped_cmd_vel: false
     odom_topic: /odometry/local
     robot_base_frame: base_footprint
-    max_velocity: [0.8, 0.0, 0.4]
-    min_velocity: [-0.8, 0.0, -0.4]
+    max_velocity: [0.5, 0.0, 0.4]
+    min_velocity: [-0.5, 0.0, -0.4]
     max_accel: [0.8, 0.0, 0.8]
     max_decel: [-1.5, 0.0, -0.8]
     deadband_velocity: [0.05, 0.0, 0.05]

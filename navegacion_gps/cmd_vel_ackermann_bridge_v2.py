@@ -8,6 +8,24 @@ from std_msgs.msg import Empty
 from controller_server.control_logic import command_from_cmd_vel
 
 
+def translate_desired_command_to_gazebo_twist(
+    *,
+    speed_mps: float,
+    steer_pct: int,
+    sim_max_forward_mps: float,
+    sim_max_reverse_mps: float,
+    sim_max_steering_angle_rad: float,
+) -> tuple[float, float]:
+    linear_x = max(
+        -float(sim_max_reverse_mps),
+        min(float(sim_max_forward_mps), float(speed_mps)),
+    )
+    steering_angle_rad = (
+        float(steer_pct) / 100.0 * abs(float(sim_max_steering_angle_rad))
+    )
+    return (linear_x, steering_angle_rad)
+
+
 class CmdVelAckermannBridgeV2Node(Node):
     def __init__(self) -> None:
         super().__init__("cmd_vel_ackermann_bridge_v2")
@@ -24,7 +42,7 @@ class CmdVelAckermannBridgeV2Node(Node):
         self.declare_parameter("reverse_brake_pct", 20)
         self.declare_parameter("sim_max_forward_mps", 4.0)
         self.declare_parameter("sim_max_reverse_mps", 1.30)
-        self.declare_parameter("sim_max_abs_angular_z", 0.4)
+        self.declare_parameter("sim_max_steering_angle_rad", 0.5235987756)
         self.declare_parameter("input_timeout_s", 0.5)
         self.declare_parameter("watchdog_hz", 20.0)
         self.declare_parameter("stop_hold_topic", "/local_nav_v2/stop_hold")
@@ -55,8 +73,8 @@ class CmdVelAckermannBridgeV2Node(Node):
         self._sim_max_reverse_mps = float(
             self.get_parameter("sim_max_reverse_mps").value
         )
-        self._sim_max_abs_angular_z = abs(
-            float(self.get_parameter("sim_max_abs_angular_z").value)
+        self._sim_max_steering_angle_rad = abs(
+            float(self.get_parameter("sim_max_steering_angle_rad").value)
         )
         self._input_timeout_s = max(
             0.05, float(self.get_parameter("input_timeout_s").value)
@@ -114,12 +132,12 @@ class CmdVelAckermannBridgeV2Node(Node):
             self._publish_zero()
             return
 
-        out.linear.x = max(
-            -self._sim_max_reverse_mps,
-            min(self._sim_max_forward_mps, float(desired_command.speed_mps)),
-        )
-        out.angular.z = (
-            float(desired_command.steer_pct) / 100.0 * self._sim_max_abs_angular_z
+        out.linear.x, out.angular.z = translate_desired_command_to_gazebo_twist(
+            speed_mps=float(desired_command.speed_mps),
+            steer_pct=int(desired_command.steer_pct),
+            sim_max_forward_mps=self._sim_max_forward_mps,
+            sim_max_reverse_mps=self._sim_max_reverse_mps,
+            sim_max_steering_angle_rad=self._sim_max_steering_angle_rad,
         )
         self._pub.publish(out)
 

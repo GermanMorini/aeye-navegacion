@@ -30,6 +30,7 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
     nav2_params_file = LaunchConfiguration("nav2_params_file")
     collision_monitor_params_file = LaunchConfiguration("collision_monitor_params_file")
+    goal_pose_use_goal_orientation = LaunchConfiguration("goal_pose_use_goal_orientation")
 
     lifecycle_node_names = [
         "controller_server",
@@ -45,6 +46,7 @@ def generate_launch_description():
                 "collision_monitor_params_file",
                 default_value=default_collision_monitor_params,
             ),
+            DeclareLaunchArgument("goal_pose_use_goal_orientation", default_value="False"),
             Node(
                 package="nav2_controller",
                 executable="controller_server",
@@ -100,6 +102,12 @@ def generate_launch_description():
                 output="screen",
                 parameters=[
                     {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+                    {
+                        "use_goal_orientation": ParameterValue(
+                            goal_pose_use_goal_orientation,
+                            value_type=bool,
+                        )
+                    },
                 ],
             ),
         ]
