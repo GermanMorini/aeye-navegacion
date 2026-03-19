@@ -24,6 +24,7 @@ from launch.actions import (
     DeclareLaunchArgument,
     GroupAction,
     IncludeLaunchDescription,
+    LogInfo,
     OpaqueFunction,
 )
 from launch.substitutions import LaunchConfiguration, PythonExpression, TextSubstitution
@@ -164,6 +165,123 @@ def _build_joint_state_bridge(context):
         arguments=[joint_state_topic],
     )
     return [joint_state_bridge_cmd]
+
+
+def _resolve_localization_param_files(
+    context,
+    *,
+    package_share_dir: str,
+    base_params_path: str,
+) -> list[str]:
+    profile = (
+        LaunchConfiguration("sim_localization_profile").perform(context).strip().lower()
+    )
+    custom_params_file = (
+        LaunchConfiguration("sim_localization_params_file").perform(context).strip()
+    )
+    param_files = [base_params_path]
+
+    if custom_params_file:
+        param_files.append(custom_params_file)
+        return param_files
+
+    profile_overlays = {
+        "baseline": None,
+        "navsat_imu_heading": _resolve_config_file_path(
+            package_share_dir, "dual_ekf_navsat_params.sim_navsat_imu_heading.yaml"
+        ),
+        "decouple_global_yaw": _resolve_config_file_path(
+            package_share_dir, "dual_ekf_navsat_params.sim_decouple_global_yaw.yaml"
+        ),
+        "decouple_global_twist_only": _resolve_config_file_path(
+            package_share_dir, "dual_ekf_navsat_params.sim_decouple_global_twist_only.yaml"
+        ),
+        "decouple_global_linear_twist_only": _resolve_config_file_path(
+            package_share_dir,
+            "dual_ekf_navsat_params.sim_decouple_global_linear_twist_only.yaml",
+        ),
+    }
+    if profile not in profile_overlays:
+        valid_profiles = ", ".join(sorted(profile_overlays))
+        raise RuntimeError(
+            f"Unsupported sim_localization_profile '{profile}'. "
+            f"Valid values: {valid_profiles}"
+        )
+
+    overlay_path = profile_overlays[profile]
+    if overlay_path:
+        param_files.append(overlay_path)
+    return param_files
+
+
+def _build_localization_nodes(
+    context,
+    *,
+    package_share_dir: str,
+    base_params_path: str,
+):
+    use_sim_time = LaunchConfiguration("use_sim_time")
+    use_navsat = LaunchConfiguration("use_navsat")
+    profile = LaunchConfiguration("sim_localization_profile").perform(context).strip()
+    custom_params_file = (
+        LaunchConfiguration("sim_localization_params_file").perform(context).strip()
+    )
+    localization_param_files = _resolve_localization_param_files(
+        context,
+        package_share_dir=package_share_dir,
+        base_params_path=base_params_path,
+    )
+
+    if custom_params_file:
+        profile_msg = f"custom override: {custom_params_file}"
+    else:
+        profile_msg = f"profile: {profile or 'baseline'}"
+
+    ekf_odom_cmd = Node(
+        package="robot_localization",
+        executable="ekf_node",
+        name="ekf_filter_node_odom",
+        output="screen",
+        parameters=[
+            *localization_param_files,
+            {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+        ],
+        remappings=[("odometry/filtered", "odometry/local")],
+    )
+    ekf_map_cmd = Node(
+        package="robot_localization",
+        executable="ekf_node",
+        name="ekf_filter_node_map",
+        output="screen",
+        parameters=[
+            *localization_param_files,
+            {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+        ],
+    )
+    navsat_transform_cmd = Node(
+        package="robot_localization",
+        executable="navsat_transform_node",
+        name="navsat_transform",
+        output="screen",
+        parameters=[
+            *localization_param_files,
+            {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+        ],
+        remappings=[
+            ("imu/data", "imu/data"),
+            ("gps/fix", "gps/fix"),
+            ("gps/filtered", "gps/filtered"),
+            ("odometry/gps", "odometry/gps"),
+            ("odometry/filtered", "odometry/local"),
+        ],
+        condition=IfCondition(use_navsat),
+    )
+    return [
+        LogInfo(msg=f"[simulacion.launch.py] Localization {profile_msg}"),
+        ekf_odom_cmd,
+        ekf_map_cmd,
+        navsat_transform_cmd,
+    ]
 
 
 def generate_launch_description():
@@ -324,45 +442,22 @@ def generate_launch_description():
         default_value="map",
         description="Global map frame for navigation web backend",
     )
-
-    ekf_odom_cmd = Node(
-        package="robot_localization",
-        executable="ekf_node",
-        name="ekf_filter_node_odom",
-        output="screen",
-        parameters=[
-            rl_params_file,
-            {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
-        ],
-        remappings=[("odometry/filtered", "odometry/local")],
+    declare_sim_localization_profile_cmd = DeclareLaunchArgument(
+        "sim_localization_profile",
+        default_value="baseline",
+        description=(
+            "Localization profile for simulation: "
+            "baseline, navsat_imu_heading, decouple_global_yaw, "
+            "decouple_global_twist_only, decouple_global_linear_twist_only"
+        ),
     )
-    ekf_map_cmd = Node(
-        package="robot_localization",
-        executable="ekf_node",
-        name="ekf_filter_node_map",
-        output="screen",
-        parameters=[
-            rl_params_file,
-            {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
-        ],
-    )
-    navsat_transform_cmd = Node(
-        package="robot_localization",
-        executable="navsat_transform_node",
-        name="navsat_transform",
-        output="screen",
-        parameters=[
-            rl_params_file,
-            {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
-        ],
-        remappings=[
-            ("imu/data", "imu/data"),
-            ("gps/fix", "gps/fix"),
-            ("gps/filtered", "gps/filtered"),
-            ("odometry/gps", "odometry/gps"),
-            ("odometry/filtered", "odometry/local"),
-        ],
-        condition=IfCondition(use_navsat),
+    declare_sim_localization_params_file_cmd = DeclareLaunchArgument(
+        "sim_localization_params_file",
+        default_value="",
+        description=(
+            "Optional overlay params file for robot_localization/navsat_transform in "
+            "simulation; applied on top of dual_ekf_navsat_params.yaml"
+        ),
     )
 
     navigation2_cmd = IncludeLaunchDescription(
@@ -759,6 +854,8 @@ def generate_launch_description():
     ld.add_action(declare_ws_port_cmd)
     ld.add_action(declare_gps_topic_cmd)
     ld.add_action(declare_map_frame_cmd)
+    ld.add_action(declare_sim_localization_profile_cmd)
+    ld.add_action(declare_sim_localization_params_file_cmd)
     ld.add_action(gz_sim_cmd)
     ld.add_action(
         OpaqueFunction(
@@ -768,9 +865,15 @@ def generate_launch_description():
     )
     ld.add_action(OpaqueFunction(function=_build_joint_state_bridge))
     ld.add_action(OpaqueFunction(function=_spawn_robot))
-    ld.add_action(ekf_odom_cmd)
-    ld.add_action(ekf_map_cmd)
-    ld.add_action(navsat_transform_cmd)
+    ld.add_action(
+        OpaqueFunction(
+            function=_build_localization_nodes,
+            kwargs={
+                "package_share_dir": gps_wpf_dir,
+                "base_params_path": rl_params_file,
+            },
+        )
+    )
     ld.add_action(navigation2_cmd)
     ld.add_action(realistic_nav2_cmd)
     ld.add_action(keepout_filter_mask_server_cmd)

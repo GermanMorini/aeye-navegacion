@@ -28,3 +28,18 @@ def test_real_and_simulation_share_navigation_contracts() -> None:
     assert 'default_value="/gps/fix"' in real_launch
     assert '"odometry/local"' in simulation_launch
     assert '"odometry/local"' in real_launch
+
+
+def test_simulation_launch_exposes_localization_profiles() -> None:
+    simulation_launch = _read_launch_file("simulacion.launch.py")
+
+    assert '"sim_localization_profile"' in simulation_launch
+    assert '"sim_localization_params_file"' in simulation_launch
+    assert "dual_ekf_navsat_params.sim_navsat_imu_heading.yaml" in simulation_launch
+    assert "dual_ekf_navsat_params.sim_decouple_global_yaw.yaml" in simulation_launch
+    assert "dual_ekf_navsat_params.sim_decouple_global_twist_only.yaml" in simulation_launch
+    assert (
+        "dual_ekf_navsat_params.sim_decouple_global_linear_twist_only.yaml"
+        in simulation_launch
+    )
+    assert "dual_ekf_navsat_params.sim_gps_only_global.yaml" not in simulation_launch

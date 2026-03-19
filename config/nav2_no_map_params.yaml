@@ -104,7 +104,7 @@ smoother_server:
       path_upsampling_factor: 1
       keep_start_orientation: true
       keep_goal_orientation: true
-      minimum_turning_radius: 1.7
+      minimum_turning_radius: 2.2
       optimizer:
         max_iterations: 80
 
@@ -136,7 +136,7 @@ controller_server:
     FollowPath:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
 
-      desired_linear_vel: 1.2
+      desired_linear_vel: 0.8
 
       lookahead_dist: 1.6
       min_lookahead_dist: 1.0
@@ -144,13 +144,13 @@ controller_server:
       lookahead_time: 1.2
       use_velocity_scaled_lookahead_dist: true
 
-      min_approach_linear_velocity: 1.0
+      min_approach_linear_velocity: 0.5
       approach_velocity_scaling_dist: 1.0
 
       use_regulated_linear_velocity_scaling: true
       use_cost_regulated_linear_velocity_scaling: true
       regulated_linear_scaling_min_radius: 2.4
-      regulated_linear_scaling_min_speed: 1.0
+      regulated_linear_scaling_min_speed: 0.5
 
       use_collision_detection: true
       max_allowed_time_to_collision_up_to_carrot: 0.75
@@ -181,9 +181,9 @@ velocity_smoother:
     robot_base_frame: base_footprint
 
     # max_velocity: [4.16, 0.0, 2.5]
-    max_velocity: [1.2, 0.0, 0.6]
+    max_velocity: [0.8, 0.0, 0.4]
     # Solo permite reversa para recoveries (BackUp), no en seguimiento nominal.
-    min_velocity: [-1.2, 0.0, -0.6]
+    min_velocity: [-0.8, 0.0, -0.4]
 
     max_accel: [0.8, 0.0, 0.8]
     max_decel: [-1.5, 0.0, -0.8]

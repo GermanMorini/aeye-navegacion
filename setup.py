@@ -38,6 +38,7 @@ setup(
             'nav_command_server = navegacion_gps.nav_command_server:main',
             'nav_snapshot_server = navegacion_gps.nav_snapshot_server:main',
             'nav_observability = navegacion_gps.nav_observability:main',
+            'sim_localization_benchmark = navegacion_gps.sim_localization_benchmark:main',
         ],
     },
 )

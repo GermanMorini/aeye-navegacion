@@ -163,6 +163,13 @@ Simulación legacy:
 ./tools/exec.sh "source /opt/ros/humble/setup.bash && source /ros2_ws/install/setup.bash && ros2 launch navegacion_gps simulacion.launch.py realism_mode:=false"
 ```
 
+Perfiles de localización de simulación soportados:
+- `sim_localization_profile:=baseline`
+- `sim_localization_profile:=navsat_imu_heading`
+- `sim_localization_profile:=decouple_global_yaw`
+- `sim_localization_profile:=decouple_global_twist_only`
+- `sim_localization_profile:=decouple_global_linear_twist_only`
+
 Parámetros nuevos de la emulación del actuador en simulación:
 - `sim_max_forward_mps`
 - `sim_max_reverse_mps`
@@ -172,6 +179,17 @@ Parámetros principales del GPS realista en simulación:
 - `gps_realism_publish_rate_hz`
 - `gps_realism_horizontal_noise_stddev_m`
 - `gps_realism_vertical_noise_stddev_m`
+
+Benchmark de localización en simulación:
+```bash
+./tools/exec.sh "source /opt/ros/humble/setup.bash && source /ros2_ws/install/setup.bash && ros2 run navegacion_gps sim_localization_benchmark --profile baseline --profile navsat_imu_heading --profile decouple_global_yaw --profile decouple_global_twist_only --profile decouple_global_linear_twist_only --realism-mode false --realism-mode true --output /tmp/sim_localization_matrix.json"
+```
+
+El benchmark está orientado a diagnóstico de deriva en reposo:
+- exige runtime ROS limpio antes de arrancar;
+- limpia el runtime al terminar;
+- mide deriva de `map->odom`, consistencia `fromLL` vs `/odometry/gps`, covarianzas y una atribución simple del origen de la deriva;
+- sólo corre goal tests opcionales si un perfil pasa el umbral de drift configurado.
 
 RViz para real:
 ```bash
@@ -199,6 +217,30 @@ Qué mirar primero cuando falla:
 - `/nav_command_server/events` para la secuencia de decisiones y fallas
 - `/controller/status` y `/controller/telemetry` para `estop`, `failsafe` y fuente de control
 - `/gps/fix`, `/odometry/local`, `/cmd_vel_safe` y `/cmd_vel_final` para reconstruir la cadena completa
+
+## Estado actual de la simulación
+Fixes de integración consolidados en esta branch:
+- `fromLL` se transforma explícitamente a `map` antes de usarlo para goals y zonas.
+- `collision_monitor` y la cadena de comandos quedan alineados con la limitación real hacia `/cmd_vel_final` y `/cmd_vel_gazebo`.
+- `gazebo_utils` completa covarianzas razonables cuando Gazebo publica IMU o GPS con covarianzas nulas.
+- `sim_localization_benchmark` deja una baseline reproducible para comparar perfiles sin contaminar el runtime.
+
+Perfiles de localización evaluados:
+
+| Perfil | Propósito | Estado | Última conclusión medida |
+| --- | --- | --- | --- |
+| `baseline` | Baseline reproducible y perfil por defecto | baseline | Sigue siendo la opción más segura para correr la simulación, pero en la validación final cerró con ~`7.16 m / 20 s` en `realism_mode:=false` y ~`6.04 m / 20 s` en `realism_mode:=true`. |
+| `navsat_imu_heading` | Quitar `use_odometry_yaw` en `navsat_transform` | experimental | Puede mejorar algo en `realism_mode:=true` (~`3.57 m / 20 s`), pero no da una mejora consistente entre modos y sigue sin cumplir el criterio de cierre. |
+| `decouple_global_yaw` | Sacar yaw absoluto del EKF global y de `navsat_transform` | experimental | Sirvió para aislar el problema, pero no quedó como candidato de uso: en la validación final quedó en ~`5.48 m / 20 s` legacy y ~`5.68 m / 20 s` realista. |
+| `decouple_global_twist_only` | Dejar al EKF global sólo con `twist` de `/odometry/local` | experimental | Mejor perfil viable medido en `realism_mode:=true`: ~`3.48 m / 20 s`, con `diagnostics` todavía en `OK`, pero lejos del criterio de cierre. |
+| `decouple_global_linear_twist_only` | Igual que el anterior, pero sin `vyaw` del EKF local | experimental | Dio el drift bruto más bajo en `realism_mode:=true` (~`2.17 m / 20 s`), pero `robot_localization` lo marca inválido por yaw no observado; no se recomienda como baseline operativa. |
+| `gps_only_global` | Experimento interno para aislar GPS puro en el EKF global | descartado | No se expone por launch ni benchmark: rompió el bringup y no produjo muestras útiles. |
+
+Conclusión operativa de esta branch:
+- la deriva principal sigue naciendo en el fuse del `ekf_filter_node_map` con `/odometry/local`;
+- `/odometry/gps` entra con covarianza fija (`0.1225 m^2` en `x/y`) pero su discrepancia real frente a `fromLL` suele ser bastante mayor, así que el EKF global sigue recibiendo una referencia demasiado optimista;
+- la navegación global larga no queda resuelta en simulación;
+- esta simulación sí sirve para probar integración, control local, conversión de goals LL y trayectos cortos, pero no valida patrullas largas ni navegación global outdoor.
 
 ## Notas
 - `mapviz_gps.mvc` existe en la raíz del workspace y se copia en la imagen Docker, pero este paquete ya no expone un `mapviz.launch.py` dedicado.

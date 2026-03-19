@@ -15,6 +15,13 @@ from rclpy.node import Node
 from sensor_msgs.msg import Imu, LaserScan, NavSatFix, PointCloud2
 
 
+DEFAULT_IMU_ORIENTATION_VARIANCE = 0.01
+DEFAULT_IMU_ANGULAR_VELOCITY_VARIANCE = 0.001
+DEFAULT_IMU_LINEAR_ACCELERATION_VARIANCE = 0.02
+DEFAULT_GPS_HORIZONTAL_VARIANCE = 0.35**2
+DEFAULT_GPS_VERTICAL_VARIANCE = 0.75**2
+
+
 def _fallback_command_from_cmd_vel(
     linear_x: float,
     angular_z: float,
@@ -110,6 +117,10 @@ def _offset_geodetic_fix(
         float(latitude_deg) + float(north_m) / meters_per_deg_lat,
         float(longitude_deg) + float(east_m) / meters_per_deg_lon,
     )
+
+
+def _covariance_is_zero(values) -> bool:
+    return all(abs(float(value)) <= 1.0e-12 for value in values)
 
 
 class GazeboUtilsNode(Node):
@@ -419,6 +430,42 @@ class GazeboUtilsNode(Node):
 
     def _imu_cb(self, msg: Imu):
         msg.header.frame_id = self._resolve_frame(msg.header.frame_id, self.imu_frame_id)
+        if _covariance_is_zero(msg.orientation_covariance):
+            msg.orientation_covariance = [
+                DEFAULT_IMU_ORIENTATION_VARIANCE,
+                0.0,
+                0.0,
+                0.0,
+                DEFAULT_IMU_ORIENTATION_VARIANCE,
+                0.0,
+                0.0,
+                0.0,
+                DEFAULT_IMU_ORIENTATION_VARIANCE,
+            ]
+        if _covariance_is_zero(msg.angular_velocity_covariance):
+            msg.angular_velocity_covariance = [
+                DEFAULT_IMU_ANGULAR_VELOCITY_VARIANCE,
+                0.0,
+                0.0,
+                0.0,
+                DEFAULT_IMU_ANGULAR_VELOCITY_VARIANCE,
+                0.0,
+                0.0,
+                0.0,
+                DEFAULT_IMU_ANGULAR_VELOCITY_VARIANCE,
+            ]
+        if _covariance_is_zero(msg.linear_acceleration_covariance):
+            msg.linear_acceleration_covariance = [
+                DEFAULT_IMU_LINEAR_ACCELERATION_VARIANCE,
+                0.0,
+                0.0,
+                0.0,
+                DEFAULT_IMU_LINEAR_ACCELERATION_VARIANCE,
+                0.0,
+                0.0,
+                0.0,
+                DEFAULT_IMU_LINEAR_ACCELERATION_VARIANCE,
+            ]
         self.imu_pub.publish(msg)
 
     def _get_reference_time_ns(self, msg: NavSatFix) -> int:
@@ -502,6 +549,20 @@ class GazeboUtilsNode(Node):
             out_msg = self._apply_realistic_gps(msg, self._get_reference_time_ns(msg))
             if out_msg is None:
                 return
+        elif _covariance_is_zero(out_msg.position_covariance):
+            out_msg = deepcopy(msg)
+            out_msg.position_covariance = [
+                DEFAULT_GPS_HORIZONTAL_VARIANCE,
+                0.0,
+                0.0,
+                0.0,
+                DEFAULT_GPS_HORIZONTAL_VARIANCE,
+                0.0,
+                0.0,
+                0.0,
+                DEFAULT_GPS_VERTICAL_VARIANCE,
+            ]
+            out_msg.position_covariance_type = NavSatFix.COVARIANCE_TYPE_DIAGONAL_KNOWN
         out_msg.header.frame_id = self._resolve_frame(out_msg.header.frame_id, self.gps_frame_id)
         self.gps_pub.publish(out_msg)
 
