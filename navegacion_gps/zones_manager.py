@@ -11,15 +11,19 @@ import rclpy
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from geographic_msgs.msg import GeoPoint
-from geometry_msgs.msg import Pose, Quaternion
+from geometry_msgs.msg import PointStamped, Pose, Quaternion
 from nav2_msgs.srv import ClearEntireCostmap
 from nav2_msgs.srv import LoadMap
 from nav_msgs.msg import MapMetaData
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
+from rclpy.duration import Duration
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.time import Time
 from robot_localization.srv import FromLL
 from std_srvs.srv import Trigger
+import tf2_geometry_msgs  # noqa: F401
+from tf2_ros import Buffer, TransformException, TransformListener
 
 from interfaces.srv import GetZonesState, SetZonesGeoJson
 
@@ -100,6 +104,7 @@ class ZonesManagerNode(Node):
         self.declare_parameter("fromll_wait_timeout_s", 2.0)
         self.declare_parameter("fromll_call_retries", 4)
         self.declare_parameter("fromll_retry_delay_s", 0.15)
+        self.declare_parameter("fromll_frame", "odom")
 
         self.declare_parameter("load_map_service", "/keepout_filter_mask_server/load_map")
         self.declare_parameter("load_map_wait_timeout_s", 8.0)
@@ -115,6 +120,7 @@ class ZonesManagerNode(Node):
         )
 
         self.declare_parameter("map_frame", "map")
+        self.declare_parameter("tf_lookup_timeout_s", 0.5)
         self.declare_parameter("buffer_margin_m", 0.0)
         self.declare_parameter("degrade_enabled", True)
         self.declare_parameter("degrade_radius_m", 1.5)
@@ -145,6 +151,7 @@ class ZonesManagerNode(Node):
         self.fromll_retry_delay_s = max(
             0.0, float(self.get_parameter("fromll_retry_delay_s").value)
         )
+        self.fromll_frame = str(self.get_parameter("fromll_frame").value).strip() or "odom"
 
         self.load_map_service = str(self.get_parameter("load_map_service").value)
         self.load_map_wait_timeout_s = max(
@@ -166,6 +173,9 @@ class ZonesManagerNode(Node):
         )
 
         self.map_frame = str(self.get_parameter("map_frame").value)
+        self.tf_lookup_timeout_s = max(
+            0.05, float(self.get_parameter("tf_lookup_timeout_s").value)
+        )
         self.buffer_margin_m = max(0.0, float(self.get_parameter("buffer_margin_m").value))
         self.degrade_enabled = bool(self.get_parameter("degrade_enabled").value)
         self.degrade_radius_m = float(self.get_parameter("degrade_radius_m").value)
@@ -227,6 +237,8 @@ class ZonesManagerNode(Node):
         self._active_fromll_name: Optional[str] = None
         self._active_fromll_client: Optional[Any] = None
         self._last_fromll_error: Optional[str] = None
+        self._tf_buffer = Buffer()
+        self._tf_listener = TransformListener(self._tf_buffer, self, spin_thread=False)
 
         self._load_map_client = self.create_client(
             LoadMap,
@@ -434,10 +446,41 @@ class ZonesManagerNode(Node):
                     time.sleep(self.fromll_retry_delay_s)
                 continue
 
+            transformed = self._transform_point_to_map(
+                float(res.map_point.x), float(res.map_point.y)
+            )
+            if transformed is None:
+                if attempt + 1 < self.fromll_call_retries and self.fromll_retry_delay_s > 0.0:
+                    time.sleep(self.fromll_retry_delay_s)
+                continue
+
             self._last_fromll_error = None
-            return float(res.map_point.x), float(res.map_point.y)
+            return transformed
 
         return None
+
+    def _transform_point_to_map(self, x: float, y: float) -> Optional[Tuple[float, float]]:
+        if self.fromll_frame == self.map_frame:
+            return float(x), float(y)
+
+        point = PointStamped()
+        point.header.frame_id = self.fromll_frame
+        point.header.stamp = Time().to_msg()
+        point.point.x = float(x)
+        point.point.y = float(y)
+        point.point.z = 0.0
+        try:
+            transformed = self._tf_buffer.transform(
+                point,
+                self.map_frame,
+                timeout=Duration(seconds=self.tf_lookup_timeout_s),
+            )
+        except TransformException as exc:
+            self._last_fromll_error = (
+                f"tf transform failed ({self.fromll_frame}->{self.map_frame}): {exc}"
+            )
+            return None
+        return float(transformed.point.x), float(transformed.point.y)
 
     def _parse_geojson_text(self, raw_text: str) -> Tuple[Optional[Dict[str, Any]], str]:
         try:

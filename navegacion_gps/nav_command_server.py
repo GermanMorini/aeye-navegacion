@@ -9,16 +9,20 @@ import rclpy
 from action_msgs.msg import GoalStatus
 from diagnostic_msgs.msg import DiagnosticStatus, KeyValue
 from geographic_msgs.msg import GeoPoint
-from geometry_msgs.msg import PoseStamped, Quaternion, Twist
+from geometry_msgs.msg import PointStamped, PoseStamped, Quaternion, Twist
 from nav2_msgs.action import FollowWaypoints, NavigateThroughPoses
 from nav2_msgs.msg import CollisionMonitorState
 from rclpy.action import ActionClient
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
+from rclpy.duration import Duration
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
+from rclpy.time import Time
 from robot_localization.srv import FromLL
 from sensor_msgs.msg import NavSatFix
+import tf2_geometry_msgs  # noqa: F401
+from tf2_ros import Buffer, TransformException, TransformListener
 
 from interfaces.msg import CmdVelFinal, NavEvent, NavTelemetry
 from interfaces.srv import (
@@ -45,7 +49,9 @@ class NavCommandServerNode(Node):
         self.declare_parameter("fromll_wait_timeout_s", 2.0)
         self.declare_parameter("fromll_call_retries", 4)
         self.declare_parameter("fromll_retry_delay_s", 0.15)
+        self.declare_parameter("fromll_frame", "odom")
         self.declare_parameter("map_frame", "map")
+        self.declare_parameter("tf_lookup_timeout_s", 0.5)
         self.declare_parameter("gps_topic", "/gps/fix")
         self.declare_parameter("cmd_vel_safe_topic", "/cmd_vel_safe")
         self.declare_parameter("cmd_vel_final_topic", "/cmd_vel_final")
@@ -81,7 +87,11 @@ class NavCommandServerNode(Node):
         self.fromll_retry_delay_s = max(
             0.0, float(self.get_parameter("fromll_retry_delay_s").value)
         )
+        self.fromll_frame = str(self.get_parameter("fromll_frame").value).strip() or "odom"
         self.map_frame = str(self.get_parameter("map_frame").value)
+        self.tf_lookup_timeout_s = max(
+            0.05, float(self.get_parameter("tf_lookup_timeout_s").value)
+        )
         self.gps_topic = str(self.get_parameter("gps_topic").value)
         self.cmd_vel_safe_topic = str(self.get_parameter("cmd_vel_safe_topic").value)
         self.cmd_vel_final_topic = str(self.get_parameter("cmd_vel_final_topic").value)
@@ -165,6 +175,8 @@ class NavCommandServerNode(Node):
         self._active_fromll_name: Optional[str] = None
         self._active_fromll_client: Optional[Any] = None
         self._last_fromll_error: Optional[str] = None
+        self._tf_buffer = Buffer()
+        self._tf_listener = TransformListener(self._tf_buffer, self, spin_thread=False)
         self._follow_waypoints_client = ActionClient(
             self,
             FollowWaypoints,
@@ -362,6 +374,26 @@ class NavCommandServerNode(Node):
         qz = math.sin(half_yaw)
         qw = math.cos(half_yaw)
         return Quaternion(x=0.0, y=0.0, z=qz, w=qw)
+
+    def _transform_pose_to_map(self, pose: PoseStamped) -> Optional[PoseStamped]:
+        if pose.header.frame_id == self.map_frame:
+            pose.header.stamp = self.get_clock().now().to_msg()
+            return pose
+
+        try:
+            transformed = self._tf_buffer.transform(
+                pose,
+                self.map_frame,
+                timeout=Duration(seconds=self.tf_lookup_timeout_s),
+            )
+        except TransformException as exc:
+            self._last_fromll_error = (
+                f"tf transform failed ({pose.header.frame_id}->{self.map_frame}): {exc}"
+            )
+            return None
+
+        transformed.header.stamp = self.get_clock().now().to_msg()
+        return transformed
 
     def _cmd_vel_safe_payload_locked(self) -> Dict[str, Any]:
         if self._last_cmd_vel_safe is None:
@@ -791,13 +823,13 @@ class NavCommandServerNode(Node):
         x, y, _ = converted
 
         pose = PoseStamped()
-        pose.header.frame_id = self.map_frame
-        pose.header.stamp = self.get_clock().now().to_msg()
+        pose.header.frame_id = self.fromll_frame
+        pose.header.stamp = Time().to_msg()
         pose.pose.position.x = float(x)
         pose.pose.position.y = float(y)
         pose.pose.position.z = 0.0
         pose.pose.orientation = self._yaw_to_quaternion(yaw_deg)
-        return pose
+        return self._transform_pose_to_map(pose)
 
     def _convert_waypoints_to_poses(
         self, waypoints: Sequence[Tuple[float, float, float]]
