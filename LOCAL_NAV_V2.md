@@ -1,37 +1,22 @@
 # Navegacion Local V2 Ackermann
 
 ## Resumen
-La `v2` es una base nueva de navegacion local para el robot Ackermann. Se ejecuta en paralelo a la `v1` y arranca sin planner global ni GPS en la capa local. La idea es tener una base local simple, observable y alineada con el robot real:
+La `v2` es una base de navegacion local para el robot Ackermann que corre completamente en `odom`.
+La capa local actual ya no usa `goal_pose_to_follow_path_v2` ni `velocity_smoother`: hoy la navegacion se apoya en un stack Nav2 nativo sobre `odom`, con localizacion Ackermann + EKF local + costmaps rolling + collision monitor.
 
-- odometria Ackermann derivada de telemetria de ruedas y direccion;
-- EKF local en `odom`;
-- Nav2 local-only;
-- simulacion y robot real consumiendo el mismo contrato de señales.
-
-La `v2` esta pensada para tres tareas:
+Objetivos de esta fase:
 
 - levantar una simulacion local reproducible;
 - validar localizacion y seguimiento de paths cortos;
-- tunear la base local antes de reintroducir navegacion global.
-
-## Objetivo y alcance
-La `v2` resuelve la navegacion local del robot sin depender del EKF global del Pixhawk ni de GPS para `odom -> base_footprint`.
+- tunear la base local antes de reintroducir una capa global.
 
 Queda explicitamente fuera de esta fase:
 
-- planner global;
 - `map -> odom`;
 - `navsat_transform`;
 - goals geograficos LL;
-- fusion GPS en la capa local.
-
-Diferencias principales contra la `v1`:
-
-- la localizacion local ya no toma `/local_position/odom` ni `/odom` legacy como base;
-- la odometria local sale de ruedas/direccion medidas;
-- la navegacion usa solo `FollowPath` sobre `odom`;
-- la cadena de comandos local es mas corta y mas facil de depurar;
-- la simulacion `v2` separa mejor sensores, localizacion y Nav2.
+- fusion GPS en la capa local;
+- navegacion global basada en `map`.
 
 ## Arquitectura general
 ### Flujo en simulacion
@@ -41,12 +26,15 @@ Launch principal:
 ros2 launch navegacion_gps sim_local_v2.launch.py
 ```
 
-Composicion:
+Composicion efectiva:
 
 1. `sim_v2_base.launch.py`
 2. `localization_v2.launch.py`
-3. `nav_local_v2.launch.py`
-4. `rviz_local_v2.rviz`
+3. `keepout_filter_mask_server`
+4. `keepout_costmap_filter_info_server`
+5. `lifecycle_manager_keepout_filters`
+6. `nav_local_v2.launch.py`
+7. `rviz_local_v2.rviz`
 
 ### Flujo en robot real
 Launch principal:
@@ -55,16 +43,17 @@ Launch principal:
 ros2 launch navegacion_gps real_local_v2.launch.py
 ```
 
-Composicion:
+Composicion efectiva:
 
 1. `mavros.launch.py`
 2. `rs16.launch.py`
-3. `controller_server_node`
-4. `localization_v2.launch.py`
-5. `nav_local_v2.launch.py`
-6. `rviz_local_v2.rviz`
+3. `vehicle_controller_server`
+4. `pointcloud_to_laserscan`
+5. `localization_v2.launch.py`
+6. `nav_local_v2.launch.py`
+7. `rviz_local_v2.rviz`
 
-### Nodos principales de la v2
+## Nodos principales de la v2
 | Nodo | Rol |
 | --- | --- |
 | `sim_drive_telemetry` | Construye `DriveTelemetry` en simulacion a partir de `/odom_raw` y `/joint_states`. |
@@ -72,10 +61,16 @@ Composicion:
 | `cmd_vel_ackermann_bridge_v2` | Convierte `/cmd_vel_safe` en `/cmd_vel_gazebo` reutilizando la logica de control real. |
 | `ackermann_odometry` | Integra odometria planar Ackermann y publica `/wheel/odometry` y `/vehicle/twist`. |
 | `ekf_filter_node_local_v2` | Fusiona wheel odom + IMU y publica `/odometry/local` y TF `odom -> base_footprint`. |
-| `controller_server` | Ejecuta `FollowPath` con `RegulatedPurePursuitController`. |
-| `velocity_smoother` | Suaviza `/cmd_vel_nav` antes de `collision_monitor`. |
+| `planner_server` | Calcula el plan global-local en `odom` usando el costmap rolling. |
+| `smoother_server` | Suaviza el plan generado antes de entregarlo al controlador. |
+| `controller_server` | Sigue el path con `RegulatedPurePursuitController` y publica `/cmd_vel`. |
+| `bt_navigator` | Orquesta `ComputePath`, `SmoothPath`, `FollowPath` y recoveries del BT. |
+| `behavior_server` | Ejecuta behaviors de recuperacion (`BackUp`, `DriveOnHeading`, `Wait`). |
+| `waypoint_follower` | Expone la navegacion por waypoints para el perfil local-v2. |
 | `collision_monitor` | Aplica stop preventivo y publica `/cmd_vel_safe`. |
-| `goal_pose_to_follow_path_v2` | Traduce `2D Goal Pose` a `FollowPath`, publica path de debug y replanifica si pierde captura. |
+| `keepout_filter_mask_server` | Publica la mascara keepout estatica usada por los costmaps de `sim_local_v2`. |
+| `keepout_costmap_filter_info_server` | Publica metadata del filtro keepout en `/costmap_filter_info`. |
+| `polygon_stamped_republisher` | Republlica `/stop_zone_raw` hacia `/stop_zone` para RViz y consumers legacy. |
 
 ## Sensores y señales usadas por la navegacion local
 ### En robot real
@@ -91,10 +86,10 @@ Composicion:
 - `/gps/fix_raw` -> `/gps/fix` solo para observabilidad
 
 ### Decisiones explicitas de la v2
-- La capa local **no usa** `/local_position/odom`.
-- La capa local **no usa** `/odom` legacy como entrada principal.
+- La capa local no usa `/local_position/odom`.
+- La capa local no usa `/odom` legacy como entrada principal.
 - GPS queda fuera de `odom -> base_footprint`.
-- Si mas adelante vuelve una capa global, GPS deberia entrar en `map -> odom`, no en la base local.
+- Todo el stack Nav2 local opera en `odom`.
 
 ## TF y frames
 Arbol esperado:
@@ -117,7 +112,7 @@ odom
 ### Que publica cada parte
 - `robot_localization` publica `odom -> base_footprint`.
 - `robot_state_publisher` publica la cadena fija del modelo a partir del URDF.
-- Gazebo publica `/odom_raw`, pero en `v2` no publica TF de odometria al resto del sistema.
+- Gazebo publica `/odom_raw`, pero la referencia operativa de navegacion es `/odometry/local`.
 - `sim_sensor_normalizer_v2` corrige `frame_id` y covarianzas; no inventa un TF nuevo.
 
 ### Por que `odom` queda fijo
@@ -166,7 +161,7 @@ yaw_rate = v * tan(delta) / wheelbase
 x, y, yaw <- integrate_planar(x, y, yaw, v, yaw_rate, dt)
 ```
 
-La `v2` local usa esta odometria como base del movimiento longitudinal y de yaw estimado por el modelo Ackermann.
+La `v2` local usa esta odometria como base del movimiento longitudinal y del yaw estimado por el modelo Ackermann.
 
 ### EKF local (`localization_v2.yaml`)
 Configuracion base:
@@ -185,14 +180,14 @@ De `/wheel/odometry` se usan:
 
 - pose planar `x`, `y`, `yaw`
 - `linear.x`
-- `linear.y` fijado por la salida odom
+- `linear.y`
 - `angular.z`
 
 De `/imu/data` se usa:
 
 - `angular.z`
 
-La IMU en esta configuracion no se usa para pose absoluta; aporta principalmente yaw rate. La pose local sigue siendo independiente de GPS.
+La IMU no se usa para pose absoluta; aporta principalmente yaw rate. La pose local sigue siendo independiente de GPS.
 
 ### Covarianzas y tuning expuesto por launch
 `localization_v2.launch.py` expone:
@@ -213,54 +208,45 @@ Defaults actuales:
 - `twist_covariance_yaw_rate = 0.1`
 - `wheelbase_m = 0.94`
 
-## Cadena de control y smoothing
-Cadena nominal de mando:
+## Navegacion local y pipeline de comandos
+La navegacion local actual usa Nav2 nativo sobre `odom`. El goal operativo ya no pasa por `goal_pose_to_follow_path_v2`.
+
+Cadena nominal de control en simulacion:
 
 ```text
-/goal_pose
--> goal_pose_to_follow_path_v2
--> /follow_path
+RViz Nav2 goal / bt_navigator
+-> planner_server
+-> smoother_server
 -> controller_server
--> /cmd_vel_nav
--> velocity_smoother
--> /cmd_vel_smoothed
+-> /cmd_vel
 -> collision_monitor
 -> /cmd_vel_safe
 -> cmd_vel_ackermann_bridge_v2
 -> /cmd_vel_gazebo
--> plugin Ackermann de Gazebo
+-> /cmd_vel_steer (Gazebo)
 ```
+
+### Topics relevantes
+- `/plan`: plan visible de Nav2
+- `/cmd_vel`: salida del `controller_server`
+- `/cmd_vel_safe`: salida del `collision_monitor`
+- `/cmd_vel_gazebo`: salida del bridge Ackermann
+- `/odometry/local`: odometria filtrada de referencia para control y costmaps
 
 ### `cmd_vel_ackermann_bridge_v2`
 Este nodo:
 
 - consume `/cmd_vel_safe`;
 - reutiliza `controller_server.control_logic.command_from_cmd_vel`;
-- aplica deadband, velocidad minima efectiva, clamp de velocidad y steering;
+- aplica deadband, velocidad minima efectiva y clamps de velocidad/steering;
 - convierte el comando al contrato esperado por el plugin Ackermann de Gazebo.
 
-En la simulacion, `/cmd_vel_gazebo` se bridgea a `/cmd_vel_steer`.
-
-### `velocity_smoother`
-Configuracion relevante:
-
-- `feedback: OPEN_LOOP`
-- `max_velocity: [0.5, 0.0, 0.2]`
-- `min_velocity: [-0.5, 0.0, -0.4]`
-- `max_accel: [0.8, 0.0, 0.25]`
-
-La `v2` quedo en `OPEN_LOOP` por una razon concreta: `CLOSED_LOOP` introducia comportamiento inconsistente en esta cadena Ackermann local, especialmente combinando:
-
-- feedback basado en `/odometry/local`;
-- velocidad minima efectiva del robot;
-- conversion `cmd_vel -> steering`.
-
-Con `OPEN_LOOP`, la cadena `cmd_vel_nav -> cmd_vel_safe` queda coherente y mas predecible para esta arquitectura.
+En la simulacion, `bridge_config_v2.yaml` bridgea `/cmd_vel_gazebo` hacia Gazebo como `/cmd_vel_steer`.
 
 ### `collision_monitor`
 Usa:
 
-- entrada `/cmd_vel_smoothed`
+- entrada `/cmd_vel`
 - salida `/cmd_vel_safe`
 - frame base `base_footprint`
 - frame de odometria `odom`
@@ -271,41 +257,34 @@ Poligonos actuales:
 - `footprint`
 - `stop_zone`
 
-## Navegacion local y goals
-La `v2` no usa planner global. Usa `FollowPath` sobre `odom`.
+`collision_monitor` publica la zona de stop en `/stop_zone_raw`. Luego `polygon_stamped_republisher` la republia en `/stop_zone` para visualizacion y consumers que esperan `PolygonStamped` estable.
 
-### `goal_pose_to_follow_path_v2`
-Este nodo:
+## Keepout y stop zone
+### Keepout estatico en `sim_local_v2`
+`sim_local_v2` levanta un keepout estatico en `odom` con estos nodos:
 
-- escucha `/goal_pose` desde RViz;
-- toma la pose actual desde `/odometry/local`;
-- genera un path Ackermann-like;
-- publica ese path en `/goal_pose_path`;
-- envia el path como `nav2_msgs/action/FollowPath`;
-- monitorea si el robot pierde captura del path;
-- cancela y replanifica si la distancia al path supera el umbral configurado.
+- `keepout_filter_mask_server`
+- `keepout_costmap_filter_info_server`
+- `lifecycle_manager_keepout_filters`
 
-### Overlay de debug
-Publica:
+La mascara proviene de:
 
-- `/local_nav_v2/path_tracking_debug`
+- `config/keepout_mask.yaml`
 
-Muestra en RViz:
+Y se publica en:
 
-- punto mas cercano del robot al path;
-- segmento robot-path;
-- texto con:
-  - `d`: distancia lateral al path;
-  - `yaw_err`: error angular entre robot y path;
-  - `nav_wz`: yaw rate pedido por Nav2;
-  - `safe_wz`: yaw rate despues de smoother + collision monitor;
-  - `odom_wz`: yaw rate ejecutado por la planta.
+- `/keepout_filter_mask`
+- `/costmap_filter_info`
 
-### Interpretacion practica
-- `nav_wz` alto y `safe_wz` parecido: el controller esta pidiendo girar fuerte y la cadena lo deja pasar.
-- `nav_wz` alto y `safe_wz` mucho mas chico: el limiter/smoother esta recortando el comando.
-- `safe_wz` y `odom_wz` con mismo signo pero magnitud distinta: la planta no logra toda la curvatura pedida.
-- `d` creciendo y `yaw_err` creciendo: el robot esta perdiendo captura del path.
+Los costmaps local y global de `nav2_local_v2_params.yaml` usan `keepout_filter`, por eso este perfil necesita los publishers del filtro aunque no tenga `map`.
+
+### Stop zone
+Ademas del keepout de costmap, `collision_monitor` mantiene una `stop_zone` reactiva para frenado inmediato basada en `/scan`.
+
+Topics asociados:
+
+- `/stop_zone_raw`
+- `/stop_zone`
 
 ## Parametros y configuraciones usadas
 Archivos principales:
@@ -314,31 +293,31 @@ Archivos principales:
 - `config/nav2_local_v2_params.yaml`
 - `config/collision_monitor_v2.yaml`
 - `config/rviz_local_v2.rviz`
+- `config/keepout_mask.yaml`
 
 ### Parametros clave
 | Parametro | Default actual | Donde se usa |
 | --- | --- | --- |
 | `wheelbase_m` | `0.94` | `ackermann_odometry`, modelo Ackermann |
-| `vx_deadband_mps` | `0.01` | bridge/control real |
-| `vx_min_effective_mps` | `0.5` | bridge/control real |
-| `xy_goal_tolerance` | `0.5` | `PositionGoalChecker` |
-| `desired_linear_vel` | `0.5` | `RegulatedPurePursuitController` |
+| `vx_deadband_mps` | `0.01` | `cmd_vel_ackermann_bridge_v2` |
+| `vx_min_effective_mps` | `0.5` | `cmd_vel_ackermann_bridge_v2` |
+| `xy_goal_tolerance` | `1.2` | `PositionGoalChecker` |
+| `desired_linear_vel` | `1.2` | `RegulatedPurePursuitController` |
 | `lookahead_dist` | `1.6` | `RegulatedPurePursuitController` |
-| `feedback` | `OPEN_LOOP` | `velocity_smoother` |
+| `minimum_turning_radius` | `2.2` | `SmacPlannerHybrid` |
 
 ### Defaults de sim
 - `use_sim_time = True`
 - `wheelbase_m = 0.94`
 - `vx_min_effective_mps = 0.5`
-- `goal_pose_use_goal_orientation = False`
+- `nav_start_delay_s = 4.0`
 - mundo por defecto: `vacio.world`
 
 ### Defaults de real
 - `use_sim_time = False`
 - `wheelbase_m = 0.94`
 - `vx_min_effective_mps = 0.5`
-- `invert_steer_from_cmd_vel = True` en `controller_server_node`
-- `goal_pose_use_goal_orientation = False`
+- `invert_steer_from_cmd_vel = True` en `vehicle_controller_server`
 
 ### Parametros a recalibrar con el robot
 - `wheelbase_m`
@@ -346,6 +325,8 @@ Archivos principales:
 - covarianzas de wheel odom
 - `vx_min_effective_mps`
 - `lookahead_dist`
+- `desired_linear_vel`
+- `minimum_turning_radius`
 - tolerancia de goal
 
 ## Operacion y debugging
@@ -366,48 +347,51 @@ Desde el host, usando scripts del workspace:
 
 Checklist de validacion en robot real:
 
-- [REAL_LOCAL_V2_CHECKLIST.md](REAL_LOCAL_V2_CHECKLIST.md)
+- [REAL_LOCAL_V2_CHECKLIST.md](/home/gmorini/Documentos/codigo/ros2/workspace/src/navegacion_gps/REAL_LOCAL_V2_CHECKLIST.md)
 
 ### Que mirar primero
 - `/odometry/local`
 - `/wheel/odometry`
-- `/goal_pose_path`
-- `/cmd_vel_nav`
+- `/plan`
+- `/cmd_vel`
 - `/cmd_vel_safe`
-- `/local_nav_v2/path_tracking_debug`
+- `/cmd_vel_gazebo`
+- `/keepout_filter_mask`
+- `/costmap_filter_info`
+- `/stop_zone_raw`
+- `/stop_zone`
+
+### RViz
+El plan visible relevante en `rviz_local_v2.rviz` es `/plan`.
+El flujo historico basado en `/goal_pose_path` ya no describe la navegacion local actual.
+Para la operacion del stack actual, el objetivo debe interpretarse como un goal de Nav2 y no como el path generado por el helper antiguo.
 
 ### Fallas tipicas
-**No sigue el path**
+**No se mueve**
 
-- revisar `d`, `yaw_err`, `nav_wz`, `safe_wz`, `odom_wz`;
-- revisar si `safe_wz` esta siendo recortado;
-- revisar si `odom_wz` responde al signo correcto.
+- revisar `/cmd_vel`, `/cmd_vel_safe` y `/cmd_vel_gazebo`;
+- revisar `collision_monitor`;
+- revisar que `cmd_vel_ackermann_bridge_v2` este consumiendo `/cmd_vel_safe`;
+- revisar `vx_min_effective_mps`.
 
-**Oscila**
+**No recibe keepout**
 
-- bajar agresividad del seguimiento;
+- revisar `/keepout_filter_mask` y `/costmap_filter_info`;
+- revisar `keepout_filter_mask_server` y `keepout_costmap_filter_info_server`;
+- revisar que el `frame_id` del filtro sea `odom` en simulacion.
+
+**Oscila o abre demasiado la curva**
+
 - revisar `lookahead_dist`;
 - revisar `desired_linear_vel`;
-- revisar curvatura del path generado.
+- revisar `minimum_turning_radius`;
+- revisar el plan en `/plan` y no solo la trayectoria ejecutada.
 
-**Replanifica demasiado**
+**No llega al goal como se espera**
 
-- revisar `path_replan_distance_m`;
-- revisar si el robot realmente pierde captura;
-- revisar si la planta no alcanza la curvatura pedida.
-
-**No llega a moverse**
-
-- revisar `vx_min_effective_mps`;
-- revisar si `safe_wz` y `safe_x` salen de Nav2;
-- revisar `collision_monitor`;
-- revisar que no haya `stop_hold` activo.
-
-**Signs inconsistentes**
-
-- comparar `nav_wz`, `safe_wz` y `odom_wz`;
-- revisar `invert_steer_from_cmd_vel`;
-- revisar la conversion de steering en simulacion y en real por separado.
+- revisar `xy_goal_tolerance`;
+- revisar `use_final_approach_orientation` del planner;
+- revisar el BT y el `smoother_server`.
 
 ### Checklist rapido de validacion
 Sim:
@@ -415,9 +399,9 @@ Sim:
 1. levantar `sim_local_v2`;
 2. confirmar TF `odom -> base_footprint`;
 3. confirmar `/wheel/odometry` y `/odometry/local`;
-4. mandar un `2D Goal Pose`;
-5. mirar `Goal Path` y `Path Tracking Debug`;
-6. revisar que `nav_wz`, `safe_wz` y `odom_wz` sean coherentes.
+4. confirmar `/keepout_filter_mask` y `/costmap_filter_info`;
+5. enviar un goal y mirar `/plan`;
+6. verificar `/cmd_vel`, `/cmd_vel_safe` y `/cmd_vel_gazebo`.
 
 Real:
 
@@ -429,19 +413,23 @@ Real:
 6. ajustar covarianzas y wheelbase si hace falta.
 
 ## Contratos publicos de la v2
-La documentacion de esta fase deja explicitados estos contratos ROS:
+Contratos ROS relevantes de esta fase:
 
 - `/controller/drive_telemetry`
 - `/wheel/odometry`
 - `/vehicle/twist`
-- `/goal_pose_path`
-- `/local_nav_v2/path_tracking_debug`
-
-No se agrega una API ROS nueva por esta tarea de documentacion.
+- `/odometry/local`
+- `/plan`
+- `/cmd_vel`
+- `/cmd_vel_safe`
+- `/cmd_vel_gazebo`
+- `/keepout_filter_mask`
+- `/costmap_filter_info`
+- `/stop_zone_raw`
+- `/stop_zone`
 
 ## Limitaciones actuales
-- Todavia hay oscilaciones.
-- `2D Goal Pose` sigue siendo una aproximacion local, no un planner global.
-- La capa global aun no fue reintroducida.
-- La planta simulada y el robot real todavia requieren tuning fino de footprint, covarianzas y limites.
-- El comportamiento observado hoy es razonable para validacion local, pero no es todavia la arquitectura final de navegacion completa.
+- La capa sigue siendo local-only; no hay `map -> odom`.
+- La calidad del seguimiento sigue dependiendo del tuning de planner, smoother, controller y planta.
+- La planta simulada y el robot real todavia requieren ajuste fino de footprint, covarianzas y limites.
+- El perfil `real_local_v2` y el perfil de simulacion no son identicos en todos los auxiliares, pero comparten el mismo contrato local de odometria y navegacion en `odom`.
