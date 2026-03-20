@@ -226,10 +226,27 @@ RViz Nav2 goal / bt_navigator
 -> /cmd_vel_steer (Gazebo)
 ```
 
+Cadena nominal de control en robot real:
+
+```text
+RViz Nav2 goal / bt_navigator
+-> planner_server
+-> smoother_server
+-> controller_server
+-> /cmd_vel
+-> collision_monitor
+-> /cmd_vel_safe
+-> nav_command_server
+-> /cmd_vel_final
+-> vehicle_controller_server
+-> actuador UART
+```
+
 ### Topics relevantes
 - `/plan`: plan visible de Nav2
 - `/cmd_vel`: salida del `controller_server`
 - `/cmd_vel_safe`: salida del `collision_monitor`
+- `/cmd_vel_final`: comando arbitrado que consume el controlador real
 - `/cmd_vel_gazebo`: salida del bridge Ackermann
 - `/odometry/local`: odometria filtrada de referencia para control y costmaps
 
@@ -258,6 +275,17 @@ Poligonos actuales:
 - `stop_zone`
 
 `collision_monitor` publica la zona de stop en `/stop_zone_raw`. Luego `polygon_stamped_republisher` la republia en `/stop_zone` para visualizacion y consumers que esperan `PolygonStamped` estable.
+
+### `nav_command_server` en `real_local_v2`
+En `real_local_v2`, `nav_command_server` vuelve a formar parte del pipeline de mando.
+
+En esta fase se usa como puente/arbitraje de comandos:
+
+- consume `/cmd_vel_safe`
+- publica `/cmd_vel_final`
+- mantiene el contrato esperado por `vehicle_controller_server`
+
+La navegacion local `v2` no depende de goals LL para mover el robot, pero el nodo conserva sus servicios legacy para compatibilidad operativa.
 
 ## Keepout y stop zone
 ### Keepout estatico de la `v2`
@@ -355,6 +383,7 @@ Checklist de validacion en robot real:
 - `/plan`
 - `/cmd_vel`
 - `/cmd_vel_safe`
+- `/cmd_vel_final`
 - `/cmd_vel_gazebo`
 - `/keepout_filter_mask`
 - `/costmap_filter_info`
@@ -408,10 +437,11 @@ Real:
 
 1. levantar `real_local_v2`;
 2. verificar `/controller/drive_telemetry`;
-3. verificar `/wheel/odometry` y `/odometry/local`;
+3. verificar `/wheel/odometry`, `/odometry/local` y `/cmd_vel_final`;
 4. probar con ruedas levantadas;
-5. validar avance, giro y reversa;
-6. ajustar covarianzas y wheelbase si hace falta.
+5. validar avance, giro y freno por `/cmd_vel_final`;
+6. recien despues probar goals Nav2;
+7. ajustar covarianzas y wheelbase si hace falta.
 
 ## Contratos publicos de la v2
 Contratos ROS relevantes de esta fase:
@@ -423,6 +453,7 @@ Contratos ROS relevantes de esta fase:
 - `/plan`
 - `/cmd_vel`
 - `/cmd_vel_safe`
+- `/cmd_vel_final`
 - `/cmd_vel_gazebo`
 - `/keepout_filter_mask`
 - `/costmap_filter_info`

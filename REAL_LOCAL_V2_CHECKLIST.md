@@ -31,6 +31,7 @@ Verificar que levanten:
 - `behavior_server`
 - `waypoint_follower`
 - `collision_monitor`
+- `nav_command_server`
 - `stop_zone_republisher`
 
 Verificar que RViz abra con la config local `v2`.
@@ -79,6 +80,7 @@ Comparar:
 
 - `/cmd_vel`
 - `/cmd_vel_safe`
+- `/cmd_vel_final`
 - `/wheel/odometry`
 
 Si el sentido no coincide, revisar:
@@ -90,11 +92,12 @@ Si el sentido no coincide, revisar:
 ## Cadena de Control
 Verificar flujo:
 
-- `bt_navigator -> planner_server -> smoother_server -> controller_server -> /cmd_vel -> /cmd_vel_safe`
+- `bt_navigator -> planner_server -> smoother_server -> controller_server -> /cmd_vel -> /cmd_vel_safe -> /cmd_vel_final`
 
 Confirmar:
 
 - `collision_monitor` no frena por error al arrancar
+- `nav_command_server` publica `/cmd_vel_final`
 - al terminar o cancelar un goal el robot queda en stop
 - no hay residuos de comando luego del goal
 
@@ -136,6 +139,7 @@ Durante la prueba vigilar:
 - steering con signo correcto
 - `/wheel/odometry` coherente con el movimiento
 - `/odometry/local` estable sin GPS
+- `/cmd_vel_final` presente y coherente con `/cmd_vel_safe`
 - `2D Goal Pose` corto ejecutado sin abortos raros
 - stop correcto al terminar o cancelar
 - keepout visible en RViz y topics `/keepout_filter_mask` y `/costmap_filter_info` presentes
