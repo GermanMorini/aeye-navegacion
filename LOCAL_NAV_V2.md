@@ -245,8 +245,9 @@ En la simulacion, `/cmd_vel_gazebo` se bridgea a `/cmd_vel_steer`.
 Configuracion relevante:
 
 - `feedback: OPEN_LOOP`
-- `max_velocity: [0.5, 0.0, 0.4]`
+- `max_velocity: [0.5, 0.0, 0.2]`
 - `min_velocity: [-0.5, 0.0, -0.4]`
+- `max_accel: [0.8, 0.0, 0.25]`
 
 La `v2` quedo en `OPEN_LOOP` por una razon concreta: `CLOSED_LOOP` introducia comportamiento inconsistente en esta cadena Ackermann local, especialmente combinando:
 
@@ -322,7 +323,7 @@ Archivos principales:
 | `vx_min_effective_mps` | `0.5` | bridge/control real |
 | `xy_goal_tolerance` | `0.5` | `PositionGoalChecker` |
 | `desired_linear_vel` | `0.5` | `RegulatedPurePursuitController` |
-| `lookahead_dist` | `0.8` | `RegulatedPurePursuitController` |
+| `lookahead_dist` | `1.6` | `RegulatedPurePursuitController` |
 | `feedback` | `OPEN_LOOP` | `velocity_smoother` |
 
 ### Defaults de sim

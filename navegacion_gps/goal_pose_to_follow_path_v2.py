@@ -53,6 +53,7 @@ def build_ackermann_path(
     step_distance_m: float,
     min_intermediate_poses: int,
     use_goal_orientation: bool = True,
+    turning_radius_m: float = 2.4,
 ) -> Path:
     path = Path()
     path.header.frame_id = str(frame_id)
@@ -80,11 +81,163 @@ def build_ackermann_path(
         return path
 
     safe_step = max(0.05, float(step_distance_m))
+
+    def append_pose(x_world: float, y_world: float, yaw_world_rad: float) -> None:
+        pose_stamped = PoseStamped()
+        pose_stamped.header.frame_id = str(frame_id)
+        pose_stamped.pose.position.x = float(x_world)
+        pose_stamped.pose.position.y = float(y_world)
+        pose_stamped.pose.position.z = 0.0
+        pose_stamped.pose.orientation = quaternion_from_yaw(yaw_world_rad)
+        path.poses.append(pose_stamped)
+
+    if not use_goal_orientation:
+        cos_start = math.cos(start_yaw_rad)
+        sin_start = math.sin(start_yaw_rad)
+        goal_local_x = cos_start * dx_m + sin_start * dy_m
+        goal_local_y = -sin_start * dx_m + cos_start * dy_m
+
+        if goal_local_x > 0.0 and abs(goal_local_y) <= 1.0e-6:
+            segment_count = max(
+                int(math.ceil(distance_m / safe_step)),
+                int(min_intermediate_poses),
+            )
+            for index in range(segment_count + 1):
+                ratio = float(index) / float(segment_count)
+                append_pose(
+                    x_world=float(start_pose.position.x) + ratio * dx_m,
+                    y_world=float(start_pose.position.y) + ratio * dy_m,
+                    yaw_world_rad=heading_rad,
+                )
+            return path
+
+        turn_sign = 1.0 if goal_local_y >= 0.0 else -1.0
+        mirrored_goal_y = turn_sign * goal_local_y
+        turning_radius = max(0.1, float(turning_radius_m))
+        circle_to_goal_x = goal_local_x
+        circle_to_goal_y = mirrored_goal_y - turning_radius
+        circle_to_goal_distance = math.hypot(circle_to_goal_x, circle_to_goal_y)
+
+        if circle_to_goal_distance > turning_radius + 1.0e-6:
+            gamma = math.atan2(circle_to_goal_y, circle_to_goal_x)
+            beta = math.acos(
+                max(-1.0, min(1.0, turning_radius / circle_to_goal_distance))
+            )
+            candidate_alphas = [gamma - beta, gamma + beta]
+
+            for alpha in candidate_alphas:
+                turn_angle = alpha + 0.5 * math.pi
+                if not (0.0 <= turn_angle <= math.pi):
+                    continue
+
+                tangent_x = turning_radius * math.sin(turn_angle)
+                tangent_y = turning_radius * (1.0 - math.cos(turn_angle))
+                straight_dx = circle_to_goal_x - tangent_x
+                straight_dy = mirrored_goal_y - tangent_y
+                straight_length = (
+                    straight_dx * math.cos(turn_angle)
+                    + straight_dy * math.sin(turn_angle)
+                )
+                lateral_error = abs(
+                    -straight_dx * math.sin(turn_angle)
+                    + straight_dy * math.cos(turn_angle)
+                )
+                if straight_length < -1.0e-6 or lateral_error > 1.0e-3:
+                    continue
+
+                arc_length = turning_radius * turn_angle
+                arc_steps = max(
+                    int(math.ceil(arc_length / safe_step)),
+                    1,
+                )
+                line_steps = max(
+                    int(math.ceil(max(0.0, straight_length) / safe_step)),
+                    1 if straight_length > 1.0e-6 else 0,
+                )
+
+                for index in range(arc_steps + 1):
+                    ratio = float(index) / float(arc_steps)
+                    arc_heading = turn_sign * turn_angle * ratio
+                    arc_x = turning_radius * math.sin(turn_angle * ratio)
+                    arc_y = turn_sign * turning_radius * (
+                        1.0 - math.cos(turn_angle * ratio)
+                    )
+                    append_pose(
+                        x_world=float(start_pose.position.x)
+                        + cos_start * arc_x
+                        - sin_start * arc_y,
+                        y_world=float(start_pose.position.y)
+                        + sin_start * arc_x
+                        + cos_start * arc_y,
+                        yaw_world_rad=normalize_angle(start_yaw_rad + arc_heading),
+                    )
+
+                for index in range(1, line_steps + 1):
+                    ratio = float(index) / float(line_steps)
+                    line_distance = straight_length * ratio
+                    line_x = tangent_x + line_distance * math.cos(turn_angle)
+                    line_y = turn_sign * (
+                        tangent_y + line_distance * math.sin(turn_angle)
+                    )
+                    append_pose(
+                        x_world=float(start_pose.position.x)
+                        + cos_start * line_x
+                        - sin_start * line_y,
+                        y_world=float(start_pose.position.y)
+                        + sin_start * line_x
+                        + cos_start * line_y,
+                        yaw_world_rad=normalize_angle(
+                            start_yaw_rad + turn_sign * turn_angle
+                        ),
+                    )
+
+                if path.poses:
+                    path.poses[-1].pose.position.x = float(goal_pose.position.x)
+                    path.poses[-1].pose.position.y = float(goal_pose.position.y)
+                    path.poses[-1].pose.orientation = quaternion_from_yaw(
+                        normalize_angle(start_yaw_rad + turn_sign * turn_angle)
+                    )
+                return path
+
     segment_count = max(
         int(math.ceil(distance_m / safe_step)),
         int(min_intermediate_poses),
     )
-    control_distance_m = max(0.35, min(distance_m * 0.5, 2.0))
+    start_heading_error_rad = normalize_angle(start_yaw_rad - heading_rad)
+    goal_heading_error_rad = normalize_angle(goal_yaw_rad - heading_rad)
+    aligned_with_goal_heading = (
+        abs(start_heading_error_rad) <= math.radians(12.0)
+        and abs(goal_heading_error_rad) <= math.radians(12.0)
+    )
+
+    if aligned_with_goal_heading:
+        for index in range(segment_count + 1):
+            ratio = float(index) / float(segment_count)
+            pose_stamped = PoseStamped()
+            pose_stamped.header.frame_id = str(frame_id)
+            pose_stamped.pose.position.x = (
+                float(start_pose.position.x) + ratio * dx_m
+            )
+            pose_stamped.pose.position.y = (
+                float(start_pose.position.y) + ratio * dy_m
+            )
+            pose_stamped.pose.position.z = 0.0
+            pose_stamped.pose.orientation = quaternion_from_yaw(heading_rad)
+            path.poses.append(pose_stamped)
+
+        if use_goal_orientation and path.poses:
+            path.poses[-1].pose.orientation = goal_pose.orientation
+        return path
+
+    max_heading_error_rad = max(
+        abs(start_heading_error_rad),
+        abs(goal_heading_error_rad),
+    )
+    heading_weight = min(1.0, max_heading_error_rad / math.radians(90.0))
+    control_distance_m = max(
+        0.20,
+        min(distance_m * (0.18 + 0.22 * heading_weight), 1.0),
+    )
 
     p0_x = float(start_pose.position.x)
     p0_y = float(start_pose.position.y)
@@ -126,13 +279,11 @@ def build_ackermann_path(
             if tangent_norm > 1.0e-6
             else heading_rad
         )
-        pose_stamped = PoseStamped()
-        pose_stamped.header.frame_id = str(frame_id)
-        pose_stamped.pose.position.x = x_value
-        pose_stamped.pose.position.y = y_value
-        pose_stamped.pose.position.z = 0.0
-        pose_stamped.pose.orientation = quaternion_from_yaw(tangent_yaw_rad)
-        path.poses.append(pose_stamped)
+        append_pose(
+            x_world=x_value,
+            y_world=y_value,
+            yaw_world_rad=tangent_yaw_rad,
+        )
 
     if use_goal_orientation and path.poses:
         path.poses[-1].pose.orientation = goal_pose.orientation
@@ -172,6 +323,7 @@ class GoalPoseToFollowPathV2(Node):
         self.declare_parameter("path_topic", "/goal_pose_path")
         self.declare_parameter("step_distance_m", 0.10)
         self.declare_parameter("min_intermediate_poses", 6)
+        self.declare_parameter("turning_radius_m", 2.4)
         self.declare_parameter("transform_timeout_s", 0.2)
         self.declare_parameter("use_goal_orientation", True)
         self.declare_parameter("stop_hold_topic", "/local_nav_v2/stop_hold")
@@ -200,6 +352,10 @@ class GoalPoseToFollowPathV2(Node):
         self._step_distance_m = float(self.get_parameter("step_distance_m").value)
         self._min_intermediate_poses = int(
             self.get_parameter("min_intermediate_poses").value
+        )
+        self._turning_radius_m = max(
+            0.1,
+            float(self.get_parameter("turning_radius_m").value),
         )
         self._transform_timeout_s = float(
             self.get_parameter("transform_timeout_s").value
@@ -331,6 +487,7 @@ class GoalPoseToFollowPathV2(Node):
             step_distance_m=self._step_distance_m,
             min_intermediate_poses=self._min_intermediate_poses,
             use_goal_orientation=self._use_goal_orientation,
+            turning_radius_m=self._turning_radius_m,
         )
         path.header.stamp = self.get_clock().now().to_msg()
         for pose in path.poses:

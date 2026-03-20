@@ -88,6 +88,96 @@ def test_build_ackermann_path_respects_start_heading() -> None:
     )
 
 
+def test_build_ackermann_path_is_nearly_straight_for_aligned_goal() -> None:
+    start_pose = Pose()
+    start_pose.orientation = quaternion_from_yaw(0.0)
+    goal_pose = Pose()
+    goal_pose.position.x = 5.0
+    goal_pose.position.y = 0.0
+    goal_pose.orientation = quaternion_from_yaw(0.0)
+
+    path = build_ackermann_path(
+        start_pose=start_pose,
+        goal_pose=goal_pose,
+        frame_id="odom",
+        step_distance_m=0.5,
+        min_intermediate_poses=2,
+        use_goal_orientation=False,
+    )
+
+    assert len(path.poses) >= 4
+    for pose_stamped in path.poses:
+        assert math.isclose(
+            float(pose_stamped.pose.position.y),
+            0.0,
+            rel_tol=0.0,
+            abs_tol=1.0e-9,
+        )
+        assert math.isclose(
+            yaw_from_quaternion(pose_stamped.pose.orientation),
+            0.0,
+            rel_tol=0.0,
+            abs_tol=1.0e-9,
+        )
+
+
+def test_build_ackermann_path_curves_less_for_mild_heading_error() -> None:
+    start_pose = Pose()
+    start_pose.orientation = quaternion_from_yaw(0.25)
+    goal_pose = Pose()
+    goal_pose.position.x = 6.0
+    goal_pose.position.y = 0.0
+    goal_pose.orientation = quaternion_from_yaw(0.0)
+
+    path = build_ackermann_path(
+        start_pose=start_pose,
+        goal_pose=goal_pose,
+        frame_id="odom",
+        step_distance_m=0.5,
+        min_intermediate_poses=2,
+        use_goal_orientation=False,
+    )
+
+    max_abs_y = max(abs(float(p.pose.position.y)) for p in path.poses)
+    assert max_abs_y < 0.75
+
+
+def test_build_ackermann_path_uses_arc_then_line_for_lateral_goal() -> None:
+    start_pose = Pose()
+    start_pose.orientation = quaternion_from_yaw(0.0)
+    goal_pose = Pose()
+    goal_pose.position.x = 6.0
+    goal_pose.position.y = 2.0
+    goal_pose.orientation = quaternion_from_yaw(0.0)
+
+    path = build_ackermann_path(
+        start_pose=start_pose,
+        goal_pose=goal_pose,
+        frame_id="odom",
+        step_distance_m=0.5,
+        min_intermediate_poses=2,
+        use_goal_orientation=False,
+        turning_radius_m=2.4,
+    )
+
+    assert len(path.poses) >= 4
+    first_half = path.poses[: len(path.poses) // 2]
+    max_abs_y = max(abs(float(p.pose.position.y)) for p in first_half)
+    assert max_abs_y > 0.2
+    assert math.isclose(
+        float(path.poses[-1].pose.position.x),
+        6.0,
+        rel_tol=0.0,
+        abs_tol=1.0e-6,
+    )
+    assert math.isclose(
+        float(path.poses[-1].pose.position.y),
+        2.0,
+        rel_tol=0.0,
+        abs_tol=1.0e-6,
+    )
+
+
 def test_minimum_distance_to_path_xy_is_zero_on_path() -> None:
     start_pose = Pose()
     start_pose.orientation = quaternion_from_yaw(0.0)
