@@ -40,6 +40,7 @@ La `v2` usa:
 Guia tecnica detallada:
 
 - [LOCAL_NAV_V2.md](LOCAL_NAV_V2.md)
+- [REAL_LOCAL_V2_CHECKLIST.md](REAL_LOCAL_V2_CHECKLIST.md)
 
 ## Flujo de control
 - Nav2 publica `/cmd_vel`.

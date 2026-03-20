@@ -364,6 +364,10 @@ Desde el host, usando scripts del workspace:
 ./tools/launch_real_local_v2.sh
 ```
 
+Checklist de validacion en robot real:
+
+- [REAL_LOCAL_V2_CHECKLIST.md](REAL_LOCAL_V2_CHECKLIST.md)
+
 ### Que mirar primero
 - `/odometry/local`
 - `/wheel/odometry`
