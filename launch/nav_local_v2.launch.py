@@ -83,6 +83,18 @@ def generate_launch_description():
                 ],
             ),
             Node(
+                package="navegacion_gps",
+                executable="polygon_stamped_republisher",
+                name="stop_zone_republisher",
+                output="screen",
+                parameters=[
+                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+                    {"input_topic": "/stop_zone_raw"},
+                    {"output_topic": "/stop_zone"},
+                    {"republish_period_s": 1.0},
+                ],
+            ),
+            Node(
                 package="nav2_lifecycle_manager",
                 executable="lifecycle_manager",
                 name="lifecycle_manager_local_navigation_v2",

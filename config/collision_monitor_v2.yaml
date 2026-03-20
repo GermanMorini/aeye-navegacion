@@ -26,7 +26,7 @@ collision_monitor:
       action_type: "stop"
       min_points: 3
       points: [2.19, 0.76, 2.19, -0.76, -0.55, -0.76, -0.55, 0.76]
-      polygon_pub_topic: "/stop_zone"
+      polygon_pub_topic: "/stop_zone_raw"
       visualize: true
       enabled: true
 
