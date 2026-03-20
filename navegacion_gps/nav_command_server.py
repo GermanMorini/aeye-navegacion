@@ -55,6 +55,7 @@ class NavCommandServerNode(Node):
         self.declare_parameter("gps_topic", "/gps/fix")
         self.declare_parameter("cmd_vel_safe_topic", "/cmd_vel_safe")
         self.declare_parameter("cmd_vel_final_topic", "/cmd_vel_final")
+        self.declare_parameter("forward_cmd_vel_safe_without_goal", False)
         self.declare_parameter("collision_monitor_state_topic", "/collision_monitor_state")
         self.declare_parameter("brake_topic", "/cmd_vel_safe")
         self.declare_parameter("manual_cmd_topic", "/cmd_vel_safe")
@@ -95,6 +96,9 @@ class NavCommandServerNode(Node):
         self.gps_topic = str(self.get_parameter("gps_topic").value)
         self.cmd_vel_safe_topic = str(self.get_parameter("cmd_vel_safe_topic").value)
         self.cmd_vel_final_topic = str(self.get_parameter("cmd_vel_final_topic").value)
+        self.forward_cmd_vel_safe_without_goal = bool(
+            self.get_parameter("forward_cmd_vel_safe_without_goal").value
+        )
         self.collision_monitor_state_topic = str(
             self.get_parameter("collision_monitor_state_topic").value
         )
@@ -252,6 +256,7 @@ class NavCommandServerNode(Node):
             f"brake={self.brake_service}, telemetry={self.telemetry_topic}, "
             f"events={self.event_topic}, "
             f"teleop_topic={self.teleop_cmd_topic}, "
+            f"forward_without_goal={self.forward_cmd_vel_safe_without_goal}, "
             f"cmd_vel_final_topic={self.cmd_vel_final_topic}, "
             f"follow_waypoints_action={self.follow_waypoints_action}, "
             f"navigate_through_poses_action={self.navigate_through_poses_action})"
@@ -741,8 +746,9 @@ class NavCommandServerNode(Node):
             manual_enabled = bool(self._manual_enabled)
             is_navigating = bool(self._is_navigating)
             collision_stop_active = bool(self._collision_stop_active)
+            forward_without_goal = bool(self.forward_cmd_vel_safe_without_goal)
 
-        if manual_enabled or (not is_navigating):
+        if manual_enabled or ((not is_navigating) and (not forward_without_goal)):
             self._publish_telemetry(force=False)
             return
 

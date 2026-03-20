@@ -75,6 +75,7 @@ Con ruedas levantadas:
 
 - mandar un comando corto o un `2D Goal Pose` pequeno
 - verificar que `angular.z > 0` produzca giro en el sentido esperado
+- referencia validada en `salus`: con el robot visto desde atras, `angular.z > 0` debe intentar girar a la izquierda
 
 Comparar:
 
@@ -98,8 +99,10 @@ Confirmar:
 
 - `collision_monitor` no frena por error al arrancar
 - `nav_command_server` publica `/cmd_vel_final`
+- `nav_command_server` esta en modo passthrough local para la `v2` (`forward_cmd_vel_safe_without_goal=true`)
 - al terminar o cancelar un goal el robot queda en stop
 - no hay residuos de comando luego del goal
+- al validar telemetria, mirar varios mensajes seguidos: `drive_enabled` puede pasar a `true` antes de que `control_source` cambie a `PI`, y la velocidad medida puede tardar algunos ciclos mas en reflejar el movimiento
 
 ## Prueba Local Minima
 Mandar un `2D Goal Pose` corto y simple.

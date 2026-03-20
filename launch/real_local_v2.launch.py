@@ -192,6 +192,7 @@ def generate_launch_description():
                         "gps_topic": "/gps/fix",
                         "cmd_vel_safe_topic": "/cmd_vel_safe",
                         "cmd_vel_final_topic": "/cmd_vel_final",
+                        "forward_cmd_vel_safe_without_goal": True,
                         "brake_topic": "/cmd_vel_safe",
                         "manual_cmd_topic": "/cmd_vel_safe",
                         "teleop_cmd_topic": "/cmd_vel_teleop",

@@ -16,6 +16,7 @@ class _FakeArbNode:
         self._lock = threading.Lock()
         self._manual_enabled = False
         self._is_navigating = False
+        self.forward_cmd_vel_safe_without_goal = False
         self._auto_mode = "idle"
         self._current_goal_handle = None
         self._last_cmd_vel_safe = None
@@ -116,6 +117,21 @@ def test_on_cmd_vel_safe_publishes_auto_when_navigating() -> None:
     NavCommandServerNode._on_cmd_vel_safe(node, msg)
 
     assert node.published == [(0.8, -0.2, 0)]
+
+
+def test_on_cmd_vel_safe_publishes_auto_when_passthrough_enabled_without_goal() -> None:
+    node = _FakeArbNode()
+    node._manual_enabled = False
+    node._is_navigating = False
+    node._collision_stop_active = False
+    node.forward_cmd_vel_safe_without_goal = True
+
+    msg = Twist()
+    msg.linear.x = 0.6
+    msg.angular.z = 0.15
+    NavCommandServerNode._on_cmd_vel_safe(node, msg)
+
+    assert node.published == [(0.6, 0.15, 0)]
 
 
 def test_on_collision_monitor_state_stop_ignored_in_manual() -> None:

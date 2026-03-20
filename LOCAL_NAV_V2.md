@@ -284,8 +284,23 @@ En esta fase se usa como puente/arbitraje de comandos:
 - consume `/cmd_vel_safe`
 - publica `/cmd_vel_final`
 - mantiene el contrato esperado por `vehicle_controller_server`
+- en `real_local_v2` se lanza con `forward_cmd_vel_safe_without_goal=true`, para que el comando local de Nav2 llegue al actuador aunque el goal no haya sido iniciado por los servicios legacy del propio `nav_command_server`
 
 La navegacion local `v2` no depende de goals LL para mover el robot, pero el nodo conserva sus servicios legacy para compatibilidad operativa.
+
+En pruebas reales sobre `salus` se observo una transicion corta en telemetria cuando entra un comando automatico:
+
+- `/cmd_vel_final` aparece primero en ROS;
+- `vehicle_controller_server` confirma recepcion del comando;
+- `DriveTelemetry.drive_enabled` puede pasar a `true` antes de que `control_source` cambie de `NONE` a `PI`;
+- la velocidad medida tarda algunos ciclos mas en despegar de `0.0`.
+
+Para validar la cadena real no alcanza con mirar una sola muestra inmediatamente despues del comando; conviene observar una ventana corta de varios mensajes.
+
+Tambien se valido la convencion de giro en el robot real con ruedas levantadas:
+
+- un comando con `linear.x > 0` y `angular.z > 0` hace que el robot intente girar a la izquierda visto desde atras;
+- por lo tanto, para la `v2` real el signo de steering usado por navegacion y el `invert_steer_from_cmd_vel=True` actual de `vehicle_controller_server` quedaron coherentes entre si.
 
 ## Keepout y stop zone
 ### Keepout estatico de la `v2`
