@@ -65,6 +65,7 @@ def generate_launch_description():
 
     use_sim_time = LaunchConfiguration("use_sim_time")
     wheelbase_m = LaunchConfiguration("wheelbase_m")
+    invert_measured_steer_sign = LaunchConfiguration("invert_measured_steer_sign")
     lidar_config_path = LaunchConfiguration("lidar_config_path")
     fcu_url = LaunchConfiguration("fcu_url")
     use_cyclone_dds = LaunchConfiguration("use_cyclone_dds")
@@ -88,6 +89,10 @@ def generate_launch_description():
         [
             DeclareLaunchArgument("use_sim_time", default_value="False"),
             DeclareLaunchArgument("wheelbase_m", default_value="0.94"),
+            DeclareLaunchArgument(
+                "invert_measured_steer_sign",
+                default_value="True",
+            ),
             DeclareLaunchArgument(
                 "custom_urdf",
                 default_value=os.path.join(gps_wpf_dir, "models", "cuatri_real.urdf"),
@@ -222,6 +227,7 @@ def generate_launch_description():
                 launch_arguments={
                     "use_sim_time": use_sim_time,
                     "wheelbase_m": wheelbase_m,
+                    "invert_measured_steer_sign": invert_measured_steer_sign,
                     "localization_params_file": localization_params_file,
                     "pose_covariance_xy": pose_covariance_xy,
                     "pose_covariance_yaw": pose_covariance_yaw,

@@ -26,6 +26,12 @@ def compute_yaw_rate(speed_mps: float, steer_rad: float, wheelbase_m: float) -> 
     return float(speed_mps) * math.tan(float(steer_rad)) / float(wheelbase_m)
 
 
+def apply_measured_steer_sign(steer_deg: float, invert_sign: bool) -> float:
+    if not math.isfinite(steer_deg):
+        return 0.0
+    return -float(steer_deg) if bool(invert_sign) else float(steer_deg)
+
+
 def integrate_planar(
     x_m: float,
     y_m: float,
@@ -83,6 +89,7 @@ class AckermannOdometryNode(Node):
         self.declare_parameter("base_frame", "base_footprint")
         self.declare_parameter("wheelbase_m", 0.94)
         self.declare_parameter("steering_limit_rad", 0.5235987756)
+        self.declare_parameter("invert_measured_steer_sign", False)
         self.declare_parameter("max_dt_s", 0.2)
         self.declare_parameter("require_steer_valid", False)
         self.declare_parameter("pose_covariance_xy", 0.05)
@@ -100,6 +107,9 @@ class AckermannOdometryNode(Node):
         self._wheelbase_m = max(1.0e-6, float(self.get_parameter("wheelbase_m").value))
         self._steering_limit_rad = abs(
             float(self.get_parameter("steering_limit_rad").value)
+        )
+        self._invert_measured_steer_sign = bool(
+            self.get_parameter("invert_measured_steer_sign").value
         )
         self._max_dt_s = max(0.01, float(self.get_parameter("max_dt_s").value))
         self._require_steer_valid = bool(self.get_parameter("require_steer_valid").value)
@@ -182,6 +192,10 @@ class AckermannOdometryNode(Node):
             speed_mps = -speed_mps
 
         steer_deg = float(msg.steer_deg_measured) if bool(msg.steer_valid) else 0.0
+        steer_deg = apply_measured_steer_sign(
+            steer_deg,
+            invert_sign=self._invert_measured_steer_sign,
+        )
         steer_rad = math.radians(steer_deg)
         steer_rad = max(-self._steering_limit_rad, min(self._steering_limit_rad, steer_rad))
         yaw_rate_rps = compute_yaw_rate(speed_mps, steer_rad, self._wheelbase_m)

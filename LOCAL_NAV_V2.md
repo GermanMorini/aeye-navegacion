@@ -148,14 +148,16 @@ Modelo usado:
 
 1. toma `speed_mps_measured`;
 2. aplica signo con `reverse_requested`;
-3. convierte `steer_deg_measured` a radianes;
-4. calcula:
+3. opcionalmente invierte el signo de `steer_deg_measured` con `invert_measured_steer_sign`;
+4. convierte `steer_deg_measured` a radianes;
+5. satura el steering al limite configurado;
+6. calcula:
 
 ```text
 yaw_rate = v * tan(delta) / wheelbase
 ```
 
-5. integra pose planar con un paso tipo midpoint:
+7. integra pose planar con un paso tipo midpoint:
 
 ```text
 x, y, yaw <- integrate_planar(x, y, yaw, v, yaw_rate, dt)
@@ -198,6 +200,7 @@ La IMU no se usa para pose absoluta; aporta principalmente yaw rate. La pose loc
 - `twist_covariance_vy`
 - `twist_covariance_yaw_rate`
 - `wheelbase_m`
+- `invert_measured_steer_sign`
 
 Defaults actuales:
 
@@ -207,6 +210,7 @@ Defaults actuales:
 - `twist_covariance_vy = 0.01`
 - `twist_covariance_yaw_rate = 0.1`
 - `wheelbase_m = 0.94`
+- `invert_measured_steer_sign = False` en sim y `True` en `real_local_v2`
 
 ## Navegacion local y pipeline de comandos
 La navegacion local actual usa Nav2 nativo sobre `odom`. El goal operativo ya no pasa por `goal_pose_to_follow_path_v2`.
@@ -300,7 +304,14 @@ Para validar la cadena real no alcanza con mirar una sola muestra inmediatamente
 Tambien se valido la convencion de giro en el robot real con ruedas levantadas:
 
 - un comando con `linear.x > 0` y `angular.z > 0` hace que el robot intente girar a la izquierda visto desde atras;
-- por lo tanto, para la `v2` real el signo de steering usado por navegacion y el `invert_steer_from_cmd_vel=True` actual de `vehicle_controller_server` quedaron coherentes entre si.
+- `vehicle_controller_server` debe mantener `invert_steer_from_cmd_vel=True` para respetar el signo fisico correcto del actuador;
+- la telemetria `steer_deg_measured` llega con convencion opuesta a la que necesita la odometria Ackermann;
+- por eso `real_local_v2` activa `invert_measured_steer_sign=True` en `ackermann_odometry`;
+- con esa combinacion quedan coherentes entre si:
+  - giro fisico real del robot,
+  - `steer_deg_measured`,
+  - `/wheel/odometry`,
+  - `/odometry/local`.
 
 ## Keepout y stop zone
 ### Keepout estatico de la `v2`
@@ -361,6 +372,7 @@ Archivos principales:
 - `wheelbase_m = 0.94`
 - `vx_min_effective_mps = 0.5`
 - `invert_steer_from_cmd_vel = True` en `vehicle_controller_server`
+- `invert_measured_steer_sign = True` en `ackermann_odometry`
 
 ### Parametros a recalibrar con el robot
 - `wheelbase_m`

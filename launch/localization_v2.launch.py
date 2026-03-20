@@ -29,6 +29,7 @@ def generate_launch_description():
     drive_telemetry_topic = LaunchConfiguration("drive_telemetry_topic")
     imu_topic = LaunchConfiguration("imu_topic")
     wheelbase_m = LaunchConfiguration("wheelbase_m")
+    invert_measured_steer_sign = LaunchConfiguration("invert_measured_steer_sign")
     localization_params_file = LaunchConfiguration("localization_params_file")
     pose_covariance_xy = LaunchConfiguration("pose_covariance_xy")
     pose_covariance_yaw = LaunchConfiguration("pose_covariance_yaw")
@@ -45,6 +46,10 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument("imu_topic", default_value="/imu/data"),
             DeclareLaunchArgument("wheelbase_m", default_value="0.94"),
+            DeclareLaunchArgument(
+                "invert_measured_steer_sign",
+                default_value="False",
+            ),
             DeclareLaunchArgument(
                 "localization_params_file",
                 default_value=default_params_file,
@@ -63,6 +68,12 @@ def generate_launch_description():
                     {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
                     {"telemetry_topic": drive_telemetry_topic},
                     {"wheelbase_m": ParameterValue(wheelbase_m, value_type=float)},
+                    {
+                        "invert_measured_steer_sign": ParameterValue(
+                            invert_measured_steer_sign,
+                            value_type=bool,
+                        )
+                    },
                     {
                         "pose_covariance_xy": ParameterValue(
                             pose_covariance_xy,

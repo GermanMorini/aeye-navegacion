@@ -88,6 +88,7 @@ Si el sentido no coincide, revisar:
 
 - `invert_steer_from_cmd_vel`
 - convencion de steering medida
+- `invert_measured_steer_sign`
 - signo de yaw en la odometria
 
 ## Cadena de Control
