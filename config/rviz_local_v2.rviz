@@ -203,7 +203,7 @@ Visualization Manager:
       Length: 0.12
       Line Style: Lines
       Line Width: 0.08
-      Name: Goal Path
+      Name: Plan
       Offset:
         X: 0
         Y: 0
@@ -218,7 +218,7 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /goal_pose_path
+        Value: /plan
       Value: true
     - Class: rviz_default_plugins/MarkerArray
       Enabled: true

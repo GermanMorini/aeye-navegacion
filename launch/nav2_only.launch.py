@@ -3,11 +3,11 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.conditions import IfCondition
-from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
+from launch_ros.descriptions import ParameterFile
 from launch_ros.parameter_descriptions import ParameterValue
 from nav2_common.launch import RewrittenYaml
 
@@ -58,7 +58,6 @@ def _build_robot_state_publisher(context):
 
 
 def generate_launch_description():
-    bringup_dir = get_package_share_directory("nav2_bringup")
     gps_wpf_dir = get_package_share_directory("navegacion_gps")
 
     nav2_params = _resolve_config_file_path(gps_wpf_dir, "nav2_no_map_params.yaml")
@@ -74,14 +73,17 @@ def generate_launch_description():
     bt_through_poses_xml = _resolve_config_file_path(
         gps_wpf_dir, "navigate_through_poses_w_replanning_and_recovery_no_spin.xml"
     )
-    configured_params = RewrittenYaml(
-        source_file=nav2_params,
-        root_key="",
-        param_rewrites={
-            "default_nav_to_pose_bt_xml": bt_xml,
-            "default_nav_through_poses_bt_xml": bt_through_poses_xml,
-        },
-        convert_types=True,
+    configured_params = ParameterFile(
+        RewrittenYaml(
+            source_file=nav2_params,
+            root_key="",
+            param_rewrites={
+                "default_nav_to_pose_bt_xml": bt_xml,
+                "default_nav_through_poses_bt_xml": bt_through_poses_xml,
+            },
+            convert_types=True,
+        ),
+        allow_substs=True,
     )
 
     use_sim_time = LaunchConfiguration("use_sim_time")
@@ -133,15 +135,76 @@ def generate_launch_description():
         description="Path to custom URDF for TF tree",
     )
 
-    navigation2_cmd = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(bringup_dir, "launch", "navigation_launch.py")
-        ),
-        launch_arguments={
-            "use_sim_time": use_sim_time,
-            "params_file": configured_params,
-            "autostart": "True",
-        }.items(),
+    remappings = [("/tf", "tf"), ("/tf_static", "tf_static")]
+
+    nav2_controller_cmd = Node(
+        package="nav2_controller",
+        executable="controller_server",
+        name="controller_server",
+        output="screen",
+        parameters=[configured_params],
+        remappings=remappings,
+    )
+    nav2_smoother_cmd = Node(
+        package="nav2_smoother",
+        executable="smoother_server",
+        name="smoother_server",
+        output="screen",
+        parameters=[configured_params],
+        remappings=remappings,
+    )
+    nav2_planner_cmd = Node(
+        package="nav2_planner",
+        executable="planner_server",
+        name="planner_server",
+        output="screen",
+        parameters=[configured_params],
+        remappings=remappings,
+    )
+    nav2_behavior_cmd = Node(
+        package="nav2_behaviors",
+        executable="behavior_server",
+        name="behavior_server",
+        output="screen",
+        parameters=[configured_params],
+        remappings=remappings,
+    )
+    nav2_bt_navigator_cmd = Node(
+        package="nav2_bt_navigator",
+        executable="bt_navigator",
+        name="bt_navigator",
+        output="screen",
+        parameters=[configured_params],
+        remappings=remappings,
+    )
+    nav2_waypoint_follower_cmd = Node(
+        package="nav2_waypoint_follower",
+        executable="waypoint_follower",
+        name="waypoint_follower",
+        output="screen",
+        parameters=[configured_params],
+        remappings=remappings,
+    )
+    nav2_lifecycle_cmd = Node(
+        package="nav2_lifecycle_manager",
+        executable="lifecycle_manager",
+        name="lifecycle_manager_navigation",
+        output="screen",
+        parameters=[
+            {
+                "use_sim_time": nav2_use_sim_time,
+                "autostart": True,
+                "bond_timeout": 4.0,
+                "node_names": [
+                    "controller_server",
+                    "smoother_server",
+                    "planner_server",
+                    "behavior_server",
+                    "bt_navigator",
+                    "waypoint_follower",
+                ],
+            }
+        ],
     )
 
     keepout_filter_mask_server_cmd = Node(
@@ -245,7 +308,13 @@ def generate_launch_description():
     ld.add_action(declare_custom_urdf_cmd)
 
     ld.add_action(OpaqueFunction(function=_build_robot_state_publisher))
-    ld.add_action(navigation2_cmd)
+    ld.add_action(nav2_controller_cmd)
+    ld.add_action(nav2_smoother_cmd)
+    ld.add_action(nav2_planner_cmd)
+    ld.add_action(nav2_behavior_cmd)
+    ld.add_action(nav2_bt_navigator_cmd)
+    ld.add_action(nav2_waypoint_follower_cmd)
+    ld.add_action(nav2_lifecycle_cmd)
     ld.add_action(keepout_filter_mask_server_cmd)
     ld.add_action(keepout_costmap_filter_info_server_cmd)
     ld.add_action(keepout_lifecycle_cmd)

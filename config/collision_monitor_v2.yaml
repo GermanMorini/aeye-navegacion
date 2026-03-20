@@ -3,7 +3,7 @@ collision_monitor:
     use_sim_time: false
     base_frame_id: base_footprint
     odom_frame_id: odom
-    cmd_vel_in_topic: /cmd_vel_smoothed
+    cmd_vel_in_topic: /cmd_vel
     cmd_vel_out_topic: /cmd_vel_safe
     state_topic: /collision_monitor_state
     expected_planner_frequency: 10.0

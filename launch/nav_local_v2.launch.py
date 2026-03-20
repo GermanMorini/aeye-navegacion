@@ -5,7 +5,9 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.descriptions import ParameterFile
 from launch_ros.parameter_descriptions import ParameterValue
+from nav2_common.launch import RewrittenYaml
 
 
 def _resolve_config_file_path(package_share_dir: str, filename: str) -> str:
@@ -27,14 +29,38 @@ def generate_launch_description():
     default_collision_monitor_params = _resolve_config_file_path(
         gps_wpf_dir, "collision_monitor_v2.yaml"
     )
+    bt_xml = _resolve_config_file_path(
+        gps_wpf_dir, "navigate_to_pose_w_replanning_and_recovery_no_spin.xml"
+    )
+    bt_through_poses_xml = _resolve_config_file_path(
+        gps_wpf_dir, "navigate_through_poses_w_replanning_and_recovery_no_spin.xml"
+    )
     use_sim_time = LaunchConfiguration("use_sim_time")
     nav2_params_file = LaunchConfiguration("nav2_params_file")
     collision_monitor_params_file = LaunchConfiguration("collision_monitor_params_file")
-    goal_pose_use_goal_orientation = LaunchConfiguration("goal_pose_use_goal_orientation")
+    configured_nav2_params = ParameterFile(
+        RewrittenYaml(
+            source_file=nav2_params_file,
+            root_key="",
+            param_rewrites={
+                "default_nav_to_pose_bt_xml": bt_xml,
+                "default_nav_through_poses_bt_xml": bt_through_poses_xml,
+            },
+            convert_types=True,
+        ),
+        allow_substs=True,
+    )
+    remappings = [("/tf", "tf"), ("/tf_static", "tf_static")]
 
     lifecycle_node_names = [
+        "planner_server",
         "controller_server",
-        "velocity_smoother",
+        "smoother_server",
+        "bt_navigator",
+        "behavior_server",
+        "waypoint_follower",
+    ]
+    collision_monitor_lifecycle_node_names = [
         "collision_monitor",
     ]
 
@@ -46,31 +72,71 @@ def generate_launch_description():
                 "collision_monitor_params_file",
                 default_value=default_collision_monitor_params,
             ),
-            DeclareLaunchArgument("goal_pose_use_goal_orientation", default_value="False"),
+            Node(
+                package="nav2_planner",
+                executable="planner_server",
+                name="planner_server",
+                output="screen",
+                parameters=[
+                    configured_nav2_params,
+                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+                ],
+                remappings=remappings,
+            ),
             Node(
                 package="nav2_controller",
                 executable="controller_server",
                 name="controller_server",
                 output="screen",
                 parameters=[
-                    nav2_params_file,
+                    configured_nav2_params,
                     {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
                 ],
-                remappings=[("/cmd_vel", "/cmd_vel_nav")],
+                remappings=remappings,
             ),
             Node(
-                package="nav2_velocity_smoother",
-                executable="velocity_smoother",
-                name="velocity_smoother",
+                package="nav2_smoother",
+                executable="smoother_server",
+                name="smoother_server",
                 output="screen",
                 parameters=[
-                    nav2_params_file,
+                    configured_nav2_params,
                     {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
                 ],
-                remappings=[
-                    ("/cmd_vel", "/cmd_vel_nav"),
-                    ("/cmd_vel_smoothed", "/cmd_vel_smoothed"),
+                remappings=remappings,
+            ),
+            Node(
+                package="nav2_bt_navigator",
+                executable="bt_navigator",
+                name="bt_navigator",
+                output="screen",
+                parameters=[
+                    configured_nav2_params,
+                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
                 ],
+                remappings=remappings,
+            ),
+            Node(
+                package="nav2_behaviors",
+                executable="behavior_server",
+                name="behavior_server",
+                output="screen",
+                parameters=[
+                    configured_nav2_params,
+                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+                ],
+                remappings=remappings,
+            ),
+            Node(
+                package="nav2_waypoint_follower",
+                executable="waypoint_follower",
+                name="waypoint_follower",
+                output="screen",
+                parameters=[
+                    configured_nav2_params,
+                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+                ],
+                remappings=remappings,
             ),
             Node(
                 package="nav2_collision_monitor",
@@ -108,18 +174,16 @@ def generate_launch_description():
                 ],
             ),
             Node(
-                package="navegacion_gps",
-                executable="goal_pose_to_follow_path_v2",
-                name="goal_pose_to_follow_path_v2",
+                package="nav2_lifecycle_manager",
+                executable="lifecycle_manager",
+                name="collision_monitor_lifecycle_manager_local_v2",
                 output="screen",
                 parameters=[
-                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
                     {
-                        "use_goal_orientation": ParameterValue(
-                            goal_pose_use_goal_orientation,
-                            value_type=bool,
-                        )
-                    },
+                        "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
+                        "autostart": True,
+                        "node_names": collision_monitor_lifecycle_node_names,
+                    }
                 ],
             ),
         ]
