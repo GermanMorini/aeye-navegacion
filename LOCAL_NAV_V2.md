@@ -2,7 +2,7 @@
 
 ## Resumen
 La `v2` es una base de navegacion local para el robot Ackermann que corre completamente en `odom`.
-La capa local actual ya no usa `goal_pose_to_follow_path_v2` ni `velocity_smoother`: hoy la navegacion se apoya en un stack Nav2 nativo sobre `odom`, con localizacion Ackermann + EKF local + costmaps rolling + collision monitor.
+La capa local actual ya no usa `goal_pose_to_follow_path_v2` ni `velocity_smoother`: hoy la navegacion se apoya en un stack Nav2 nativo sobre `odom`, con localizacion Ackermann + EKF local + planner + smoother + BT + costmaps rolling + collision monitor.
 
 Objetivos de esta fase:
 
@@ -68,7 +68,7 @@ Composicion efectiva:
 | `behavior_server` | Ejecuta behaviors de recuperacion (`BackUp`, `DriveOnHeading`, `Wait`). |
 | `waypoint_follower` | Expone la navegacion por waypoints para el perfil local-v2. |
 | `collision_monitor` | Aplica stop preventivo y publica `/cmd_vel_safe`. |
-| `keepout_filter_mask_server` | Publica la mascara keepout estatica usada por los costmaps de `sim_local_v2`. |
+| `keepout_filter_mask_server` | Publica la mascara keepout estatica usada por los costmaps de la `v2`. |
 | `keepout_costmap_filter_info_server` | Publica metadata del filtro keepout en `/costmap_filter_info`. |
 | `polygon_stamped_republisher` | Republlica `/stop_zone_raw` hacia `/stop_zone` para RViz y consumers legacy. |
 
@@ -260,14 +260,14 @@ Poligonos actuales:
 `collision_monitor` publica la zona de stop en `/stop_zone_raw`. Luego `polygon_stamped_republisher` la republia en `/stop_zone` para visualizacion y consumers que esperan `PolygonStamped` estable.
 
 ## Keepout y stop zone
-### Keepout estatico en `sim_local_v2`
-`sim_local_v2` levanta un keepout estatico en `odom` con estos nodos:
+### Keepout estatico de la `v2`
+`nav_local_v2` levanta un keepout estatico en `odom` con estos nodos:
 
 - `keepout_filter_mask_server`
 - `keepout_costmap_filter_info_server`
 - `lifecycle_manager_keepout_filters`
 
-La mascara proviene de:
+La mascara proviene por defecto de:
 
 - `config/keepout_mask.yaml`
 
@@ -276,7 +276,7 @@ Y se publica en:
 - `/keepout_filter_mask`
 - `/costmap_filter_info`
 
-Los costmaps local y global de `nav2_local_v2_params.yaml` usan `keepout_filter`, por eso este perfil necesita los publishers del filtro aunque no tenga `map`.
+Los costmaps local y global de `nav2_local_v2_params.yaml` usan `keepout_filter`, por eso tanto `sim_local_v2` como `real_local_v2` necesitan los publishers del filtro aunque no exista `map -> odom`.
 
 ### Stop zone
 Ademas del keepout de costmap, `collision_monitor` mantiene una `stop_zone` reactiva para frenado inmediato basada en `/scan`.
@@ -347,7 +347,7 @@ Desde el host, usando scripts del workspace:
 
 Checklist de validacion en robot real:
 
-- [REAL_LOCAL_V2_CHECKLIST.md](/home/gmorini/Documentos/codigo/ros2/workspace/src/navegacion_gps/REAL_LOCAL_V2_CHECKLIST.md)
+- [REAL_LOCAL_V2_CHECKLIST.md](REAL_LOCAL_V2_CHECKLIST.md)
 
 ### Que mirar primero
 - `/odometry/local`
@@ -365,6 +365,7 @@ Checklist de validacion en robot real:
 El plan visible relevante en `rviz_local_v2.rviz` es `/plan`.
 El flujo historico basado en `/goal_pose_path` ya no describe la navegacion local actual.
 Para la operacion del stack actual, el objetivo debe interpretarse como un goal de Nav2 y no como el path generado por el helper antiguo.
+Si se esta validando contra el robot real, reiniciar limpio `real_local_v2` antes de sacar conclusiones: una sesion vieja puede dejar nodos del stack anterior vivos y mezclar la observacion.
 
 ### Fallas tipicas
 **No se mueve**
@@ -378,7 +379,7 @@ Para la operacion del stack actual, el objetivo debe interpretarse como un goal 
 
 - revisar `/keepout_filter_mask` y `/costmap_filter_info`;
 - revisar `keepout_filter_mask_server` y `keepout_costmap_filter_info_server`;
-- revisar que el `frame_id` del filtro sea `odom` en simulacion.
+- revisar que el `frame_id` del filtro sea `odom`.
 
 **Oscila o abre demasiado la curva**
 

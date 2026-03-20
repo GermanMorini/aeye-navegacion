@@ -33,9 +33,9 @@ La `v2` usa:
 
 - odometria Ackermann derivada de `DriveTelemetry`;
 - EKF local en `odom`;
-- Nav2 local-only con `FollowPath`;
-- `velocity_smoother` en `OPEN_LOOP`;
-- overlay de debug en RViz para seguir `d`, `yaw_err`, `nav_wz`, `safe_wz` y `odom_wz`.
+- Nav2 nativo sobre `odom` con planner, smoother y BT;
+- keepout filter estatico compartido por `sim_local_v2` y `real_local_v2`;
+- visualizacion de `/plan`, `/stop_zone`, `/keepout_filter_mask` y `/costmap_filter_info` en RViz.
 
 Guia tecnica detallada:
 

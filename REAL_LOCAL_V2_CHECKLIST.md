@@ -22,10 +22,16 @@ Verificar que levanten:
 - `vehicle_controller_server`
 - `ackermann_odometry`
 - `ekf_filter_node_local_v2`
+- `keepout_filter_mask_server`
+- `keepout_costmap_filter_info_server`
 - `controller_server`
-- `velocity_smoother`
+- `planner_server`
+- `smoother_server`
+- `bt_navigator`
+- `behavior_server`
+- `waypoint_follower`
 - `collision_monitor`
-- `goal_pose_to_follow_path_v2`
+- `stop_zone_republisher`
 
 Verificar que RViz abra con la config local `v2`.
 
@@ -71,7 +77,7 @@ Con ruedas levantadas:
 
 Comparar:
 
-- `/cmd_vel_nav`
+- `/cmd_vel`
 - `/cmd_vel_safe`
 - `/wheel/odometry`
 
@@ -84,7 +90,7 @@ Si el sentido no coincide, revisar:
 ## Cadena de Control
 Verificar flujo:
 
-- `/cmd_vel_nav -> /cmd_vel_smoothed -> /cmd_vel_safe`
+- `bt_navigator -> planner_server -> smoother_server -> controller_server -> /cmd_vel -> /cmd_vel_safe`
 
 Confirmar:
 
@@ -97,17 +103,9 @@ Mandar un `2D Goal Pose` corto y simple.
 
 Verificar en RViz:
 
-- `Goal Path`
-- `Path Tracking Debug`
+- `Plan`
+- `Stop Zone`
 - traza del robot
-
-Mirar especialmente:
-
-- `d`
-- `yaw_err`
-- `nav_wz`
-- `safe_wz`
-- `odom_wz`
 
 ## Prueba en Piso
 Orden recomendado:
@@ -130,6 +128,8 @@ Durante la prueba vigilar:
 - covarianzas de `ackermann_odometry`
 - footprint
 - `lookahead_dist`
+- `desired_linear_vel`
+- `minimum_turning_radius`
 - `xy_goal_tolerance`
 
 ## Criterio Minimo de Aceptacion
@@ -138,3 +138,4 @@ Durante la prueba vigilar:
 - `/odometry/local` estable sin GPS
 - `2D Goal Pose` corto ejecutado sin abortos raros
 - stop correcto al terminar o cancelar
+- keepout visible en RViz y topics `/keepout_filter_mask` y `/costmap_filter_info` presentes

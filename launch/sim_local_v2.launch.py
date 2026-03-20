@@ -25,6 +25,7 @@ def generate_launch_description():
     localization_params_file = LaunchConfiguration("localization_params_file")
     nav2_params_file = LaunchConfiguration("nav2_params_file")
     collision_monitor_params_file = LaunchConfiguration("collision_monitor_params_file")
+    keepout_mask_yaml_arg = LaunchConfiguration("keepout_mask_yaml")
     pose_covariance_xy = LaunchConfiguration("pose_covariance_xy")
     pose_covariance_yaw = LaunchConfiguration("pose_covariance_yaw")
     twist_covariance_vx = LaunchConfiguration("twist_covariance_vx")
@@ -52,6 +53,7 @@ def generate_launch_description():
                 "collision_monitor_params_file",
                 default_value=os.path.join(gps_wpf_dir, "config", "collision_monitor_v2.yaml"),
             ),
+            DeclareLaunchArgument("keepout_mask_yaml", default_value=keepout_mask_yaml),
             DeclareLaunchArgument("pose_covariance_xy", default_value="0.05"),
             DeclareLaunchArgument("pose_covariance_yaw", default_value="0.1"),
             DeclareLaunchArgument("twist_covariance_vx", default_value="0.05"),
@@ -107,53 +109,6 @@ def generate_launch_description():
                     "twist_covariance_yaw_rate": twist_covariance_yaw_rate,
                 }.items(),
             ),
-            Node(
-                package="nav2_map_server",
-                executable="map_server",
-                name="keepout_filter_mask_server",
-                output="screen",
-                parameters=[
-                    {
-                        "yaml_filename": keepout_mask_yaml,
-                        "topic_name": "/keepout_filter_mask",
-                        "frame_id": "odom",
-                    },
-                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
-                ],
-            ),
-            Node(
-                package="nav2_map_server",
-                executable="costmap_filter_info_server",
-                name="keepout_costmap_filter_info_server",
-                output="screen",
-                parameters=[
-                    {
-                        "type": 0,
-                        "filter_info_topic": "/costmap_filter_info",
-                        "mask_topic": "/keepout_filter_mask",
-                        "base": 0.0,
-                        "multiplier": 1.0,
-                    },
-                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
-                ],
-            ),
-            Node(
-                package="nav2_lifecycle_manager",
-                executable="lifecycle_manager",
-                name="lifecycle_manager_keepout_filters",
-                output="screen",
-                parameters=[
-                    {
-                        "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
-                        "autostart": True,
-                        "bond_timeout": 4.0,
-                        "node_names": [
-                            "keepout_filter_mask_server",
-                            "keepout_costmap_filter_info_server",
-                        ],
-                    }
-                ],
-            ),
             TimerAction(
                 period=nav_start_delay_s,
                 actions=[
@@ -165,6 +120,7 @@ def generate_launch_description():
                             "use_sim_time": use_sim_time,
                             "nav2_params_file": nav2_params_file,
                             "collision_monitor_params_file": collision_monitor_params_file,
+                            "keepout_mask_yaml": keepout_mask_yaml_arg,
                         }.items(),
                     )
                 ],

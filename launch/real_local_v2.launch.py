@@ -76,7 +76,7 @@ def generate_launch_description():
     localization_params_file = LaunchConfiguration("localization_params_file")
     nav2_params_file = LaunchConfiguration("nav2_params_file")
     collision_monitor_params_file = LaunchConfiguration("collision_monitor_params_file")
-    goal_pose_use_goal_orientation = LaunchConfiguration("goal_pose_use_goal_orientation")
+    keepout_mask_yaml = LaunchConfiguration("keepout_mask_yaml")
     pose_covariance_xy = LaunchConfiguration("pose_covariance_xy")
     pose_covariance_yaw = LaunchConfiguration("pose_covariance_yaw")
     twist_covariance_vx = LaunchConfiguration("twist_covariance_vx")
@@ -114,7 +114,10 @@ def generate_launch_description():
                 "collision_monitor_params_file",
                 default_value=os.path.join(gps_wpf_dir, "config", "collision_monitor_v2.yaml"),
             ),
-            DeclareLaunchArgument("goal_pose_use_goal_orientation", default_value="False"),
+            DeclareLaunchArgument(
+                "keepout_mask_yaml",
+                default_value=os.path.join(gps_wpf_dir, "config", "keepout_mask.yaml"),
+            ),
             DeclareLaunchArgument("pose_covariance_xy", default_value="0.05"),
             DeclareLaunchArgument("pose_covariance_yaw", default_value="0.1"),
             DeclareLaunchArgument("twist_covariance_vx", default_value="0.05"),
@@ -200,7 +203,7 @@ def generate_launch_description():
                             "use_sim_time": use_sim_time,
                             "nav2_params_file": nav2_params_file,
                             "collision_monitor_params_file": collision_monitor_params_file,
-                            "goal_pose_use_goal_orientation": goal_pose_use_goal_orientation,
+                            "keepout_mask_yaml": keepout_mask_yaml,
                         }.items(),
                     )
                 ],

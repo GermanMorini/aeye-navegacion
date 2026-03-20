@@ -2,7 +2,8 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.descriptions import ParameterFile
@@ -35,9 +36,12 @@ def generate_launch_description():
     bt_through_poses_xml = _resolve_config_file_path(
         gps_wpf_dir, "navigate_through_poses_w_replanning_and_recovery_no_spin.xml"
     )
+    keepout_launch = str(Path(gps_wpf_dir) / "launch" / "keepout_filters_v2.launch.py")
+    default_keepout_mask = _resolve_config_file_path(gps_wpf_dir, "keepout_mask.yaml")
     use_sim_time = LaunchConfiguration("use_sim_time")
     nav2_params_file = LaunchConfiguration("nav2_params_file")
     collision_monitor_params_file = LaunchConfiguration("collision_monitor_params_file")
+    keepout_mask_yaml = LaunchConfiguration("keepout_mask_yaml")
     configured_nav2_params = ParameterFile(
         RewrittenYaml(
             source_file=nav2_params_file,
@@ -71,6 +75,15 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "collision_monitor_params_file",
                 default_value=default_collision_monitor_params,
+            ),
+            DeclareLaunchArgument("keepout_mask_yaml", default_value=default_keepout_mask),
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(keepout_launch),
+                launch_arguments={
+                    "use_sim_time": use_sim_time,
+                    "keepout_mask_yaml": keepout_mask_yaml,
+                    "keepout_mask_frame": "odom",
+                }.items(),
             ),
             Node(
                 package="nav2_planner",
