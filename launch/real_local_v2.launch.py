@@ -73,6 +73,7 @@ def generate_launch_description():
     rviz_config = LaunchConfiguration("rviz_config")
     vx_deadband_mps = LaunchConfiguration("vx_deadband_mps")
     vx_min_effective_mps = LaunchConfiguration("vx_min_effective_mps")
+    invert_steer_from_cmd_vel = LaunchConfiguration("invert_steer_from_cmd_vel")
     localization_params_file = LaunchConfiguration("localization_params_file")
     nav2_params_file = LaunchConfiguration("nav2_params_file")
     collision_monitor_params_file = LaunchConfiguration("collision_monitor_params_file")
@@ -102,6 +103,7 @@ def generate_launch_description():
             DeclareLaunchArgument("rviz_config", default_value=default_rviz),
             DeclareLaunchArgument("vx_deadband_mps", default_value="0.01"),
             DeclareLaunchArgument("vx_min_effective_mps", default_value="0.5"),
+            DeclareLaunchArgument("invert_steer_from_cmd_vel", default_value="True"),
             DeclareLaunchArgument(
                 "localization_params_file",
                 default_value=os.path.join(gps_wpf_dir, "config", "localization_v2.yaml"),
@@ -173,7 +175,9 @@ def generate_launch_description():
                         "vx_min_effective_mps": ParameterValue(
                             vx_min_effective_mps, value_type=float
                         ),
-                        "invert_steer_from_cmd_vel": True,
+                        "invert_steer_from_cmd_vel": ParameterValue(
+                            invert_steer_from_cmd_vel, value_type=bool
+                        ),
                     }
                 ],
             ),
