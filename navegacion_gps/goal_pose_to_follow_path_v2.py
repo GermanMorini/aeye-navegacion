@@ -4,7 +4,8 @@ import math
 from typing import Optional
 
 import rclpy
-from geometry_msgs.msg import Pose, PoseStamped, Quaternion
+from action_msgs.msg import GoalStatus
+from geometry_msgs.msg import Point, Pose, PoseStamped, Quaternion, Twist
 from nav2_msgs.action import FollowPath
 from nav_msgs.msg import Odometry, Path
 from rclpy.action import ActionClient
@@ -12,6 +13,7 @@ from rclpy.node import Node
 from std_msgs.msg import Empty
 from tf2_geometry_msgs import do_transform_pose_stamped
 from tf2_ros import Buffer, TransformException, TransformListener
+from visualization_msgs.msg import Marker, MarkerArray
 
 
 def yaw_from_quaternion(quaternion: Quaternion) -> float:
@@ -34,6 +36,14 @@ def quaternion_from_yaw(yaw_rad: float) -> Quaternion:
     quaternion.y = 0.0
     quaternion.z = math.sin(half_yaw)
     return quaternion
+
+
+def normalize_angle(angle_rad: float) -> float:
+    while angle_rad <= -math.pi:
+        angle_rad += 2.0 * math.pi
+    while angle_rad > math.pi:
+        angle_rad -= 2.0 * math.pi
+    return angle_rad
 
 
 def build_ackermann_path(
@@ -130,6 +140,25 @@ def build_ackermann_path(
     return path
 
 
+def distance_xy(first_pose: Pose, second_pose: Pose) -> float:
+    return math.hypot(
+        float(second_pose.position.x) - float(first_pose.position.x),
+        float(second_pose.position.y) - float(first_pose.position.y),
+    )
+
+
+def minimum_distance_to_path_xy(path: Path, pose: Pose) -> float:
+    if not path.poses:
+        return float("inf")
+    return min(distance_xy(path_pose.pose, pose) for path_pose in path.poses)
+
+
+def closest_path_pose(path: Path, pose: Pose) -> Optional[PoseStamped]:
+    if not path.poses:
+        return None
+    return min(path.poses, key=lambda path_pose: distance_xy(path_pose.pose, pose))
+
+
 class GoalPoseToFollowPathV2(Node):
     def __init__(self) -> None:
         super().__init__("goal_pose_to_follow_path_v2")
@@ -146,12 +175,24 @@ class GoalPoseToFollowPathV2(Node):
         self.declare_parameter("transform_timeout_s", 0.2)
         self.declare_parameter("use_goal_orientation", True)
         self.declare_parameter("stop_hold_topic", "/local_nav_v2/stop_hold")
+        self.declare_parameter("path_monitor_hz", 5.0)
+        self.declare_parameter("path_replan_distance_m", 0.9)
+        self.declare_parameter("path_replan_min_goal_distance_m", 1.0)
+        self.declare_parameter("path_replan_min_goal_age_s", 1.0)
+        self.declare_parameter("path_replan_cooldown_s", 1.5)
+        self.declare_parameter("debug_markers_topic", "/local_nav_v2/path_tracking_debug")
+        self.declare_parameter("debug_log_period_s", 1.0)
+        self.declare_parameter("cmd_vel_safe_topic", "/cmd_vel_safe")
+        self.declare_parameter("odom_raw_topic", "/odom_raw")
 
         goal_topic = str(self.get_parameter("goal_topic").value)
         odom_topic = str(self.get_parameter("odom_topic").value)
         action_name = str(self.get_parameter("action_name").value)
         path_topic = str(self.get_parameter("path_topic").value)
         stop_hold_topic = str(self.get_parameter("stop_hold_topic").value)
+        debug_markers_topic = str(self.get_parameter("debug_markers_topic").value)
+        cmd_vel_safe_topic = str(self.get_parameter("cmd_vel_safe_topic").value)
+        odom_raw_topic = str(self.get_parameter("odom_raw_topic").value)
 
         self._path_frame = str(self.get_parameter("path_frame").value)
         self._controller_id = str(self.get_parameter("controller_id").value)
@@ -166,9 +207,40 @@ class GoalPoseToFollowPathV2(Node):
         self._use_goal_orientation = bool(
             self.get_parameter("use_goal_orientation").value
         )
+        self._path_replan_distance_m = max(
+            0.1, float(self.get_parameter("path_replan_distance_m").value)
+        )
+        self._path_replan_min_goal_distance_m = max(
+            0.1,
+            float(self.get_parameter("path_replan_min_goal_distance_m").value),
+        )
+        self._path_replan_min_goal_age_s = max(
+            0.0,
+            float(self.get_parameter("path_replan_min_goal_age_s").value),
+        )
+        self._path_replan_cooldown_s = max(
+            0.1,
+            float(self.get_parameter("path_replan_cooldown_s").value),
+        )
+        self._debug_log_period_s = max(
+            0.2, float(self.get_parameter("debug_log_period_s").value)
+        )
+        path_monitor_hz = max(
+            1.0, float(self.get_parameter("path_monitor_hz").value)
+        )
 
         self._latest_pose: Optional[PoseStamped] = None
         self._latest_goal_handle = None
+        self._active_goal_pose: Optional[PoseStamped] = None
+        self._active_path: Optional[Path] = None
+        self._active_goal_sent_ns: int = 0
+        self._replan_pending = False
+        self._ignore_next_canceled_result = False
+        self._next_replan_allowed_ns = 0
+        self._latest_cmd_vel_nav = Twist()
+        self._latest_cmd_vel_safe = Twist()
+        self._latest_odom_raw = Odometry()
+        self._last_debug_log_ns = 0
 
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
@@ -176,8 +248,15 @@ class GoalPoseToFollowPathV2(Node):
 
         self._path_pub = self.create_publisher(Path, path_topic, 10)
         self._stop_hold_pub = self.create_publisher(Empty, stop_hold_topic, 10)
+        self._debug_markers_pub = self.create_publisher(
+            MarkerArray, debug_markers_topic, 10
+        )
         self.create_subscription(Odometry, odom_topic, self._on_odometry, 10)
         self.create_subscription(PoseStamped, goal_topic, self._on_goal_pose, 10)
+        self.create_subscription(Twist, "/cmd_vel_nav", self._on_cmd_vel_nav, 10)
+        self.create_subscription(Twist, cmd_vel_safe_topic, self._on_cmd_vel_safe, 10)
+        self.create_subscription(Odometry, odom_raw_topic, self._on_odom_raw, 10)
+        self.create_timer(1.0 / path_monitor_hz, self._on_path_monitor_timer)
 
         self.get_logger().info(
             "goal_pose_to_follow_path_v2 ready "
@@ -189,6 +268,15 @@ class GoalPoseToFollowPathV2(Node):
         pose_stamped.header = msg.header
         pose_stamped.pose = msg.pose.pose
         self._latest_pose = pose_stamped
+
+    def _on_cmd_vel_nav(self, msg: Twist) -> None:
+        self._latest_cmd_vel_nav = msg
+
+    def _on_cmd_vel_safe(self, msg: Twist) -> None:
+        self._latest_cmd_vel_safe = msg
+
+    def _on_odom_raw(self, msg: Odometry) -> None:
+        self._latest_odom_raw = msg
 
     def _transform_pose(self, pose: PoseStamped) -> Optional[PoseStamped]:
         if pose.header.frame_id == self._path_frame:
@@ -221,6 +309,21 @@ class GoalPoseToFollowPathV2(Node):
         if current_pose is None or goal_pose is None:
             return
 
+        self._send_follow_path_goal(
+            current_pose=current_pose,
+            goal_pose=goal_pose,
+            log_reason="RViz",
+        )
+
+    def _send_follow_path_goal(
+        self,
+        *,
+        current_pose: PoseStamped,
+        goal_pose: PoseStamped,
+        log_reason: str,
+    ) -> None:
+        self._replan_pending = False
+
         path = build_ackermann_path(
             start_pose=current_pose.pose,
             goal_pose=goal_pose.pose,
@@ -233,6 +336,9 @@ class GoalPoseToFollowPathV2(Node):
         for pose in path.poses:
             pose.header.stamp = path.header.stamp
         self._path_pub.publish(path)
+        self._active_goal_pose = goal_pose
+        self._active_path = path
+        self._active_goal_sent_ns = self.get_clock().now().nanoseconds
 
         if not self._follow_path_client.wait_for_server(timeout_sec=1.0):
             self.get_logger().warning("El action server /follow_path no esta disponible")
@@ -244,13 +350,205 @@ class GoalPoseToFollowPathV2(Node):
         goal.goal_checker_id = self._goal_checker_id
 
         self.get_logger().info(
-            "Enviando goal desde RViz a FollowPath "
+            f"Enviando goal {log_reason} a FollowPath "
             f"(poses={len(path.poses)}, x={goal_pose.pose.position.x:.2f}, "
             f"y={goal_pose.pose.position.y:.2f})"
         )
 
         send_goal_future = self._follow_path_client.send_goal_async(goal)
         send_goal_future.add_done_callback(self._on_goal_response)
+
+    def _active_goal_running(self) -> bool:
+        return self._latest_goal_handle is not None and bool(self._latest_goal_handle.accepted)
+
+    def _publish_debug_markers(
+        self,
+        *,
+        current_pose: PoseStamped,
+        closest_pose: PoseStamped,
+        distance_to_path_m: float,
+        heading_error_rad: float,
+    ) -> None:
+        marker_array = MarkerArray()
+
+        closest_marker = Marker()
+        closest_marker.header.frame_id = self._path_frame
+        closest_marker.header.stamp = self.get_clock().now().to_msg()
+        closest_marker.ns = "path_tracking_debug"
+        closest_marker.id = 0
+        closest_marker.type = Marker.SPHERE
+        closest_marker.action = Marker.ADD
+        closest_marker.pose.position.x = float(closest_pose.pose.position.x)
+        closest_marker.pose.position.y = float(closest_pose.pose.position.y)
+        closest_marker.pose.position.z = 0.08
+        closest_marker.pose.orientation.w = 1.0
+        closest_marker.scale.x = 0.18
+        closest_marker.scale.y = 0.18
+        closest_marker.scale.z = 0.18
+        closest_marker.color.a = 0.95
+        closest_marker.color.r = 1.0
+        closest_marker.color.g = 0.9
+        closest_marker.color.b = 0.0
+        marker_array.markers.append(closest_marker)
+
+        line_marker = Marker()
+        line_marker.header = closest_marker.header
+        line_marker.ns = "path_tracking_debug"
+        line_marker.id = 1
+        line_marker.type = Marker.LINE_STRIP
+        line_marker.action = Marker.ADD
+        line_marker.scale.x = 0.05
+        line_marker.color.a = 0.95
+        line_marker.color.r = 1.0
+        line_marker.color.g = 0.4
+        line_marker.color.b = 0.0
+        current_point = Point()
+        current_point.x = float(current_pose.pose.position.x)
+        current_point.y = float(current_pose.pose.position.y)
+        current_point.z = 0.06
+        closest_point = Point()
+        closest_point.x = float(closest_pose.pose.position.x)
+        closest_point.y = float(closest_pose.pose.position.y)
+        closest_point.z = 0.06
+        line_marker.points = [current_point, closest_point]
+        marker_array.markers.append(line_marker)
+
+        text_marker = Marker()
+        text_marker.header = closest_marker.header
+        text_marker.ns = "path_tracking_debug"
+        text_marker.id = 2
+        text_marker.type = Marker.TEXT_VIEW_FACING
+        text_marker.action = Marker.ADD
+        text_marker.pose.position.x = float(current_pose.pose.position.x)
+        text_marker.pose.position.y = float(current_pose.pose.position.y)
+        text_marker.pose.position.z = 0.8
+        text_marker.pose.orientation.w = 1.0
+        text_marker.scale.z = 0.28
+        text_marker.color.a = 1.0
+        text_marker.color.r = 1.0
+        text_marker.color.g = 1.0
+        text_marker.color.b = 1.0
+        text_marker.text = (
+            f"d={distance_to_path_m:.2f} m\n"
+            f"yaw_err={math.degrees(heading_error_rad):.1f} deg\n"
+            f"nav_wz={float(self._latest_cmd_vel_nav.angular.z):.2f} rad/s\n"
+            f"safe_wz={float(self._latest_cmd_vel_safe.angular.z):.2f} rad/s\n"
+            f"odom_wz={float(self._latest_odom_raw.twist.twist.angular.z):.2f} rad/s"
+        )
+        marker_array.markers.append(text_marker)
+
+        self._debug_markers_pub.publish(marker_array)
+
+    def _publish_debug_delete_all(self) -> None:
+        marker = Marker()
+        marker.action = Marker.DELETEALL
+        marker_array = MarkerArray()
+        marker_array.markers.append(marker)
+        self._debug_markers_pub.publish(marker_array)
+
+    def _on_path_monitor_timer(self) -> None:
+        if not self._active_goal_running():
+            self._publish_debug_delete_all()
+            return
+        if self._replan_pending or self._active_path is None or self._active_goal_pose is None:
+            return
+        if self._latest_pose is None:
+            return
+
+        now_ns = self.get_clock().now().nanoseconds
+        if now_ns < self._next_replan_allowed_ns:
+            return
+        if (
+            float(now_ns - self._active_goal_sent_ns) / 1_000_000_000.0
+            < self._path_replan_min_goal_age_s
+        ):
+            return
+
+        current_pose = self._transform_pose(self._latest_pose)
+        if current_pose is None:
+            return
+
+        closest_pose = closest_path_pose(self._active_path, current_pose.pose)
+        if closest_pose is None:
+            return
+
+        goal_distance_m = distance_xy(current_pose.pose, self._active_goal_pose.pose)
+        if goal_distance_m <= self._path_replan_min_goal_distance_m:
+            self._publish_debug_delete_all()
+            return
+
+        distance_to_path_m = distance_xy(
+            closest_pose.pose,
+            current_pose.pose,
+        )
+        robot_yaw_rad = yaw_from_quaternion(current_pose.pose.orientation)
+        path_yaw_rad = yaw_from_quaternion(closest_pose.pose.orientation)
+        heading_error_rad = normalize_angle(path_yaw_rad - robot_yaw_rad)
+        self._publish_debug_markers(
+            current_pose=current_pose,
+            closest_pose=closest_pose,
+            distance_to_path_m=distance_to_path_m,
+            heading_error_rad=heading_error_rad,
+        )
+
+        now_ns = self.get_clock().now().nanoseconds
+        if (
+            now_ns - self._last_debug_log_ns
+            >= int(self._debug_log_period_s * 1_000_000_000.0)
+        ):
+            self._last_debug_log_ns = now_ns
+            self.get_logger().info(
+                "Path debug "
+                f"(d={distance_to_path_m:.2f} m, "
+                f"yaw_err={math.degrees(heading_error_rad):.1f} deg, "
+                f"nav_wz={float(self._latest_cmd_vel_nav.angular.z):.2f} rad/s, "
+                f"safe_wz={float(self._latest_cmd_vel_safe.angular.z):.2f} rad/s, "
+                f"odom_wz={float(self._latest_odom_raw.twist.twist.angular.z):.2f} rad/s)"
+            )
+        if distance_to_path_m <= self._path_replan_distance_m:
+            return
+
+        self._replan_pending = True
+        self._ignore_next_canceled_result = True
+        self._next_replan_allowed_ns = now_ns + int(
+            self._path_replan_cooldown_s * 1_000_000_000.0
+        )
+        self.get_logger().warning(
+            "Robot se alejo del path activo "
+            f"({distance_to_path_m:.2f} m). Replanificando hacia el mismo goal."
+        )
+        cancel_future = self._latest_goal_handle.cancel_goal_async()
+        cancel_future.add_done_callback(self._on_cancel_for_replan)
+
+    def _on_cancel_for_replan(self, future) -> None:
+        try:
+            cancel_response = future.result()
+        except Exception as exc:  # pragma: no cover
+            self._replan_pending = False
+            self.get_logger().warning(f"Error cancelando FollowPath para replanificar: {exc}")
+            return
+
+        if cancel_response is None or not cancel_response.goals_canceling:
+            self._replan_pending = False
+            self.get_logger().warning(
+                "No pude cancelar el FollowPath activo para replanificar"
+            )
+            return
+
+        if self._latest_pose is None or self._active_goal_pose is None:
+            self._replan_pending = False
+            return
+
+        current_pose = self._transform_pose(self._latest_pose)
+        if current_pose is None:
+            self._replan_pending = False
+            return
+
+        self._send_follow_path_goal(
+            current_pose=current_pose,
+            goal_pose=self._active_goal_pose,
+            log_reason="replanificado",
+        )
 
     def _on_goal_response(self, future) -> None:
         goal_handle = future.result()
@@ -268,6 +566,17 @@ class GoalPoseToFollowPathV2(Node):
         except Exception as exc:  # pragma: no cover
             self.get_logger().warning(f"Error esperando resultado de FollowPath: {exc}")
             return
+        if (
+            self._ignore_next_canceled_result
+            and result.status == GoalStatus.STATUS_CANCELED
+        ):
+            self._ignore_next_canceled_result = False
+            self.get_logger().info("FollowPath cancelado para replanificar")
+            return
+        self._latest_goal_handle = None
+        self._active_path = None
+        self._active_goal_pose = None
+        self._publish_debug_delete_all()
         self._stop_hold_pub.publish(Empty())
         self.get_logger().info(f"Resultado FollowPath desde RViz: status={result.status}")
 

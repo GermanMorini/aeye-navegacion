@@ -50,7 +50,7 @@ velocity_smoother:
   ros__parameters:
     use_sim_time: false
     smoothing_frequency: 15.0
-    feedback: "CLOSED_LOOP"
+    feedback: "OPEN_LOOP"
     enable_stamped_cmd_vel: false
     odom_topic: /odometry/local
     robot_base_frame: base_footprint

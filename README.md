@@ -21,6 +21,26 @@ Este checkout no incluye los antiguos nodos de waypoints interactivos, logger GU
 - `ros2 launch navegacion_gps rviz_real.launch.py`
   - RViz + `robot_state_publisher` usando el URDF real
 
+## Navegacion Local V2
+La `v2` agrega una base nueva de navegacion local para el robot Ackermann, separada de la `v1` y sin depender de GPS en `odom -> base_footprint`.
+
+Launches nuevos:
+
+- `ros2 launch navegacion_gps sim_local_v2.launch.py`
+- `ros2 launch navegacion_gps real_local_v2.launch.py`
+
+La `v2` usa:
+
+- odometria Ackermann derivada de `DriveTelemetry`;
+- EKF local en `odom`;
+- Nav2 local-only con `FollowPath`;
+- `velocity_smoother` en `OPEN_LOOP`;
+- overlay de debug en RViz para seguir `d`, `yaw_err`, `nav_wz`, `safe_wz` y `odom_wz`.
+
+Guia tecnica detallada:
+
+- [LOCAL_NAV_V2.md](LOCAL_NAV_V2.md)
+
 ## Flujo de control
 - Nav2 publica `/cmd_vel`.
 - `nav2_collision_monitor` publica `/cmd_vel_safe`.
