@@ -3,8 +3,9 @@ from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.descriptions import ParameterFile
 from launch_ros.parameter_descriptions import ParameterValue
@@ -38,10 +39,28 @@ def generate_launch_description():
     )
     keepout_launch = str(Path(gps_wpf_dir) / "launch" / "keepout_filters_v2.launch.py")
     default_keepout_mask = _resolve_config_file_path(gps_wpf_dir, "keepout_mask.yaml")
+    default_keepout_overrides = _resolve_config_file_path(
+        gps_wpf_dir, "nav2_local_v2_keepout_overrides.yaml"
+    )
+    default_no_keepout_overrides = _resolve_config_file_path(
+        gps_wpf_dir, "nav2_local_v2_no_keepout_overrides.yaml"
+    )
     use_sim_time = LaunchConfiguration("use_sim_time")
+    use_keepout = LaunchConfiguration("use_keepout")
     nav2_params_file = LaunchConfiguration("nav2_params_file")
     collision_monitor_params_file = LaunchConfiguration("collision_monitor_params_file")
     keepout_mask_yaml = LaunchConfiguration("keepout_mask_yaml")
+    selected_nav2_overrides_file = PythonExpression(
+        [
+            "'",
+            default_keepout_overrides,
+            "' if '",
+            use_keepout,
+            "' == 'True' else '",
+            default_no_keepout_overrides,
+            "'",
+        ]
+    )
     configured_nav2_params = ParameterFile(
         RewrittenYaml(
             source_file=nav2_params_file,
@@ -52,6 +71,10 @@ def generate_launch_description():
             },
             convert_types=True,
         ),
+        allow_substs=True,
+    )
+    configured_nav2_overrides = ParameterFile(
+        selected_nav2_overrides_file,
         allow_substs=True,
     )
     remappings = [("/tf", "tf"), ("/tf_static", "tf_static")]
@@ -71,6 +94,7 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("use_sim_time", default_value="False"),
+            DeclareLaunchArgument("use_keepout", default_value="True"),
             DeclareLaunchArgument("nav2_params_file", default_value=default_nav2_params),
             DeclareLaunchArgument(
                 "collision_monitor_params_file",
@@ -84,6 +108,7 @@ def generate_launch_description():
                     "keepout_mask_yaml": keepout_mask_yaml,
                     "keepout_mask_frame": "odom",
                 }.items(),
+                condition=IfCondition(use_keepout),
             ),
             Node(
                 package="nav2_planner",
@@ -92,6 +117,7 @@ def generate_launch_description():
                 output="screen",
                 parameters=[
                     configured_nav2_params,
+                    configured_nav2_overrides,
                     {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
                 ],
                 remappings=remappings,
@@ -103,6 +129,7 @@ def generate_launch_description():
                 output="screen",
                 parameters=[
                     configured_nav2_params,
+                    configured_nav2_overrides,
                     {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
                 ],
                 remappings=remappings,
@@ -114,6 +141,7 @@ def generate_launch_description():
                 output="screen",
                 parameters=[
                     configured_nav2_params,
+                    configured_nav2_overrides,
                     {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
                 ],
                 remappings=remappings,
@@ -125,6 +153,7 @@ def generate_launch_description():
                 output="screen",
                 parameters=[
                     configured_nav2_params,
+                    configured_nav2_overrides,
                     {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
                 ],
                 remappings=remappings,
@@ -136,6 +165,7 @@ def generate_launch_description():
                 output="screen",
                 parameters=[
                     configured_nav2_params,
+                    configured_nav2_overrides,
                     {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
                 ],
                 remappings=remappings,
@@ -147,6 +177,7 @@ def generate_launch_description():
                 output="screen",
                 parameters=[
                     configured_nav2_params,
+                    configured_nav2_overrides,
                     {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
                 ],
                 remappings=remappings,

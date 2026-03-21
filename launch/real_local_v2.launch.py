@@ -70,6 +70,7 @@ def generate_launch_description():
     fcu_url = LaunchConfiguration("fcu_url")
     use_cyclone_dds = LaunchConfiguration("use_cyclone_dds")
     nav_start_delay_s = LaunchConfiguration("nav_start_delay_s")
+    use_keepout = LaunchConfiguration("use_keepout")
     use_rviz = LaunchConfiguration("use_rviz")
     rviz_config = LaunchConfiguration("rviz_config")
     vx_deadband_mps = LaunchConfiguration("vx_deadband_mps")
@@ -104,6 +105,7 @@ def generate_launch_description():
             DeclareLaunchArgument("fcu_url", default_value="/dev/ttyACM0:921600"),
             DeclareLaunchArgument("use_cyclone_dds", default_value="false"),
             DeclareLaunchArgument("nav_start_delay_s", default_value="4.0"),
+            DeclareLaunchArgument("use_keepout", default_value="True"),
             DeclareLaunchArgument("use_rviz", default_value="True"),
             DeclareLaunchArgument("rviz_config", default_value=default_rviz),
             DeclareLaunchArgument("vx_deadband_mps", default_value="0.01"),
@@ -245,6 +247,7 @@ def generate_launch_description():
                         ),
                         launch_arguments={
                             "use_sim_time": use_sim_time,
+                            "use_keepout": use_keepout,
                             "nav2_params_file": nav2_params_file,
                             "collision_monitor_params_file": collision_monitor_params_file,
                             "keepout_mask_yaml": keepout_mask_yaml,

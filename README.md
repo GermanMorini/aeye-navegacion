@@ -37,6 +37,11 @@ La `v2` usa:
 - keepout filter estatico compartido por `sim_local_v2` y `real_local_v2`;
 - visualizacion de `/plan`, `/stop_zone`, `/keepout_filter_mask` y `/costmap_filter_info` en RViz.
 
+Flag de launch util para diagnostico:
+
+- `use_keepout:=True` por defecto en `sim_local_v2`, `real_local_v2` y `nav_local_v2`
+- si se pasa `use_keepout:=False`, no se levantan los servidores keepout y los costmaps cargan una variante de params sin `keepout_filter`
+
 Guia tecnica detallada:
 
 - [LOCAL_NAV_V2.md](LOCAL_NAV_V2.md)

@@ -332,6 +332,11 @@ Y se publica en:
 
 Los costmaps local y global de `nav2_local_v2_params.yaml` usan `keepout_filter`, por eso tanto `sim_local_v2` como `real_local_v2` necesitan los publishers del filtro aunque no exista `map -> odom`.
 
+Para diagnostico existe el flag de launch:
+
+- `use_keepout:=True` por defecto
+- `use_keepout:=False` desactiva el bringup del keepout y hace que `nav_local_v2` cargue overrides de params sin `keepout_filter`
+
 ### Stop zone
 Ademas del keepout de costmap, `collision_monitor` mantiene una `stop_zone` reactiva para frenado inmediato basada en `/scan`.
 
