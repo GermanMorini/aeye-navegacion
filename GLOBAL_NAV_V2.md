@@ -81,6 +81,15 @@ Perfil nuevo propuesto:
 - publica `map -> odom`;
 - habilita goals LL y goals RViz en `map`.
 
+Importante:
+
+- `sim_global_v2` debe reutilizar la version actual de `sim_local_v2`, no el esquema legacy de simulacion;
+- eso implica conservar la cadena de mando fiel introducida en `SIM_LOCAL_V2_FIDELITY.md`;
+- en particular, la capa global debe montarse sobre:
+  - `nav_command_server`
+  - `vehicle_controller_server` con `transport_backend=sim_gazebo`
+  - `/controller/drive_telemetry` como fuente de `ackermann_odometry`
+
 La activacion propuesta para esta capa es mediante un launch separado:
 
 ```bash
@@ -104,6 +113,26 @@ La capa local sigue siendo la fuente de verdad para:
 - seguimiento de path;
 - reaccion a obstaculos;
 - estabilidad de corto plazo aunque GPS degrade.
+
+En simulacion, esta base local debe entenderse segun la version actualizada de `sim_local_v2`:
+
+```text
+/cmd_vel
+-> /cmd_vel_safe
+-> nav_command_server
+-> /cmd_vel_final
+-> vehicle_controller_server (sim_gazebo)
+-> /cmd_vel_gazebo
+-> Gazebo
+-> /controller/drive_telemetry
+-> ackermann_odometry
+-> /odometry/local
+```
+
+La `Global Nav V2` debe apoyarse sobre esa cadena y no reintroducir:
+
+- `cmd_vel_ackermann_bridge_v2` en el launch principal;
+- `sim_drive_telemetry` en el launch principal.
 
 ### Capa global
 La capa global agrega:
