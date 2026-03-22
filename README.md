@@ -45,6 +45,7 @@ Flag de launch util para diagnostico:
 Guia tecnica detallada:
 
 - [LOCAL_NAV_V2.md](LOCAL_NAV_V2.md)
+- [SIM_LOCAL_V2_FIDELITY.md](SIM_LOCAL_V2_FIDELITY.md)
 - [REAL_LOCAL_V2_CHECKLIST.md](REAL_LOCAL_V2_CHECKLIST.md)
 
 ## Flujo de control
@@ -52,9 +53,9 @@ Guia tecnica detallada:
 - `nav2_collision_monitor` publica `/cmd_vel_safe`.
 - `nav_command_server` recibe `/cmd_vel_safe` y comandos manuales en `/cmd_vel_teleop`.
 - `nav_command_server` publica `/cmd_vel_final` (`interfaces/msg/CmdVelFinal`).
-- En simulación legacy, `gazebo_utils` adapta `/cmd_vel_final` a `/cmd_vel_gazebo` por passthrough.
-- En simulación realista, `gazebo_utils` reutiliza la lógica de `controller_server.control_logic.command_from_cmd_vel` para aplicar clamp, deadband, velocidad mínima efectiva y mapeo de steering antes de publicar `/cmd_vel_gazebo`.
-- En hardware real, `controller_server` consume `/cmd_vel_final`.
+- `controller_server` consume `/cmd_vel_final`.
+- En `real_local_v2`, `controller_server` usa el backend UART real y publica `/controller/drive_telemetry`.
+- En `sim_local_v2`, `controller_server` usa `transport_backend:=sim_gazebo`, publica `/cmd_vel_gazebo` hacia Gazebo y sintetiza `/controller/drive_telemetry` a partir de `/odom_raw` y `/joint_states`.
 
 ## Nodos del paquete
 ### `zones_manager`
@@ -98,6 +99,12 @@ Guia tecnica detallada:
 - Normaliza `frame_id` y tópicos de sensores bridged desde Gazebo Sim.
 - Puede puentear `/cmd_vel_final` hacia `/cmd_vel_gazebo` en simulación.
 - En `realism_mode:=true` desactiva el bridge de ultrasounds y usa una emulación de actuador alineada con el robot real.
+
+### `sim_local_v2`
+- Usa la misma cadena de mando ROS que `real_local_v2`:
+  - `/cmd_vel_safe -> nav_command_server -> /cmd_vel_final -> vehicle_controller_server`
+- Mantiene `sim_v2_base.launch.py` y `sim_sensor_normalizer_v2` para sensores/bridges.
+- La telemetría de conducción para `ackermann_odometry` sale de `/controller/drive_telemetry`, igual que en el robot real.
 
 ## Observabilidad y debugging
 - Telemetría de navegación:
