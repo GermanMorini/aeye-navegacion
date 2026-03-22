@@ -43,6 +43,7 @@ setup(
             'nav_observability = navegacion_gps.nav_observability:main',
             'polygon_stamped_republisher = navegacion_gps.polygon_stamped_republisher:main',
             'sim_drive_telemetry = navegacion_gps.sim_drive_telemetry:main',
+            'sim_global_drift_check = navegacion_gps.sim_global_drift_check:main',
             'sim_sensor_normalizer_v2 = navegacion_gps.sim_sensor_normalizer_v2:main',
             'sim_localization_benchmark = navegacion_gps.sim_localization_benchmark:main',
         ],

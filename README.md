@@ -45,6 +45,7 @@ Flag de launch util para diagnostico:
 Guia tecnica detallada:
 
 - [LOCAL_NAV_V2.md](LOCAL_NAV_V2.md)
+- [GLOBAL_NAV_V2.md](GLOBAL_NAV_V2.md)
 - [SIM_LOCAL_V2_FIDELITY.md](SIM_LOCAL_V2_FIDELITY.md)
 - [REAL_LOCAL_V2_CHECKLIST.md](REAL_LOCAL_V2_CHECKLIST.md)
 
@@ -105,6 +106,14 @@ Guia tecnica detallada:
   - `/cmd_vel_safe -> nav_command_server -> /cmd_vel_final -> vehicle_controller_server`
 - Mantiene `sim_v2_base.launch.py` y `sim_sensor_normalizer_v2` para sensores/bridges.
 - La telemetría de conducción para `ackermann_odometry` sale de `/controller/drive_telemetry`, igual que en el robot real.
+
+### `sim_global_v2`
+- Reutiliza la misma base `v2` de simulación que `sim_local_v2`, pero agrega `navsat_transform`, EKF global y `map -> odom`.
+- Mantiene la cadena de mando local:
+  - `/cmd_vel_safe -> nav_command_server -> /cmd_vel_final -> vehicle_controller_server`
+- Expone goals RViz y conversiones LL sobre `map`, con `gps_profile:=ideal|m8n|f9p_rtk`.
+- En este perfil, `/gps/fix` se sintetiza desde `/odom_raw` + datum fijo; `/gps/fix_raw` queda como señal cruda del simulador.
+- El GPS sintetico global se publica con `frame_id=base_footprint`; no se usa `gps_link` para evitar runaway de `map -> odom` por el offset fisico del sensor en el URDF.
 
 ## Observabilidad y debugging
 - Telemetría de navegación:
@@ -191,6 +200,33 @@ Simulación:
 ./tools/exec.sh "source /opt/ros/humble/setup.bash && source /ros2_ws/install/setup.bash && ros2 launch navegacion_gps simulacion.launch.py"
 ```
 
+Simulación global-v2:
+```bash
+./tools/exec.sh "source /opt/ros/humble/setup.bash && source /ros2_ws/install/setup.bash && ros2 launch navegacion_gps sim_global_v2.launch.py"
+./tools/launch_sim_global_v2.sh
+```
+
+Chequeo de deriva global-v2 sobre una sesion ya levantada:
+```bash
+./tools/check_sim_global_drift.sh
+./tools/check_sim_global_drift.sh --duration-s 30 --sample-interval-s 1.0 --output /tmp/sim_global_drift.json
+```
+
+El chequeo mide deriva en reposo usando:
+
+- TF `map -> odom`
+- TF `map -> base_footprint`
+- TF `odom -> base_footprint`
+- `/odometry/gps`
+- conversion `fromLL`
+
+Cadena global `v2` efectiva:
+
+- el EKF global solo reutiliza `twist` de `/odometry/local`;
+- `navsat_transform.use_odometry_yaw=false`;
+- `/gps/fix` sintetico se publica con `frame_id=base_footprint`;
+- `localization_global_v2.launch.py` retrasa el arranque global para esperar TF local valido.
+
 Simulación legacy:
 ```bash
 ./tools/exec.sh "source /opt/ros/humble/setup.bash && source /ros2_ws/install/setup.bash && ros2 launch navegacion_gps simulacion.launch.py realism_mode:=false"
@@ -212,6 +248,25 @@ Parámetros principales del GPS realista en simulación:
 - `gps_realism_publish_rate_hz`
 - `gps_realism_horizontal_noise_stddev_m`
 - `gps_realism_vertical_noise_stddev_m`
+
+Perfiles de GPS de `sim_global_v2`:
+- `gps_profile:=ideal`
+  - GPS sintético base desde `/odom_raw + datum`
+  - sin ruido artificial agregado
+  - covarianza preset chica: `sigma_xy=0.02 m`, `sigma_z=0.05 m`
+- `gps_profile:=m8n`
+  - misma base sintética que `ideal`
+  - GNSS medio sin RTK
+  - ruido/covarianza: `sigma_xy=1.8 m`, `sigma_z=3.5 m`
+- `gps_profile:=f9p_rtk`
+  - misma base sintética que `ideal`
+  - GNSS tipo RTK
+  - ruido/covarianza: `sigma_xy=0.15 m`, `sigma_z=0.25 m`
+
+Qué esperar:
+- `ideal`: baseline limpio para validar TF, `fromLL` y wiring global sin ruido del sensor GPS del URDF.
+- `m8n`: deriva y jitter visibles propios de un GNSS medio.
+- `f9p_rtk`: comportamiento intermedio entre `ideal` y `m8n`, cercano a un RTK.
 
 Benchmark de localización en simulación:
 ```bash
@@ -257,6 +312,37 @@ Fixes de integración consolidados en esta branch:
 - `collision_monitor` y la cadena de comandos quedan alineados con la limitación real hacia `/cmd_vel_final` y `/cmd_vel_gazebo`.
 - `gazebo_utils` completa covarianzas razonables cuando Gazebo publica IMU o GPS con covarianzas nulas.
 - `sim_localization_benchmark` deja una baseline reproducible para comparar perfiles sin contaminar el runtime.
+- `sim_global_v2` separa la capa global del perfil local-v2 y reutiliza un bringup base compartido sin reintroducir helpers legacy.
+- `sim_global_v2` usa GPS sintético basado en `/odom_raw + datum`, de modo que `ideal`, `m8n` y `f9p_rtk` comparten la misma verdad base y solo difieren por su preset.
+- `sim_global_v2` sufrio un runaway severo de `map -> odom` cuando el GPS sintetico se publicaba como `gps_link`; la correccion fue publicar esa medicion en `base_footprint` y eliminar el preset defectuoso de la interfaz publica.
+
+## Incidente resuelto: deriva global `v2`
+Problema observado:
+
+- el robot estaba quieto en Gazebo;
+- `/odometry/local` y `/odometry/gps` permanecian estables;
+- `map -> odom` se desplazaba decenas de metros en pocos segundos.
+
+Causa raiz:
+
+- el GPS sintetico de `sim_global_v2` representa la pose del robot como plataforma;
+- durante una iteracion intermedia se publicaba con `frame_id=gps_link`;
+- en el URDF, `gps_link` esta desplazado respecto de `base_footprint`;
+- esa inconsistencia de frame introducia una correccion espuria continua en `navsat_transform` y en el EKF global.
+
+Solucion:
+
+- `sim_global_v2` ya no expone presets alternativos de localizacion global;
+- el GPS sintetico se publica con `frame_id=base_footprint`;
+- el EKF global reutiliza solo `twist` local;
+- `navsat_transform.use_odometry_yaw=false`;
+- se mantiene un delay de arranque del bloque global para evitar inicializaciones con TF local incompleto.
+
+Validacion:
+
+- antes de la correccion: `map->odom ≈ 104.899 m / 10 s` en reposo;
+- despues de la correccion: `map->odom ≈ 1.5e-13 m / 30 s` en reposo;
+- herramienta de verificacion: `./tools/check_sim_global_drift.sh`
 
 Perfiles de localización evaluados:
 

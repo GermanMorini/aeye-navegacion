@@ -169,7 +169,10 @@ def generate_launch_description():
                 PythonLaunchDescriptionSource(
                     os.path.join(ros_gz_sim_dir, "launch", "gz_sim.launch.py")
                 ),
-                launch_arguments={"gz_args": [TextSubstitution(text="-r "), world]}.items(),
+                launch_arguments={
+                    "gz_args": [TextSubstitution(text="-r "), world],
+                    "on_exit_shutdown": "true",
+                }.items(),
             ),
             OpaqueFunction(
                 function=_build_gz_bridge, kwargs={"bridge_config": bridge_config}
