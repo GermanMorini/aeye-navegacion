@@ -4,6 +4,11 @@
 La `v2` es una base de navegacion local para el robot Ackermann que corre completamente en `odom`.
 La capa local actual ya no usa `goal_pose_to_follow_path_v2` ni `velocity_smoother`: hoy la navegacion se apoya en un stack Nav2 nativo sobre `odom`, con localizacion Ackermann + EKF local + planner + smoother + BT + costmaps rolling + collision monitor.
 
+Documentos complementarios:
+
+- [SIM_LOCAL_V2_FIDELITY.md](SIM_LOCAL_V2_FIDELITY.md): explica por que `sim_local_v2` ahora sigue la misma cadena de mando que `real_local_v2`, que se cambio respecto del esquema legacy y como validar la simulacion.
+  Tambien documenta la convencion de signos de steering y donde se adapta entre ROS, controlador, Gazebo y telemetria.
+
 Objetivos de esta fase:
 
 - levantar una simulacion local reproducible;
@@ -29,12 +34,21 @@ ros2 launch navegacion_gps sim_local_v2.launch.py
 Composicion efectiva:
 
 1. `sim_v2_base.launch.py`
-2. `localization_v2.launch.py`
-3. `keepout_filter_mask_server`
-4. `keepout_costmap_filter_info_server`
-5. `lifecycle_manager_keepout_filters`
-6. `nav_local_v2.launch.py`
-7. `rviz_local_v2.rviz`
+2. `sim_sensor_normalizer_v2`
+3. `vehicle_controller_server` (`transport_backend=sim_gazebo`)
+4. `nav_command_server`
+5. `localization_v2.launch.py`
+6. `keepout_filter_mask_server`
+7. `keepout_costmap_filter_info_server`
+8. `lifecycle_manager_keepout_filters`
+9. `nav_local_v2.launch.py`
+10. `rviz_local_v2.rviz`
+
+Notas importantes:
+
+- `sim_local_v2` ya no usa `sim_drive_telemetry` en el launch principal.
+- `sim_local_v2` ya no usa `cmd_vel_ackermann_bridge_v2` en el launch principal.
+- La fuente de `/controller/drive_telemetry` en simulacion ahora es `vehicle_controller_server` con `transport_backend=sim_gazebo`.
 
 ### Flujo en robot real
 Launch principal:
@@ -48,17 +62,18 @@ Composicion efectiva:
 1. `mavros.launch.py`
 2. `rs16.launch.py`
 3. `vehicle_controller_server`
-4. `pointcloud_to_laserscan`
-5. `localization_v2.launch.py`
-6. `nav_local_v2.launch.py`
-7. `rviz_local_v2.rviz`
+4. `nav_command_server`
+5. `pointcloud_to_laserscan`
+6. `localization_v2.launch.py`
+7. `nav_local_v2.launch.py`
+8. `rviz_local_v2.rviz`
 
 ## Nodos principales de la v2
 | Nodo | Rol |
 | --- | --- |
-| `sim_drive_telemetry` | Construye `DriveTelemetry` en simulacion a partir de `/odom_raw` y `/joint_states`. |
 | `sim_sensor_normalizer_v2` | Normaliza frames y covarianzas de IMU, GPS, nube y odometria bridged desde Gazebo. |
-| `cmd_vel_ackermann_bridge_v2` | Convierte `/cmd_vel_safe` en `/cmd_vel_gazebo` reutilizando la logica de control real. |
+| `vehicle_controller_server` | En real habla UART; en `sim_local_v2` usa `transport_backend=sim_gazebo`, publica `/cmd_vel_gazebo` y expone `/controller/drive_telemetry`. |
+| `nav_command_server` | Arbitra `/cmd_vel_safe` y teleop, y publica `/cmd_vel_final` tanto en real como en `sim_local_v2`. |
 | `ackermann_odometry` | Integra odometria planar Ackermann y publica `/wheel/odometry` y `/vehicle/twist`. |
 | `ekf_filter_node_local_v2` | Fusiona wheel odom + IMU y publica `/odometry/local` y TF `odom -> base_footprint`. |
 | `planner_server` | Calcula el plan global-local en `odom` usando el costmap rolling. |
@@ -210,7 +225,7 @@ Defaults actuales:
 - `twist_covariance_vy = 0.01`
 - `twist_covariance_yaw_rate = 0.1`
 - `wheelbase_m = 0.94`
-- `invert_measured_steer_sign = False` en sim y `True` en `real_local_v2`
+- `invert_measured_steer_sign = True` tanto en `sim_local_v2` como en `real_local_v2`
 
 ## Navegacion local y pipeline de comandos
 La navegacion local actual usa Nav2 nativo sobre `odom`. El goal operativo ya no pasa por `goal_pose_to_follow_path_v2`.
@@ -225,7 +240,9 @@ RViz Nav2 goal / bt_navigator
 -> /cmd_vel
 -> collision_monitor
 -> /cmd_vel_safe
--> cmd_vel_ackermann_bridge_v2
+-> nav_command_server
+-> /cmd_vel_final
+-> vehicle_controller_server (sim_gazebo)
 -> /cmd_vel_gazebo
 -> /cmd_vel_steer (Gazebo)
 ```
@@ -250,19 +267,21 @@ RViz Nav2 goal / bt_navigator
 - `/plan`: plan visible de Nav2
 - `/cmd_vel`: salida del `controller_server`
 - `/cmd_vel_safe`: salida del `collision_monitor`
-- `/cmd_vel_final`: comando arbitrado que consume el controlador real
-- `/cmd_vel_gazebo`: salida del bridge Ackermann
+- `/cmd_vel_final`: comando arbitrado que consumen el controlador real y el controlador simulado
+- `/cmd_vel_gazebo`: salida del `vehicle_controller_server` en `sim_local_v2`
 - `/odometry/local`: odometria filtrada de referencia para control y costmaps
 
-### `cmd_vel_ackermann_bridge_v2`
-Este nodo:
+### `vehicle_controller_server` en `sim_local_v2`
+En `sim_local_v2`, `vehicle_controller_server` comparte el mismo `controller_server_node` del robot real, pero cambia el backend interno a `sim_gazebo`.
 
-- consume `/cmd_vel_safe`;
-- reutiliza `controller_server.control_logic.command_from_cmd_vel`;
-- aplica deadband, velocidad minima efectiva y clamps de velocidad/steering;
-- convierte el comando al contrato esperado por el plugin Ackermann de Gazebo.
+En esta fase:
 
-En la simulacion, `bridge_config_v2.yaml` bridgea `/cmd_vel_gazebo` hacia Gazebo como `/cmd_vel_steer`.
+- consume `/cmd_vel_final`;
+- publica `/cmd_vel_gazebo` hacia Gazebo;
+- publica `/controller/status`, `/controller/telemetry` y `/controller/drive_telemetry`;
+- sintetiza `DriveTelemetry` desde `/odom_raw` y `/joint_states` para que `ackermann_odometry` consuma el mismo contrato ROS que en real.
+
+`bridge_config_v2.yaml` sigue bridgeando `/cmd_vel_gazebo` hacia Gazebo como `/cmd_vel_steer`.
 
 ### `collision_monitor`
 Usa:
@@ -280,15 +299,15 @@ Poligonos actuales:
 
 `collision_monitor` publica la zona de stop en `/stop_zone_raw`. Luego `polygon_stamped_republisher` la republia en `/stop_zone` para visualizacion y consumers que esperan `PolygonStamped` estable.
 
-### `nav_command_server` en `real_local_v2`
-En `real_local_v2`, `nav_command_server` vuelve a formar parte del pipeline de mando.
+### `nav_command_server` en `real_local_v2` y `sim_local_v2`
+En `real_local_v2` y `sim_local_v2`, `nav_command_server` forma parte del pipeline de mando.
 
 En esta fase se usa como puente/arbitraje de comandos:
 
 - consume `/cmd_vel_safe`
 - publica `/cmd_vel_final`
 - mantiene el contrato esperado por `vehicle_controller_server`
-- en `real_local_v2` se lanza con `forward_cmd_vel_safe_without_goal=true`, para que el comando local de Nav2 llegue al actuador aunque el goal no haya sido iniciado por los servicios legacy del propio `nav_command_server`
+- en ambos perfiles se lanza con `forward_cmd_vel_safe_without_goal=true`, para que el comando local de Nav2 llegue al controlador aunque el goal no haya sido iniciado por los servicios legacy del propio `nav_command_server`
 
 La navegacion local `v2` no depende de goals LL para mover el robot, pero el nodo conserva sus servicios legacy para compatibilidad operativa.
 
@@ -306,7 +325,7 @@ Tambien se valido la convencion de giro en el robot real con ruedas levantadas:
 - un comando con `linear.x > 0` y `angular.z > 0` hace que el robot intente girar a la izquierda visto desde atras;
 - `vehicle_controller_server` debe mantener `invert_steer_from_cmd_vel=True` para respetar el signo fisico correcto del actuador;
 - la telemetria `steer_deg_measured` llega con convencion opuesta a la que necesita la odometria Ackermann;
-- por eso `real_local_v2` activa `invert_measured_steer_sign=True` en `ackermann_odometry`;
+- por eso `real_local_v2` y `sim_local_v2` activan `invert_measured_steer_sign=True` en `ackermann_odometry`;
 - con esa combinacion quedan coherentes entre si:
   - giro fisico real del robot,
   - `steer_deg_measured`,
@@ -358,8 +377,8 @@ Archivos principales:
 | Parametro | Default actual | Donde se usa |
 | --- | --- | --- |
 | `wheelbase_m` | `0.94` | `ackermann_odometry`, modelo Ackermann |
-| `vx_deadband_mps` | `0.01` | `cmd_vel_ackermann_bridge_v2` |
-| `vx_min_effective_mps` | `0.5` | `cmd_vel_ackermann_bridge_v2` |
+| `vx_deadband_mps` | `0.01` | `vehicle_controller_server` |
+| `vx_min_effective_mps` | `0.5` | `vehicle_controller_server` |
 | `xy_goal_tolerance` | `1.2` | `PositionGoalChecker` |
 | `desired_linear_vel` | `1.2` | `RegulatedPurePursuitController` |
 | `lookahead_dist` | `1.6` | `RegulatedPurePursuitController` |
@@ -369,6 +388,8 @@ Archivos principales:
 - `use_sim_time = True`
 - `wheelbase_m = 0.94`
 - `vx_min_effective_mps = 0.5`
+- `invert_steer_from_cmd_vel = True`
+- `invert_measured_steer_sign = True`
 - `nav_start_delay_s = 4.0`
 - mundo por defecto: `vacio.world`
 
@@ -431,9 +452,9 @@ Si se esta validando contra el robot real, reiniciar limpio `real_local_v2` ante
 ### Fallas tipicas
 **No se mueve**
 
-- revisar `/cmd_vel`, `/cmd_vel_safe` y `/cmd_vel_gazebo`;
+- revisar `/cmd_vel`, `/cmd_vel_safe`, `/cmd_vel_final` y `/cmd_vel_gazebo`;
 - revisar `collision_monitor`;
-- revisar que `cmd_vel_ackermann_bridge_v2` este consumiendo `/cmd_vel_safe`;
+- revisar `nav_command_server` y `vehicle_controller_server`;
 - revisar `vx_min_effective_mps`.
 
 **No recibe keepout**
@@ -496,4 +517,4 @@ Contratos ROS relevantes de esta fase:
 - La capa sigue siendo local-only; no hay `map -> odom`.
 - La calidad del seguimiento sigue dependiendo del tuning de planner, smoother, controller y planta.
 - La planta simulada y el robot real todavia requieren ajuste fino de footprint, covarianzas y limites.
-- El perfil `real_local_v2` y el perfil de simulacion no son identicos en todos los auxiliares, pero comparten el mismo contrato local de odometria y navegacion en `odom`.
+- `sim_local_v2` y `real_local_v2` comparten hoy la misma cadena ROS de mando local, pero no modelan aun ruido de sensores, slip ni latencias fisicas del actuador real.
