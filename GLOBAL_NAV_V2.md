@@ -89,6 +89,7 @@ Importante:
   - `nav_command_server`
   - `vehicle_controller_server` con `transport_backend=sim_gazebo`
   - `/controller/drive_telemetry` como fuente de `ackermann_odometry`
+- la estrategia elegida para construir `sim_global_v2` es crear un bringup base comun con `sim_local_v2`, y no incluir `sim_local_v2.launch.py` directamente.
 
 La activacion propuesta para esta capa es mediante un launch separado:
 
@@ -97,6 +98,56 @@ ros2 launch navegacion_gps sim_global_v2.launch.py
 ```
 
 Ese launch se define aqui como objetivo de arquitectura. La documentacion no implica que ya exista implementado.
+
+### Estrategia de bringup elegida para simulacion
+Para evitar acoplar la capa global al launch local actual, se elige esta estrategia:
+
+1. crear un launch base comun para la `v2` de simulacion;
+2. hacer que `sim_local_v2.launch.py` use ese launch base en modo local-only;
+3. hacer que `sim_global_v2.launch.py` use ese launch base en modo global.
+
+La opcion descartada es:
+
+- incluir `sim_local_v2.launch.py` directamente desde `sim_global_v2.launch.py`.
+
+Motivo principal:
+
+- `sim_local_v2` ya no es un launch trivial;
+- hoy fija parametros locales como `map_frame=odom` y `fromll_frame=odom`;
+- si `sim_global_v2` dependiera directamente de ese launch, la separacion entre local y global quedaria difusa;
+- un bringup base comun deja mas claro que partes son compartidas y que partes cambian entre perfiles.
+
+### Reparto esperado de responsabilidades
+#### Launch base comun de simulacion
+Debe contener lo compartido por ambos perfiles:
+
+- `sim_v2_base.launch.py`
+- `sim_sensor_normalizer_v2`
+- `vehicle_controller_server` en `sim_gazebo`
+- `nav_command_server` parametrizable
+- `localization_v2.launch.py`
+- componentes comunes de la navegacion local
+
+#### `sim_local_v2.launch.py`
+Debe representar el perfil local-only:
+
+- `map_frame=odom`
+- `fromll_frame=odom`
+- sin `navsat_transform`
+- sin EKF global
+- Nav2 operando localmente en `odom`
+
+#### `sim_global_v2.launch.py`
+Debe representar el perfil con capa global:
+
+- `map_frame=map`
+- `fromll_frame=map`
+- con `navsat_transform`
+- con EKF global
+- Nav2 en modo global:
+  - `global_frame=map`
+  - `local_frame=odom`
+  - `odom_topic=/odometry/local`
 
 ## Arquitectura general
 ### Capa local
@@ -231,6 +282,56 @@ La idea es que:
 - el planner piense globalmente en `map`;
 - el controlador siga conduciendo localmente en `odom`.
 
+## `nav_command_server` en local y global
+Para la `Global Nav V2` se elige mantener un unico `nav_command_server`.
+
+No se propone:
+
+- crear un nodo nuevo para global;
+- sacar `nav_command_server` del pipeline local;
+- duplicar la logica de arbitraje entre perfiles.
+
+La estrategia elegida es usar el mismo nodo con dos presets de configuracion:
+
+- preset local
+- preset global
+
+### Preset local
+Perfil esperado para `sim_local_v2`:
+
+- `map_frame=odom`
+- `fromll_frame=odom`
+- `gps_topic=/gps/fix`
+- `forward_cmd_vel_safe_without_goal=True`
+
+Interpretacion:
+
+- el nodo sigue actuando como puente de mando y arbitraje;
+- los services LL permanecen por compatibilidad;
+- la operacion principal del perfil no depende de una capa global.
+
+### Preset global
+Perfil esperado para `sim_global_v2`:
+
+- `map_frame=map`
+- `fromll_frame=map`
+- `gps_topic=/gps/fix`
+- `forward_cmd_vel_safe_without_goal=True`
+
+Interpretacion:
+
+- el nodo mantiene la misma cadena de mando;
+- los services LL pasan a estar alineados con la navegacion global real;
+- la conversion LL debe caer en `map`, no en `odom`.
+
+### Criterio de diseño elegido
+Se elige esta estrategia porque:
+
+- conserva la paridad entre simulacion local y simulacion global;
+- mantiene la cadena ROS ya consolidada tras `SIM_LOCAL_V2_FIDELITY.md`;
+- evita abrir una nueva variante de arbitraje;
+- deja la diferencia local/global concentrada en la configuracion y en los frames, no en un nodo distinto.
+
 ## Nav2 en modo global
 Con la capa global activa, la configuracion objetivo de Nav2 pasa a ser:
 
@@ -242,6 +343,37 @@ Esto permite:
 
 - planificacion global consistente con GPS;
 - seguimiento local estable y desacoplado de la deriva o del ruido del GPS.
+
+### Estrategia elegida para params de Nav2
+Para `sim_global_v2` se elige usar un archivo de params propio de Nav2.
+
+No se propone:
+
+- parchear `nav2_local_v2_params.yaml` con overrides ad hoc;
+- mezclar el perfil local y el perfil global dentro del mismo archivo principal;
+- introducir todavia una jerarquia mas compleja de base comun + overlays.
+
+La opcion elegida es mantener dos perfiles explicitos:
+
+- `nav2_local_v2_params.yaml`
+- `nav2_global_v2_params.yaml`
+
+### Criterio de diseño
+La razon principal es de mantenibilidad:
+
+- `sim_local_v2` y `sim_global_v2` ya fueron definidos como perfiles separados;
+- conviene que Nav2 refleje esa separacion de forma directa;
+- el perfil local debe seguir siendo facil de leer y tunear sin contaminarse con decisiones globales;
+- el perfil global debe poder evolucionar sin introducir regresiones en el local.
+
+### Intencion del perfil global
+`nav2_global_v2_params.yaml` debera expresar de forma explicita que:
+
+- `bt_navigator` opera con `global_frame=map`;
+- `behavior_server` usa `global_frame=map` y `local_frame=odom`;
+- el planner global trabaja en `map`;
+- el controlador local sigue usando `odom`;
+- `odom_topic` sigue siendo `/odometry/local`.
 
 ## Localizacion global
 ### `navsat_transform`
@@ -373,18 +505,253 @@ No se define en esta fase:
 
 Si en una futura implementacion la navegacion global necesita un costmap global sin `keepout_filter`, eso debe quedar separado del comportamiento actual de `sim_local_v2` para no mezclar ambos perfiles.
 
+### Decision actual para `sim_global_v2`
+Para la primera fase de `sim_global_v2` se elige no incluir `keepout_filter` global.
+
+Objetivo de esta decision:
+
+- arrancar con la arquitectura global minima;
+- probar `map -> odom`;
+- probar goals LL y goals RViz en `map`;
+- validar planner global + controlador local antes de sumar restricciones geograficas mas complejas.
+
+Esto no significa descartar zonas no-go a futuro.
+
+La intencion explicitamente aceptada es:
+
+- en una fase posterior, agregar zonas no-go globales georreferenciadas;
+- integrarlas al planner global en `map`;
+- resolver entonces como conviven con la proteccion reactiva local.
+
 ## Pendientes de definicion
 ### Todavia no cerrados para `sim_global_v2`
-La arquitectura base de simulacion ya esta bastante definida, pero siguen abiertos algunos puntos de implementacion:
+La arquitectura de simulacion queda cerrada a nivel de diseño.
 
-- como se llamara exactamente el launch nuevo y que argumentos expondra;
-- si `sim_global_v2` reutilizara por include la configuracion de `sim_local_v2` o si tendra un bringup base propio;
-- que archivo de params Nav2 global se usara finalmente;
-- si el costmap global llevara o no `keepout_filter` en esta primera fase;
-- como se modelara el GPS simulado para probar drift, ruido y degradacion de forma representativa;
-- que RViz se publicara como default para goals en `map`.
+Nombres recomendados para la futura implementacion:
 
-Nada de eso cambia la arquitectura principal ya cerrada, pero si afecta los detalles del bringup.
+- `launch/sim_global_v2.launch.py`
+- `launch/sim_nav_v2_base.launch.py`
+- `config/nav2_global_v2_params.yaml`
+- `config/rviz_global_v2.rviz`
+
+Con esto, ya no quedan pendientes arquitectonicos relevantes para simulacion dentro de este documento.
+
+## Estrategia de GPS simulado
+Para `sim_global_v2` se elige trabajar con perfiles de GPS diferenciados.
+
+La idea es validar la arquitectura global en mas de un escenario y no depender de una unica simulacion "perfecta".
+
+### Perfiles elegidos
+- `ideal`
+- `m8n`
+- `f9p_rtk`
+
+### Perfil `ideal`
+Objetivo:
+
+- validar arquitectura, TF y conversiones sin que el ruido del GPS ensucie el diagnostico.
+
+Interpretacion:
+
+- GPS casi ideal;
+- frecuencia estable;
+- ruido despreciable o muy bajo;
+- sin degradacion relevante.
+
+Uso esperado:
+
+- primer smoke test de `sim_global_v2`;
+- validacion inicial de `map -> odom`;
+- validacion inicial de goals LL y goals RViz en `map`.
+
+### Perfil `m8n`
+Objetivo:
+
+- representar un GPS comun de calidad media, mas cercano a una operacion sin RTK.
+
+Interpretacion:
+
+- ruido horizontal apreciable;
+- precision inferior a RTK;
+- posible deriva lenta;
+- comportamiento suficiente para poner a prueba la robustez de la capa global.
+
+Uso esperado:
+
+- pruebas de robustez intermedia;
+- validacion de planner global con posicion menos estable;
+- observacion de como se comporta `map -> odom` con una fuente GNSS mas realista y menos precisa.
+
+### Perfil `f9p_rtk`
+Objetivo:
+
+- aproximar el comportamiento esperado del hardware real objetivo.
+
+Interpretacion:
+
+- GPS de alta calidad;
+- ruido bastante menor que `m8n`;
+- comportamiento cercano a un receptor RTK tipo F9P;
+- sigue siendo simulacion, pero alineada con el sensor que se piensa usar en robot real.
+
+Uso esperado:
+
+- pruebas finales de simulacion antes de pasar a `real_global_v2`;
+- validacion de la arquitectura global en un escenario parecido al hardware objetivo;
+- comparacion entre operacion "ideal", GNSS comun y GNSS RTK.
+
+### Criterio de validacion elegido
+La progresion recomendada de pruebas para `sim_global_v2` queda asi:
+
+1. `ideal`
+2. `m8n`
+3. `f9p_rtk`
+
+Eso permite:
+
+- primero validar arquitectura;
+- despues validar robustez;
+- y finalmente aproximarse al comportamiento esperado del hardware real.
+
+## RViz para `sim_global_v2`
+Para `sim_global_v2` se elige un RViz propio y separado del perfil local.
+
+La idea es no reutilizar directamente el RViz de `sim_local_v2`, porque la operacion global cambia el frame mental de trabajo:
+
+- en local, el foco esta en `odom`;
+- en global, el foco pasa a `map`.
+
+### Decision elegida
+La configuracion objetivo es un RViz dedicado, por ejemplo:
+
+- `rviz_global_v2.rviz`
+
+### Criterio de diseño
+Se elige esta estrategia porque:
+
+- `sim_local_v2` y `sim_global_v2` ya estan definidos como perfiles distintos;
+- conviene que la visualizacion tambien refleje esa separacion;
+- el debug de `map -> odom` necesita elementos que no son centrales en el perfil local;
+- se evita mezclar supuestos del RViz local o del RViz legacy.
+
+### Intencion del RViz global
+El RViz global debera estar pensado para:
+
+- `Fixed Frame = map`
+- visualizar `map -> odom -> base_footprint`
+- enviar `2D Goal Pose` en `map`
+- mostrar `/plan`
+- mostrar `/odometry/local`
+- mostrar `/odometry/gps`
+- mostrar costmaps y elementos utiles para diagnostico global
+
+La forma exacta del archivo RViz puede definirse mas adelante, pero la decision de tener uno propio ya queda cerrada.
+
+## Interfaz publica del launch `sim_global_v2`
+Para `sim_global_v2` se recomienda una interfaz publica chica y orientada a operacion.
+
+La idea es que el launch exponga solo los parametros utiles para uso y testing, y no toda la parametrizacion interna del bringup.
+
+### Argumentos publicos recomendados
+- `use_sim_time`
+- `use_rviz`
+- `rviz_config`
+- `gps_profile`
+- `world`
+- `nav_start_delay_s`
+
+### Argumentos que no conviene exponer como API principal
+Quedan como detalle interno del perfil:
+
+- `map_frame`
+- `fromll_frame`
+- `nav2_params_file`
+- `localization_params_file`
+- paths internos de configuracion
+- detalles del EKF global
+- detalles internos del bringup base
+
+### Criterio de diseño
+Se elige esta interfaz porque:
+
+- mantiene el launch simple de usar;
+- evita que el perfil global se transforme en una caja de parametros dificil de operar;
+- conserva la idea de perfil cerrado y reproducible;
+- deja accesibles solo las variables utiles para simulacion y validacion.
+
+### Ejemplo conceptual de uso
+```bash
+ros2 launch navegacion_gps sim_global_v2.launch.py gps_profile:=f9p_rtk use_rviz:=true
+```
+
+La idea no es exponer al usuario final toda la parametrizacion interna de frames, EKFs y wiring, sino entregarle un perfil global claro y controlado.
+
+## Pruebas automaticas minimas para `sim_global_v2`
+Para la primera fase se recomiendan pruebas automaticas minimas, estructurales y baratas de ejecutar.
+
+La idea no es arrancar con tests end-to-end completos de navegacion, sino validar primero que el bringup global queda bien cableado y no rompe las decisiones de arquitectura ya cerradas.
+
+### Alcance recomendado de la fase 1
+Las pruebas automaticas deberian cubrir:
+
+- composicion del launch;
+- parametros clave del perfil global;
+- exclusion de componentes no deseados en esta fase;
+- aceptacion de perfiles GPS definidos.
+
+### Casos recomendados
+#### 1. Test de composicion del launch
+Verificar que `sim_global_v2.launch.py`:
+
+- existe;
+- usa el bringup base comun elegido;
+- levanta `navsat_transform`;
+- levanta EKF global;
+- carga el params file global de Nav2;
+- usa el RViz global.
+
+#### 2. Test de configuracion global de `nav_command_server`
+Verificar que el preset global deja configurado:
+
+- `map_frame=map`
+- `fromll_frame=map`
+- `forward_cmd_vel_safe_without_goal=True`
+
+#### 3. Test de configuracion global de Nav2
+Verificar que el perfil global use:
+
+- `global_frame=map`
+- `local_frame=odom`
+- `odom_topic=/odometry/local`
+
+#### 4. Test de exclusion de componentes fuera de fase
+Verificar que en esta primera fase:
+
+- no se habilita `keepout_filter` global;
+- no se reintroducen helpers legacy en la cadena principal;
+- no se rompe la base local ya alineada con `SIM_LOCAL_V2_FIDELITY.md`.
+
+#### 5. Test de perfiles GPS
+Verificar que el launch acepte y enrute correctamente los perfiles:
+
+- `ideal`
+- `m8n`
+- `f9p_rtk`
+
+### Lo que no se exige en esta fase
+No se considera obligatorio todavia:
+
+- test end-to-end completo de mision;
+- validacion automatica de error metrico sobre el mapa;
+- pruebas largas de navegacion realista en Gazebo;
+- benchmarks automaticos del planner global.
+
+### Criterio de diseño
+Se elige esta estrategia porque:
+
+- protege la arquitectura sin meter fragilidad innecesaria;
+- permite detectar rapido errores de wiring y configuracion;
+- deja los tests pesados para una fase posterior, cuando `sim_global_v2` ya este estable.
 
 ### Todavia no cerrados para `real_global_v2`
 Para robot real faltan mas decisiones que en simulacion:
@@ -397,6 +764,19 @@ Para robot real faltan mas decisiones que en simulacion:
 - si el keepout global georreferenciado aparecera en una segunda fase o se mantendra solo la proteccion reactiva local;
 - como se validara en piso la coherencia entre `map`, `odom`, GPS y goals LL;
 - que estrategia se seguira ante GPS degradado, fix pobre o perdida temporal del GPS durante una mision.
+
+Lista resumida de pendientes para robot real:
+
+- definir el modelo operativo de `sitio` o `mapa`;
+- decidir donde vive la configuracion geodesica por sitio;
+- decidir como se selecciona el sitio en runtime o despliegue;
+- definir como se expone la carga del sitio al operador;
+- definir la fuente exacta de goals LL en operacion real;
+- definir manejo de GPS degradado o sin fix confiable;
+- decidir si habra fallback automatico a modo local-only;
+- definir cuando y como incorporar keepout global georreferenciado;
+- definir procedimiento de calibracion y validacion inicial en campo;
+- definir criterios minimos de aceptacion para pasar de simulacion a robot real.
 
 ### Punto importante
 Lo esencial ya esta decidido:
