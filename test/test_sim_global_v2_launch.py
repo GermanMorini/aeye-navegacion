@@ -82,12 +82,12 @@ def test_global_profile_keeps_legacy_helpers_out_of_the_main_chain() -> None:
     assert '{"gps_frame_id": gps_frame_id}' in base_contents
 
 
-def test_global_localization_config_uses_twist_only_local_odom_and_not_odometry_yaw() -> None:
+def test_global_localization_config_uses_twist_only_local_odom_and_odometry_yaw() -> None:
     stable_contents = (PACKAGE_ROOT / "config" / "global_localization_v2.yaml").read_text(
         encoding="utf-8"
     )
 
-    assert "use_odometry_yaw: false" in stable_contents
+    assert "use_odometry_yaw: true" in stable_contents
     assert (
         "odom0_config: [false, false, false,\n"
         "                   false, false, false,\n"

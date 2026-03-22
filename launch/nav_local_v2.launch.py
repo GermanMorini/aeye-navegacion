@@ -2,7 +2,7 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
@@ -10,6 +10,9 @@ from launch_ros.actions import Node
 from launch_ros.descriptions import ParameterFile
 from launch_ros.parameter_descriptions import ParameterValue
 from nav2_common.launch import RewrittenYaml
+
+
+COLLISION_MONITOR_START_DELAY_S = 2.0
 
 
 def _resolve_config_file_path(package_share_dir: str, filename: str) -> str:
@@ -217,17 +220,22 @@ def generate_launch_description():
                     }
                 ],
             ),
-            Node(
-                package="nav2_lifecycle_manager",
-                executable="lifecycle_manager",
-                name="collision_monitor_lifecycle_manager_local_v2",
-                output="screen",
-                parameters=[
-                    {
-                        "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
-                        "autostart": True,
-                        "node_names": collision_monitor_lifecycle_node_names,
-                    }
+            TimerAction(
+                period=COLLISION_MONITOR_START_DELAY_S,
+                actions=[
+                    Node(
+                        package="nav2_lifecycle_manager",
+                        executable="lifecycle_manager",
+                        name="collision_monitor_lifecycle_manager_local_v2",
+                        output="screen",
+                        parameters=[
+                            {
+                                "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
+                                "autostart": True,
+                                "node_names": collision_monitor_lifecycle_node_names,
+                            }
+                        ],
+                    )
                 ],
             ),
         ]

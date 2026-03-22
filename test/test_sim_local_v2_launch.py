@@ -38,3 +38,12 @@ def test_shared_sim_nav_v2_base_disables_legacy_bridge_nodes() -> None:
     assert 'executable="sim_drive_telemetry"' not in launch_contents
     assert 'DeclareLaunchArgument("invert_measured_steer_sign", default_value="True")' in launch_contents
     assert 'DeclareLaunchArgument("invert_steer_from_cmd_vel", default_value="True")' in launch_contents
+
+
+def test_nav_local_v2_delays_collision_monitor_lifecycle_manager_startup() -> None:
+    launch_path = Path(__file__).resolve().parents[1] / "launch" / "nav_local_v2.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert "COLLISION_MONITOR_START_DELAY_S = 2.0" in launch_contents
+    assert 'name="collision_monitor_lifecycle_manager_local_v2"' in launch_contents
+    assert "TimerAction(" in launch_contents

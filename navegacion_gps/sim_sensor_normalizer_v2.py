@@ -303,6 +303,7 @@ class SimSensorNormalizerV2Node(Node):
         self._gps_model = GpsNoiseModel(gps_profile, gps_random_seed)
         self._gps_datum = load_navsat_datum()
         self._last_raw_gps_fix: Optional[NavSatFix] = None
+        self._last_local_odom: Optional[Odometry] = None
 
         self._imu_pub = self.create_publisher(Imu, imu_out_topic, 10)
         self._gps_pub = self.create_publisher(NavSatFix, gps_out_topic, 10)
@@ -310,11 +311,13 @@ class SimSensorNormalizerV2Node(Node):
         self._odom_pub = self.create_publisher(Odometry, odom_out_topic, 10)
 
         self.create_subscription(Imu, imu_in_topic, self._on_imu, 10)
-        # Keep the bridged raw GPS topic available for observability, but generate
-        # profile GPS from /odom_raw so all presets share the same synthetic base.
+        # Keep the bridged raw GPS topic available for observability. In sim_global_v2
+        # the ideal GPS profile is anchored to /odometry/local to avoid amplifying
+        # small raw-vs-local discrepancies inside the global EKF.
         self.create_subscription(NavSatFix, gps_in_topic, self._on_gps_raw, 10)
         self.create_subscription(PointCloud2, lidar_in_topic, self._on_lidar, 10)
         self.create_subscription(Odometry, odom_in_topic, self._on_odom, 10)
+        self.create_subscription(Odometry, "/odometry/local", self._on_local_odom, 10)
 
         self.get_logger().info(
             "sim_sensor_normalizer_v2 ready "
@@ -378,11 +381,27 @@ class SimSensorNormalizerV2Node(Node):
         out.header.frame_id = self._lidar_frame_id
         self._lidar_pub.publish(out)
 
+    def _on_local_odom(self, msg: Odometry) -> None:
+        self._last_local_odom = deepcopy(msg)
+
+    def _select_gps_reference_odom(self, msg: Odometry) -> Odometry:
+        if self._gps_model.profile_name != "ideal":
+            return msg
+        if self._last_local_odom is not None:
+            # The ideal profile is an integration baseline, not a simulator-truth
+            # benchmark. Using /odometry/local removes a small but systematic
+            # mismatch against /odom_raw that the global EKF was amplifying.
+            return self._last_local_odom
+        return msg
+
     def _publish_synthetic_gps_from_odom(self, msg: Odometry) -> None:
+        reference_odom = self._select_gps_reference_odom(msg)
         base_fix = build_synthetic_navsat_fix_from_odom(
-            msg, self._gps_datum, frame_id=self._gps_frame_id
+            reference_odom, self._gps_datum, frame_id=self._gps_frame_id
         )
-        out = self._gps_model.transform(base_fix, self._get_reference_time_ns(msg))
+        out = self._gps_model.transform(
+            base_fix, self._get_reference_time_ns(reference_odom)
+        )
         if out is None:
             return
 
@@ -415,6 +434,9 @@ def main(args=None) -> None:
     node = SimSensorNormalizerV2Node()
     try:
         rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()

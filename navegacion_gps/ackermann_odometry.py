@@ -225,6 +225,9 @@ def main(args=None) -> None:
     node = AckermannOdometryNode()
     try:
         rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()

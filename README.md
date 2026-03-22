@@ -112,8 +112,15 @@ Guia tecnica detallada:
 - Mantiene la cadena de mando local:
   - `/cmd_vel_safe -> nav_command_server -> /cmd_vel_final -> vehicle_controller_server`
 - Expone goals RViz y conversiones LL sobre `map`, con `gps_profile:=ideal|m8n|f9p_rtk`.
-- En este perfil, `/gps/fix` se sintetiza desde `/odom_raw` + datum fijo; `/gps/fix_raw` queda como señal cruda del simulador.
+- En este perfil, `/gps/fix_raw` queda como señal cruda del simulador.
+- La base sintética del GPS depende del preset:
+  - `ideal`: `/odometry/local + datum`
+  - `m8n` y `f9p_rtk`: `/odom_raw + datum`
 - El GPS sintetico global se publica con `frame_id=base_footprint`; no se usa `gps_link` para evitar runaway de `map -> odom` por el offset fisico del sensor en el URDF.
+- En la investigacion actual ya se descartaron dos causas mayores:
+  - el `global_costmap` no era el origen del runaway;
+  - el `collision_monitor` ya no queda `inactive` en el arranque de `v2`.
+- La correccion mas reciente que mejoro `NavigateToPose` con `gps_profile:=ideal` fue alinear la base del GPS sintetico ideal con `/odometry/local`; eso redujo mucho la divergencia global, pero no cierra todavia la validacion de goals medianos/largos.
 
 ## Observabilidad y debugging
 - Telemetría de navegación:
@@ -220,12 +227,24 @@ El chequeo mide deriva en reposo usando:
 - `/odometry/gps`
 - conversion `fromLL`
 
-Cadena global `v2` efectiva:
+Cadena global `v2` efectiva hoy:
 
-- el EKF global solo reutiliza `twist` de `/odometry/local`;
-- `navsat_transform.use_odometry_yaw=false`;
 - `/gps/fix` sintetico se publica con `frame_id=base_footprint`;
+- `gps_profile:=ideal` usa `/odometry/local + datum` como base sintetica;
+- `navsat_transform.magnetic_declination_radians=0.0` en simulacion global;
+- `navsat_transform.use_odometry_yaw=true`;
+- `navsat_transform.delay=0.5`;
+- el EKF global fusiona posicion desde `/odometry/gps` y solo `twist` desde `/odometry/local`;
 - `localization_global_v2.launch.py` retrasa el arranque global para esperar TF local valido.
+
+Notas operativas:
+
+- en reposo, `map -> odom` ya no hace runaway;
+- con `gps_profile:=ideal`, el planner vuelve a generar camino en `map`, pero la validacion estricta de goals medianos/largos sigue fallando;
+- `collision_monitor` queda `active` y la cadena `/cmd_vel -> /cmd_vel_safe -> /cmd_vel_final -> /cmd_vel_gazebo` vuelve a funcionar;
+- el `global_costmap` no fue el origen del problema principal: su ventana sigue al robot y el fallo dominante estaba en la coherencia de la pose global;
+- hoy el problema dominante es que `/odometry/local` y `/odometry/filtered` vuelven a separarse fuerte durante trayectorias medianas y largas;
+- la validacion con `m8n` / `f9p_rtk` sigue pendiente.
 
 Simulación legacy:
 ```bash
@@ -251,20 +270,21 @@ Parámetros principales del GPS realista en simulación:
 
 Perfiles de GPS de `sim_global_v2`:
 - `gps_profile:=ideal`
-  - GPS sintético base desde `/odom_raw + datum`
+  - GPS sintético base desde `/odometry/local + datum`
   - sin ruido artificial agregado
   - covarianza preset chica: `sigma_xy=0.02 m`, `sigma_z=0.05 m`
 - `gps_profile:=m8n`
-  - misma base sintética que `ideal`
+  - base sintética desde `/odom_raw + datum`
   - GNSS medio sin RTK
   - ruido/covarianza: `sigma_xy=1.8 m`, `sigma_z=3.5 m`
 - `gps_profile:=f9p_rtk`
-  - misma base sintética que `ideal`
+  - base sintética desde `/odom_raw + datum`
   - GNSS tipo RTK
   - ruido/covarianza: `sigma_xy=0.15 m`, `sigma_z=0.25 m`
 
 Qué esperar:
 - `ideal`: baseline limpio para validar TF, `fromLL` y wiring global sin ruido del sensor GPS del URDF.
+- `ideal`: baseline limpio y alineado con la odometría local, pensado para validar integración global `v2`.
 - `m8n`: deriva y jitter visibles propios de un GNSS medio.
 - `f9p_rtk`: comportamiento intermedio entre `ideal` y `m8n`, cercano a un RTK.
 
@@ -313,7 +333,7 @@ Fixes de integración consolidados en esta branch:
 - `gazebo_utils` completa covarianzas razonables cuando Gazebo publica IMU o GPS con covarianzas nulas.
 - `sim_localization_benchmark` deja una baseline reproducible para comparar perfiles sin contaminar el runtime.
 - `sim_global_v2` separa la capa global del perfil local-v2 y reutiliza un bringup base compartido sin reintroducir helpers legacy.
-- `sim_global_v2` usa GPS sintético basado en `/odom_raw + datum`, de modo que `ideal`, `m8n` y `f9p_rtk` comparten la misma verdad base y solo difieren por su preset.
+- `sim_global_v2` usa GPS sintético por preset: `ideal` se alinea con `/odometry/local + datum`, mientras `m8n` y `f9p_rtk` siguen partiendo de `/odom_raw + datum`.
 - `sim_global_v2` sufrio un runaway severo de `map -> odom` cuando el GPS sintetico se publicaba como `gps_link`; la correccion fue publicar esa medicion en `base_footprint` y eliminar el preset defectuoso de la interfaz publica.
 
 ## Incidente resuelto: deriva global `v2`
@@ -335,7 +355,7 @@ Solucion:
 - `sim_global_v2` ya no expone presets alternativos de localizacion global;
 - el GPS sintetico se publica con `frame_id=base_footprint`;
 - el EKF global reutiliza solo `twist` local;
-- `navsat_transform.use_odometry_yaw=false`;
+- `navsat_transform.use_odometry_yaw=true`;
 - se mantiene un delay de arranque del bloque global para evitar inicializaciones con TF local incompleto.
 
 Validacion:
@@ -343,6 +363,26 @@ Validacion:
 - antes de la correccion: `map->odom ≈ 104.899 m / 10 s` en reposo;
 - despues de la correccion: `map->odom ≈ 1.5e-13 m / 30 s` en reposo;
 - herramienta de verificacion: `./tools/check_sim_global_drift.sh`
+
+Incidente adicional resuelto en movimiento con `gps_profile:=ideal`:
+
+- el baseline `ideal` usando `/odom_raw + datum` introducia una discrepancia chica pero persistente contra `/odometry/local`;
+- esa discrepancia media se midio alrededor de `0.26 m` y `0.124 rad`;
+- el EKF global la amplificaba durante la navegacion y terminaba abortando goals;
+- al mover la base sintetica de `ideal` a `/odometry/local + datum`, la divergencia bajo movimiento mejoro mucho respecto del estado previo.
+
+Validacion posterior de goals mas lejanos:
+
+- `(12.0, 8.0)`: `ABORTED`
+- `(15.0, 10.0)`: `ABORTED`
+- `(18.0, 12.0)`: `ABORTED`
+- `(20.0, 0.0)`: una corrida rapida devolvio `SUCCEEDED`, pero al repetirla con espera post-resultado tambien termino `ABORTED`
+
+Lectura operativa:
+
+- el fix de `ideal` mejora la estabilidad relativa de la cadena global;
+- no alcanza todavia para considerar cerrada la navegacion global de mision;
+- los goals medianos/largos siguen derivando hasta separar gravemente `/odometry/local` de `/odometry/filtered`.
 
 Perfiles de localización evaluados:
 
@@ -356,10 +396,10 @@ Perfiles de localización evaluados:
 | `gps_only_global` | Experimento interno para aislar GPS puro en el EKF global | descartado | No se expone por launch ni benchmark: rompió el bringup y no produjo muestras útiles. |
 
 Conclusión operativa de esta branch:
-- la deriva principal sigue naciendo en el fuse del `ekf_filter_node_map` con `/odometry/local`;
-- `/odometry/gps` entra con covarianza fija (`0.1225 m^2` en `x/y`) pero su discrepancia real frente a `fromLL` suele ser bastante mayor, así que el EKF global sigue recibiendo una referencia demasiado optimista;
-- la navegación global larga no queda resuelta en simulación;
-- esta simulación sí sirve para probar integración, control local, conversión de goals LL y trayectos cortos, pero no valida patrullas largas ni navegación global outdoor.
+- el baseline `ideal` ya sirve para validar mejor la integración global `v2` y el drift en reposo;
+- la validación real de `NavigateToPose` para trayectorias medianas/largas sigue abierta;
+- la validación larga con `m8n` y `f9p_rtk` sigue pendiente;
+- esta simulación ya es útil para pruebas de integración y trayectos de referencia, pero todavía no cierra validación outdoor larga.
 
 ## Notas
 - `mapviz_gps.mvc` existe en la raíz del workspace y se copia en la imagen Docker, pero este paquete ya no expone un `mapviz.launch.py` dedicado.
