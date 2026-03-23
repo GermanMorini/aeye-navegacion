@@ -9,6 +9,7 @@ from sensor_msgs.msg import NavSatFix
 from navegacion_gps.sim_sensor_normalizer_v2 import build_synthetic_navsat_fix_from_odom
 from navegacion_gps.sim_sensor_normalizer_v2 import GpsNoiseModel
 from navegacion_gps.sim_sensor_normalizer_v2 import load_navsat_datum_from_file
+from navegacion_gps.sim_sensor_normalizer_v2 import resolve_gps_reference_mode
 from navegacion_gps.sim_sensor_normalizer_v2 import resolve_gps_profile
 
 
@@ -39,6 +40,17 @@ def test_resolve_gps_profile_accepts_supported_values() -> None:
 def test_resolve_gps_profile_rejects_unknown_values() -> None:
     with pytest.raises(ValueError):
         resolve_gps_profile("unknown")
+
+
+def test_resolve_gps_reference_mode_accepts_supported_values() -> None:
+    assert resolve_gps_reference_mode("ideal_from_local_odom") == "ideal_from_local_odom"
+    assert resolve_gps_reference_mode("ideal_from_raw_odom") == "ideal_from_raw_odom"
+    assert resolve_gps_reference_mode("ideal_from_ground_truth") == "ideal_from_ground_truth"
+
+
+def test_resolve_gps_reference_mode_rejects_unknown_values() -> None:
+    with pytest.raises(ValueError):
+        resolve_gps_reference_mode("mystery_mode")
 
 
 def test_ideal_profile_is_passthrough() -> None:

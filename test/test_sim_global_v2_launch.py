@@ -17,6 +17,9 @@ def test_sim_global_v2_launch_exposes_the_expected_public_api() -> None:
     assert 'DeclareLaunchArgument("gps_profile", default_value="ideal")' in launch_contents
     assert 'DeclareLaunchArgument("world", default_value=default_world)' in launch_contents
     assert 'DeclareLaunchArgument("nav_start_delay_s", default_value="4.0")' in launch_contents
+    assert 'DeclareLaunchArgument(' in launch_contents
+    assert 'global_localization_params_file' in launch_contents
+    assert 'gps_reference_mode' in launch_contents
     assert '"global_localization_profile"' not in launch_contents
 
 
@@ -82,15 +85,16 @@ def test_global_profile_keeps_legacy_helpers_out_of_the_main_chain() -> None:
     assert '{"gps_frame_id": gps_frame_id}' in base_contents
 
 
-def test_global_localization_config_uses_twist_only_local_odom_and_odometry_yaw() -> None:
+def test_global_localization_config_uses_local_vyaw_without_navsat_odometry_yaw() -> None:
     stable_contents = (PACKAGE_ROOT / "config" / "global_localization_v2.yaml").read_text(
         encoding="utf-8"
     )
 
-    assert "use_odometry_yaw: true" in stable_contents
+    assert "use_odometry_yaw: false" in stable_contents
     assert (
         "odom0_config: [false, false, false,\n"
         "                   false, false, false,\n"
         "                   true,  true,  false,\n"
         "                   false, false, true,"
     ) in stable_contents
+    assert "imu0: /imu/data" not in stable_contents

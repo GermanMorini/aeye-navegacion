@@ -114,13 +114,15 @@ Guia tecnica detallada:
 - Expone goals RViz y conversiones LL sobre `map`, con `gps_profile:=ideal|m8n|f9p_rtk`.
 - En este perfil, `/gps/fix_raw` queda como señal cruda del simulador.
 - La base sintética del GPS depende del preset:
-  - `ideal`: `/odometry/local + datum`
+  - `ideal`: hoy sigue usando `ideal_from_local_odom`
   - `m8n` y `f9p_rtk`: `/odom_raw + datum`
 - El GPS sintetico global se publica con `frame_id=base_footprint`; no se usa `gps_link` para evitar runaway de `map -> odom` por el offset fisico del sensor en el URDF.
-- En la investigacion actual ya se descartaron dos causas mayores:
-  - el `global_costmap` no era el origen del runaway;
-  - el `collision_monitor` ya no queda `inactive` en el arranque de `v2`.
-- La correccion mas reciente que mejoro `NavigateToPose` con `gps_profile:=ideal` fue alinear la base del GPS sintetico ideal con `/odometry/local`; eso redujo mucho la divergencia global, pero no cierra todavia la validacion de goals medianos/largos.
+- Estado actual resumido:
+  - el reposo ya no tiene runaway de `map -> odom`
+  - goals cortos mejoraron claramente con la variante experimental actual
+  - goals largos siguen fallando
+  - hoy la hipotesis mas fuerte es que `gps_profile:=ideal` es demasiado circular porque `/odometry/gps` sigue demasiado de cerca a `/odometry/local`
+  - detalle tecnico y resultados vigentes: [GLOBAL_NAV_V2.md](GLOBAL_NAV_V2.md)
 
 ## Observabilidad y debugging
 - Telemetría de navegación:
@@ -219,6 +221,163 @@ Chequeo de deriva global-v2 sobre una sesion ya levantada:
 ./tools/check_sim_global_drift.sh --duration-s 30 --sample-interval-s 1.0 --output /tmp/sim_global_drift.json
 ```
 
+Chequeo de consistencia global-v2 sobre una sesion ya levantada:
+```bash
+./tools/check_sim_global_consistency.sh
+./tools/check_sim_global_consistency.sh --duration-s 45 --sample-interval-s 0.5 --fail-position-gap-m 3.0 --output /tmp/sim_global_consistency.json
+```
+
+Benchmark automatico de movimiento global-v2:
+```bash
+./tools/benchmark_sim_global_v2.sh
+./tools/benchmark_sim_global_v2.sh --profile strict_split_lag_compensated_odom_yaw_no_delay_soft_gps --goal 12,8 --output /tmp/sim_global_benchmark.json
+```
+
+Notas del benchmark:
+- abre `sim_global_v2` con `use_rviz:=true` por defecto para observacion pasiva;
+- no requiere interaccion manual;
+- usa variantes internas de localizacion global y de GPS ideal para experimentacion;
+- si mas adelante hace falta una corrida rapida o estilo CI, el ejecutable soporta `--no-use-rviz`.
+- resultado consolidado actual:
+  - la mejor base experimental actual es `strict_split_lag_compensated_odom_yaw_no_delay_soft_gps`;
+  - en goals cortos mejora mucho;
+  - en goals largos todavia cae en `TIMEOUT`, asi que no se considera solucion final.
+
+Chequeo especifico de deriva/orbita post-goal:
+```bash
+./tools/check_sim_global_postgoal_orbit.sh --profile strict_split_lag_compensated --goal 12,8 --output /tmp/sim_global_postgoal_orbit.json
+```
+
+Que mide:
+- si `map -> odom` sigue trasladandose o rotando despues del goal;
+- cuanto se mueve `map -> odom` frente a cuanto se mueve realmente el robot;
+- si aparece el patron visual de "odom orbitando alrededor del robot".
+
+Forensics del EKF global:
+```bash
+./tools/check_sim_global_ekf_forensics.sh --profile strict_split_lag_compensated_odom_yaw_no_delay_soft_gps --goal 12,8 --output /tmp/sim_global_ekf_forensics.json
+```
+
+Esta herramienta forense de alta precision ahora mide y separa:
+- saltos de TF `map -> odom`
+- deriva de `/odometry/filtered`
+- cercania real al goal por `base`, `local` y `global`
+- tracking del `/plan`
+- alineacion en `odom` entre:
+  - `/odom_raw` alineado
+  - `/odometry/local`
+  - `/odometry/gps`
+
+Comando recomendado para el goal largo actual:
+```bash
+./tools/check_sim_global_ekf_forensics.sh \
+  --profile strict_split_lag_compensated_odom_yaw_no_delay_soft_gps \
+  --goal 18,12 \
+  --goal-timeout-s 70 \
+  --post-goal-duration-s 15 \
+  --sample-interval-s 0.05 \
+  --output /tmp/sim_global_ekf_forensics_long.json
+```
+
+Lectura actual resumida:
+- `sim_local_v2` se mantiene sano;
+- en `sim_global_v2` largo, `global` sigue bastante de cerca a `local`;
+- el problema mas fuerte hoy es que `local` y `gps_odom` se van juntos respecto de la base real, asi que el GPS ideal todavia no corrige como referencia independiente.
+- deriva del estado global `/odometry/filtered`
+- correcciones combinadas
+- saltos impulsados por `/odometry/gps`
+- saltos impulsados por `/odometry/local` o `/odom_raw`
+- patrones de lag o reordenamiento temporal
+
+Tambien guarda ventanas `pre_window` y `post_window` por evento para auditar el salto con contexto.
+
+Benchmark forense automatico con RViz abierto:
+```bash
+./tools/benchmark_sim_global_ekf_forensics.sh --output /tmp/sim_global_ekf_forensics_benchmark.json
+```
+
+Resumen comparativo que deja por perfil:
+- `goal_status`
+- `dominant_source`
+- `dominant_error_mode`
+- `largest_map_odom_jump_m`
+- `largest_filtered_jump_m`
+- `largest_tf_filtered_disagreement_m`
+- `largest_stamp_gap_s`
+
+Experimento adicional para validar si el EKF global esta corriendo demasiado rapido para la frescura real de sus entradas:
+```bash
+./tools/benchmark_sim_global_v2.sh --profile strict_split_rate_matched --goal 12,8 --output /tmp/sim_global_rate_matched_benchmark.json
+./tools/check_sim_global_postgoal_orbit.sh --profile strict_split_rate_matched --goal 12,8 --output /tmp/sim_global_rate_matched_orbit.json
+./tools/check_sim_global_ekf_forensics.sh --profile strict_split_rate_matched --goal 12,8 --output /tmp/sim_global_rate_matched_ekf.json
+```
+
+Que mide:
+- saltos de `map -> odom` y `/odometry/filtered`;
+- cuanto cambian `/odometry/gps`, `/odometry/local` y `/odom_raw` en la misma ventana;
+- timestamps, edades de muestra y covarianzas;
+- una clasificacion del origen probable por `jump_event`.
+
+Chequeo de consistencia global-v2 durante navegacion activa:
+```bash
+./tools/check_sim_global_consistency.sh
+./tools/check_sim_global_consistency.sh --duration-s 45 --sample-interval-s 0.5 --fail-position-gap-m 3.0 --output /tmp/sim_global_consistency.json
+```
+
+Este chequeo compara siempre las cuatro referencias mas utiles para aislar la divergencia:
+- pose local (`/odometry/local`, llevada a `map`)
+- pose global (`/odometry/filtered`)
+- GPS (`/gps/fix`, proyectado a `map` con `fromLL`)
+- odometria base (`/odom_raw`, alineada a `map` usando el primer sample, porque Gazebo la publica en su propio frame `quad_ackermann_viewer_safe/odom`)
+
+Si alguna separacion entre pares supera el umbral de falla, el checker corta temprano y deja en el reporte:
+- que par se separo primero
+- si fue gap de posicion o heading
+- una pista simple de origen probable: `global_pose`, `local_pose`, `gps_pose`, `base_odometry` o `mixed_or_inconclusive`
+
+Benchmark corto de perfiles globales `v2`:
+```bash
+./tools/benchmark_sim_global_v2.sh --profile motion_candidate_navsat_decoupled --profile motion_candidate_local_vyaw_fallback --goal 12,8
+```
+
+El benchmark:
+- levanta `sim_global_v2` sin RViz
+- corre el checker de consistencia en paralelo
+- manda goals en `map`
+- compara variantes de `global_localization_v2`
+
+Perfiles internos benchmarkeables:
+- `operational_default`
+- `baseline_current`
+- `motion_candidate_navsat_decoupled`
+- `motion_candidate_local_vyaw_fallback`
+- `motion_candidate_heading_only`
+- `motion_candidate_no_lateral_velocity`
+- `motion_candidate_local_yaw_anchor`
+- `motion_candidate_yaw_anchor_gps_position`
+- `rejected_reference_linear_only`
+
+El benchmark ahora elige ganador por la consistencia central de la cadena global:
+- `global_vs_local`
+- `global_vs_gps_odom`
+- `gps_odom_vs_local`
+
+Esto evita que `/odom_raw` domine el resultado, porque en `gps_profile:=ideal` la referencia operativa de la navegacion global queda mas cerca de `/odometry/local` y `/odometry/gps` que del ground truth crudo de Gazebo.
+
+Lectura corta de la bateria mas reciente sobre goal `(12, 8)`:
+- `operational_default`: sigue siendo la mejor baseline general; quedo en `core_position_gap_m ~= 1.89` a `2.39`, segun la corrida, con `likely_origin=global_pose`.
+- `motion_candidate_no_lateral_velocity`: quedo peor en la metrica central y termino `ABORTED`; sacar `vy` local no resolvio el problema.
+- `motion_candidate_local_yaw_anchor`: mejoro bastante el heading, pero empeoro posicion y tambien termino `ABORTED`.
+- `motion_candidate_yaw_anchor_gps_position`: fue la mejor variante nueva en metrica central (`core_position_gap_m ~= 2.35`, `core_heading_gap_rad ~= 0.028` en una corrida), pero aun asi termino `ABORTED` con `Pose Goes Off Grid`.
+- `motion_candidate_gps_position_hard_lock`: endurecer la confianza en `/odometry/gps` mejoro mucho el heading (`core_heading_gap_rad ~= 0.074`), pero no cerro el problema y termino `ABORTED`.
+
+Conclusion practica actual:
+- el problema principal sigue estando en la pose global fusionada;
+- no parece ser solo un problema de latencia;
+- tampoco se arregla solo quitando `vy` o anclando yaw local;
+- tampoco se arregla solo haciendo que la posicion global siga mas de cerca a `/odometry/gps`;
+- la cadena puede mejorar por partes, pero todavia no hay una variante que cierre mision media de forma confiable.
+
 El chequeo mide deriva en reposo usando:
 
 - TF `map -> odom`
@@ -232,9 +391,9 @@ Cadena global `v2` efectiva hoy:
 - `/gps/fix` sintetico se publica con `frame_id=base_footprint`;
 - `gps_profile:=ideal` usa `/odometry/local + datum` como base sintetica;
 - `navsat_transform.magnetic_declination_radians=0.0` en simulacion global;
-- `navsat_transform.use_odometry_yaw=true`;
+- `navsat_transform.use_odometry_yaw=false`;
 - `navsat_transform.delay=0.5`;
-- el EKF global fusiona posicion desde `/odometry/gps` y solo `twist` desde `/odometry/local`;
+- el EKF global fusiona posicion desde `/odometry/gps` y `vx`,`vy`,`vyaw` desde `/odometry/local`;
 - `localization_global_v2.launch.py` retrasa el arranque global para esperar TF local valido.
 
 Notas operativas:
@@ -354,8 +513,8 @@ Solucion:
 
 - `sim_global_v2` ya no expone presets alternativos de localizacion global;
 - el GPS sintetico se publica con `frame_id=base_footprint`;
-- el EKF global reutiliza solo `twist` local;
-- `navsat_transform.use_odometry_yaw=true`;
+- `navsat_transform.use_odometry_yaw=false`;
+- el EKF global reutiliza `vx`,`vy`,`vyaw` locales;
 - se mantiene un delay de arranque del bloque global para evitar inicializaciones con TF local incompleto.
 
 Validacion:
@@ -383,6 +542,12 @@ Lectura operativa:
 - el fix de `ideal` mejora la estabilidad relativa de la cadena global;
 - no alcanza todavia para considerar cerrada la navegacion global de mision;
 - los goals medianos/largos siguen derivando hasta separar gravemente `/odometry/local` de `/odometry/filtered`.
+- con el checker nuevo corriendo sobre un `NavigateToPose` a `(12.0, 8.0)`, la primera ruptura fuerte aparecio a los `11.57 s` y el origen probable quedo marcado como `global_pose`;
+- en esa misma corrida, `gps_vs_local` seguia chico (`0.059 m`), mientras `base_vs_global` ya estaba en `3.230 m`.
+- con la comparacion limpia sobre `(12.0, 8.0)`, `motion_candidate_local_vyaw_fallback` volvio a terminar mejor que `motion_candidate_navsat_decoupled`:
+  - `motion_candidate_navsat_decoupled`: `max_position_gap_m ≈ 3.226`, `max_heading_gap_rad ≈ 0.661`
+  - `motion_candidate_local_vyaw_fallback`: `max_position_gap_m ≈ 3.068`, `max_heading_gap_rad ≈ 0.694`
+- por eso el default actual de `global_localization_v2.yaml` mantiene `use_odometry_yaw=false`, pero vuelve a tomar `vyaw` desde `/odometry/local` en lugar de la IMU.
 
 Perfiles de localización evaluados:
 
@@ -400,6 +565,37 @@ Conclusión operativa de esta branch:
 - la validación real de `NavigateToPose` para trayectorias medianas/largas sigue abierta;
 - la validación larga con `m8n` y `f9p_rtk` sigue pendiente;
 - esta simulación ya es útil para pruebas de integración y trayectos de referencia, pero todavía no cierra validación outdoor larga.
+
+Actualización de la investigación:
+
+- el fallo actual ya no parece ser “el robot se salió del costmap”;
+- con el benchmark nuevo se vio que, en varias corridas fallidas, la pose local y la pose global siguen dentro de costmaps en el snapshot terminal;
+- lo que sí aparece es un salto grande de la pose global en `map`, mientras la pose local en `odom` casi no cambia.
+
+Ejemplo reciente con `operational_default` en goal `(12, 8)`:
+
+- `goal_status = TIMEOUT`
+- salto de pose global en `map` entre snapshot inmediato y tardío: `~7.23 m`
+- movimiento local equivalente en `odom`: `~0.15 m`
+
+Eso apunta a correcciones bruscas de `map -> odom`.
+
+Se probó una variante interna nueva, `motion_candidate_lag_compensated`, con compensación de mediciones atrasadas del EKF global:
+
+- `predict_to_current_time: true`
+- `smooth_lagged_data: true`
+- `history_length: 1.0`
+
+Resultado:
+
+- goal `(12, 8)`: `SUCCEEDED`
+- goal `(15, 10)`: `ABORTED`
+
+Lectura simple:
+
+- mejora de forma real un caso corto;
+- reduce bastante el salto global;
+- todavía no alcanza para considerar resuelta la navegación global media/larga.
 
 ## Notas
 - `mapviz_gps.mvc` existe en la raíz del workspace y se copia en la imagen Docker, pero este paquete ya no expone un `mapviz.launch.py` dedicado.

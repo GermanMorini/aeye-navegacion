@@ -20,6 +20,7 @@ DEFAULT_IMU_LINEAR_ACCELERATION_VARIANCE = 0.1
 DEFAULT_GPS_HORIZONTAL_VARIANCE = 2.5
 DEFAULT_GPS_VERTICAL_VARIANCE = 4.0
 DEFAULT_GPS_PROFILE = "ideal"
+DEFAULT_GPS_REFERENCE_MODE = "ideal_from_local_odom"
 GLOBAL_LOCALIZATION_CONFIG_FILENAME = "global_localization_v2.yaml"
 GPS_PROFILE_SETTINGS: Dict[str, Dict[str, object]] = {
     "ideal": {
@@ -160,6 +161,23 @@ def resolve_gps_profile(name: str) -> Dict[str, object]:
     return {"name": profile_name, **settings}
 
 
+def resolve_gps_reference_mode(name: str) -> str:
+    mode = str(name).strip().lower() or DEFAULT_GPS_REFERENCE_MODE
+    valid = {
+        "ideal_from_local_odom",
+        "ideal_from_raw_odom",
+        # Gazebo currently exposes /odom_raw as the best directly-available
+        # simulator truth in this stack, so ground-truth mode aliases to it.
+        "ideal_from_ground_truth",
+    }
+    if mode not in valid:
+        valid_values = ", ".join(sorted(valid))
+        raise ValueError(
+            f"Unsupported gps_reference_mode '{name}'. Valid values: {valid_values}"
+        )
+    return mode
+
+
 class GpsNoiseModel:
     def __init__(self, profile_name: str, random_seed: int = 0) -> None:
         settings = resolve_gps_profile(profile_name)
@@ -282,7 +300,10 @@ class SimSensorNormalizerV2Node(Node):
         self.declare_parameter("odom_frame_id", "odom")
         self.declare_parameter("base_link_frame_id", "base_footprint")
         self.declare_parameter("gps_profile", DEFAULT_GPS_PROFILE)
+        self.declare_parameter("gps_reference_mode", DEFAULT_GPS_REFERENCE_MODE)
         self.declare_parameter("gps_random_seed", 0)
+        self.declare_parameter("gps_covariance_horizontal_stddev_override_m", 0.0)
+        self.declare_parameter("gps_covariance_vertical_stddev_override_m", 0.0)
 
         imu_in_topic = str(self.get_parameter("imu_in_topic").value)
         imu_out_topic = str(self.get_parameter("imu_out_topic").value)
@@ -300,7 +321,24 @@ class SimSensorNormalizerV2Node(Node):
         self._base_link_frame_id = str(self.get_parameter("base_link_frame_id").value)
         gps_profile = str(self.get_parameter("gps_profile").value)
         gps_random_seed = int(self.get_parameter("gps_random_seed").value)
+        gps_covariance_horizontal_stddev_override_m = float(
+            self.get_parameter("gps_covariance_horizontal_stddev_override_m").value
+        )
+        gps_covariance_vertical_stddev_override_m = float(
+            self.get_parameter("gps_covariance_vertical_stddev_override_m").value
+        )
+        self._gps_reference_mode = resolve_gps_reference_mode(
+            str(self.get_parameter("gps_reference_mode").value)
+        )
         self._gps_model = GpsNoiseModel(gps_profile, gps_random_seed)
+        if gps_covariance_horizontal_stddev_override_m > 0.0:
+            self._gps_model.covariance_horizontal_stddev_m = (
+                gps_covariance_horizontal_stddev_override_m
+            )
+        if gps_covariance_vertical_stddev_override_m > 0.0:
+            self._gps_model.covariance_vertical_stddev_m = (
+                gps_covariance_vertical_stddev_override_m
+            )
         self._gps_datum = load_navsat_datum()
         self._last_raw_gps_fix: Optional[NavSatFix] = None
         self._last_local_odom: Optional[Odometry] = None
@@ -323,6 +361,9 @@ class SimSensorNormalizerV2Node(Node):
             "sim_sensor_normalizer_v2 ready "
             f"({imu_in_topic},{gps_in_topic},{lidar_in_topic},{odom_in_topic},"
             f" gps_profile={self._gps_model.profile_name},"
+            f" gps_reference_mode={self._gps_reference_mode},"
+            f" gps_cov_std=({self._gps_model.covariance_horizontal_stddev_m:.3f},"
+            f"{self._gps_model.covariance_vertical_stddev_m:.3f}),"
             f" datum=({self._gps_datum[0]:.7f},{self._gps_datum[1]:.7f},{self._gps_datum[2]:.3f}))"
         )
 
@@ -387,11 +428,12 @@ class SimSensorNormalizerV2Node(Node):
     def _select_gps_reference_odom(self, msg: Odometry) -> Odometry:
         if self._gps_model.profile_name != "ideal":
             return msg
-        if self._last_local_odom is not None:
-            # The ideal profile is an integration baseline, not a simulator-truth
-            # benchmark. Using /odometry/local removes a small but systematic
-            # mismatch against /odom_raw that the global EKF was amplifying.
-            return self._last_local_odom
+        if self._gps_reference_mode == "ideal_from_local_odom":
+            if self._last_local_odom is not None:
+                return self._last_local_odom
+            return msg
+        if self._gps_reference_mode in {"ideal_from_raw_odom", "ideal_from_ground_truth"}:
+            return msg
         return msg
 
     def _publish_synthetic_gps_from_odom(self, msg: Odometry) -> None:

@@ -131,7 +131,7 @@ controller_server:
     general_goal_checker:
       plugin: "nav2_controller::PositionGoalChecker"
       stateful: true
-      xy_goal_tolerance: 1.2
+      xy_goal_tolerance: 0.8
 
     FollowPath:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
@@ -139,18 +139,20 @@ controller_server:
       desired_linear_vel: 1.2
 
       lookahead_dist: 1.6
-      min_lookahead_dist: 1.0
+      min_lookahead_dist: 0.6
       max_lookahead_dist: 2.5
       lookahead_time: 2.0
       use_velocity_scaled_lookahead_dist: true
 
-      min_approach_linear_velocity: 1.0
-      approach_velocity_scaling_dist: 1.0
+      # La aproximacion final no puede entrar al goal a 1 m/s o mas:
+      # eso hace que lo cruce antes de que la cadena de stop lo alcance.
+      min_approach_linear_velocity: 0.25
+      approach_velocity_scaling_dist: 3.0
 
       use_regulated_linear_velocity_scaling: true
       use_cost_regulated_linear_velocity_scaling: true
       regulated_linear_scaling_min_radius: 2.4
-      regulated_linear_scaling_min_speed: 1.0
+      regulated_linear_scaling_min_speed: 0.2
 
       use_collision_detection: true
       max_allowed_time_to_collision_up_to_carrot: 0.75

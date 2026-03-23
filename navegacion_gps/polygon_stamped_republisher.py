@@ -1,4 +1,5 @@
 from geometry_msgs.msg import PolygonStamped
+from copy import deepcopy
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import (
@@ -55,11 +56,16 @@ class PolygonStampedRepublisher(Node):
 
     def _on_polygon(self, msg: PolygonStamped) -> None:
         self._latest_polygon = msg
-        self._publisher.publish(msg)
+        self._publisher.publish(self._refresh_stamp(msg))
 
     def _republish_latest(self) -> None:
         if self._latest_polygon is not None:
-            self._publisher.publish(self._latest_polygon)
+            self._publisher.publish(self._refresh_stamp(self._latest_polygon))
+
+    def _refresh_stamp(self, msg: PolygonStamped) -> PolygonStamped:
+        out = deepcopy(msg)
+        out.header.stamp = self.get_clock().now().to_msg()
+        return out
 
 
 def main(args=None) -> None:

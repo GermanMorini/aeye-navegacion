@@ -12,7 +12,7 @@ def generate_launch_description():
     default_rviz = os.path.join(gps_wpf_dir, "config", "rviz_global_v2.rviz")
     default_world = os.path.join(gps_wpf_dir, "worlds", "vacio.world")
     nav2_params_file = os.path.join(gps_wpf_dir, "config", "nav2_global_v2_params.yaml")
-    global_localization_params_file = os.path.join(
+    default_global_localization_params_file = os.path.join(
         gps_wpf_dir, "config", "global_localization_v2.yaml"
     )
 
@@ -22,6 +22,16 @@ def generate_launch_description():
     gps_profile = LaunchConfiguration("gps_profile")
     world = LaunchConfiguration("world")
     nav_start_delay_s = LaunchConfiguration("nav_start_delay_s")
+    global_localization_params_file = LaunchConfiguration(
+        "global_localization_params_file"
+    )
+    gps_reference_mode = LaunchConfiguration("gps_reference_mode")
+    gps_covariance_horizontal_stddev_override_m = LaunchConfiguration(
+        "gps_covariance_horizontal_stddev_override_m"
+    )
+    gps_covariance_vertical_stddev_override_m = LaunchConfiguration(
+        "gps_covariance_vertical_stddev_override_m"
+    )
 
     return LaunchDescription(
         [
@@ -31,6 +41,13 @@ def generate_launch_description():
             DeclareLaunchArgument("gps_profile", default_value="ideal"),
             DeclareLaunchArgument("world", default_value=default_world),
             DeclareLaunchArgument("nav_start_delay_s", default_value="4.0"),
+            DeclareLaunchArgument(
+                "global_localization_params_file",
+                default_value=default_global_localization_params_file,
+            ),
+            DeclareLaunchArgument("gps_reference_mode", default_value="ideal_from_local_odom"),
+            DeclareLaunchArgument("gps_covariance_horizontal_stddev_override_m", default_value="0.0"),
+            DeclareLaunchArgument("gps_covariance_vertical_stddev_override_m", default_value="0.0"),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
                     os.path.join(gps_wpf_dir, "launch", "sim_nav_v2_base.launch.py")
@@ -42,6 +59,13 @@ def generate_launch_description():
                     "gps_profile": gps_profile,
                     "world": world,
                     "nav_start_delay_s": nav_start_delay_s,
+                    "gps_reference_mode": gps_reference_mode,
+                    "gps_covariance_horizontal_stddev_override_m": (
+                        gps_covariance_horizontal_stddev_override_m
+                    ),
+                    "gps_covariance_vertical_stddev_override_m": (
+                        gps_covariance_vertical_stddev_override_m
+                    ),
                     "use_global_localization": "True",
                     "map_frame": "map",
                     "fromll_frame": "map",

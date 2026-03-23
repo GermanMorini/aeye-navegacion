@@ -17,7 +17,7 @@ ekf_filter_node_map:
     odom0_config: [false, false, false,
                    false, false, false,
                    true,  true,  false,
-                   false, false, true,
+                   false, false, false,
                    false, false, false]
     odom0_queue_size: 10
     odom0_differential: false
@@ -69,21 +69,14 @@ navsat_transform:
   ros__parameters:
     frequency: 30.0
     delay: 0.5
-    # In sim_global_v2 the synthetic GPS is already generated in the same ENU
-    # convention as /odom_raw, so applying a site magnetic declination here
-    # rotates /odometry/gps away from the simulator ground truth.
     magnetic_declination_radians: 0.0
     yaw_offset: 0.0
     zero_altitude: true
     broadcast_utm_transform: true
     publish_filtered_gps: false
-    # The current default still avoids absolute local yaw in navsat_transform,
-    # but keeps local vyaw in the global EKF because it benchmarked better
-    # than the IMU-vyaw variant under motion.
     use_odometry_yaw: false
     wait_for_datum: true
     datum: [-31.4858037, -64.2410570, 0.0]
-
     gps_topic: /gps/fix
     odom_topic: /odometry/local
     output_topic: /odometry/gps

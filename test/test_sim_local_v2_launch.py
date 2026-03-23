@@ -38,6 +38,7 @@ def test_shared_sim_nav_v2_base_disables_legacy_bridge_nodes() -> None:
     assert 'executable="sim_drive_telemetry"' not in launch_contents
     assert 'DeclareLaunchArgument("invert_measured_steer_sign", default_value="True")' in launch_contents
     assert 'DeclareLaunchArgument("invert_steer_from_cmd_vel", default_value="True")' in launch_contents
+    assert 'DeclareLaunchArgument("gps_reference_mode", default_value="ideal_from_local_odom")' in launch_contents
 
 
 def test_nav_local_v2_delays_collision_monitor_lifecycle_manager_startup() -> None:

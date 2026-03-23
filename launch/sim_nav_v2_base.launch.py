@@ -71,6 +71,13 @@ def generate_launch_description():
     use_global_localization = LaunchConfiguration("use_global_localization")
     gps_profile = LaunchConfiguration("gps_profile")
     gps_frame_id = LaunchConfiguration("gps_frame_id")
+    gps_reference_mode = LaunchConfiguration("gps_reference_mode")
+    gps_covariance_horizontal_stddev_override_m = LaunchConfiguration(
+        "gps_covariance_horizontal_stddev_override_m"
+    )
+    gps_covariance_vertical_stddev_override_m = LaunchConfiguration(
+        "gps_covariance_vertical_stddev_override_m"
+    )
 
     return LaunchDescription(
         [
@@ -120,6 +127,9 @@ def generate_launch_description():
             DeclareLaunchArgument("use_global_localization", default_value="False"),
             DeclareLaunchArgument("gps_profile", default_value="ideal"),
             DeclareLaunchArgument("gps_frame_id", default_value="gps_link"),
+            DeclareLaunchArgument("gps_reference_mode", default_value="ideal_from_local_odom"),
+            DeclareLaunchArgument("gps_covariance_horizontal_stddev_override_m", default_value="0.0"),
+            DeclareLaunchArgument("gps_covariance_vertical_stddev_override_m", default_value="0.0"),
             Node(
                 package="navegacion_gps",
                 executable="sim_sensor_normalizer_v2",
@@ -129,6 +139,17 @@ def generate_launch_description():
                     {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
                     {"gps_profile": gps_profile},
                     {"gps_frame_id": gps_frame_id},
+                    {"gps_reference_mode": gps_reference_mode},
+                    {
+                        "gps_covariance_horizontal_stddev_override_m": (
+                            gps_covariance_horizontal_stddev_override_m
+                        )
+                    },
+                    {
+                        "gps_covariance_vertical_stddev_override_m": (
+                            gps_covariance_vertical_stddev_override_m
+                        )
+                    },
                 ],
             ),
             IncludeLaunchDescription(
