@@ -33,10 +33,16 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'ackermann_odometry = navegacion_gps.ackermann_odometry:main',
+            'cmd_vel_ackermann_bridge_v2 = navegacion_gps.cmd_vel_ackermann_bridge_v2:main',
             'gazebo_utils = navegacion_gps.gazebo_utils:main',
             'zones_manager = navegacion_gps.zones_manager:main',
             'nav_command_server = navegacion_gps.nav_command_server:main',
             'nav_snapshot_server = navegacion_gps.nav_snapshot_server:main',
+            'pixhawk_odometry = navegacion_gps.pixhawk_odometry:main',
+            'polygon_stamped_republisher = navegacion_gps.polygon_stamped_republisher:main',
+            'sim_drive_telemetry = navegacion_gps.sim_drive_telemetry:main',
+            'sim_sensor_normalizer_v2 = navegacion_gps.sim_sensor_normalizer_v2:main',
         ],
     },
 )
