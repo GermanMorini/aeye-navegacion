@@ -56,7 +56,6 @@ def generate_launch_description():
     use_rviz = LaunchConfiguration("use_rviz")
     rviz_config = LaunchConfiguration("rviz_config")
     use_mapviz = LaunchConfiguration("use_mapviz")
-    use_navsat = LaunchConfiguration("use_navsat")
     use_collision_monitor = LaunchConfiguration("use_collision_monitor")
     use_gazebo_utils = LaunchConfiguration("use_gazebo_utils")
     use_pointcloud_to_laserscan = LaunchConfiguration("use_pointcloud_to_laserscan")
@@ -68,6 +67,7 @@ def generate_launch_description():
     ws_port = LaunchConfiguration("ws_port")
     gps_topic = LaunchConfiguration("gps_topic")
     map_frame = LaunchConfiguration("map_frame")
+    datum_setter = LaunchConfiguration("datum_setter")
 
     declare_use_sim_time_cmd = DeclareLaunchArgument(
         "use_sim_time",
@@ -102,7 +102,7 @@ def generate_launch_description():
     declare_use_navsat_cmd = DeclareLaunchArgument(
         "use_navsat",
         default_value="True",
-        description="Whether to start navsat_transform_node",
+        description="Deprecated: navsat_transform is always started in real.launch",
     )
     declare_use_collision_monitor_cmd = DeclareLaunchArgument(
         "use_collision_monitor",
@@ -159,6 +159,11 @@ def generate_launch_description():
         default_value="map",
         description="Global map frame for navigation web backend",
     )
+    declare_datum_setter_cmd = DeclareLaunchArgument(
+        "datum_setter",
+        default_value="true",
+        description="Enable datum_setter node",
+    )
 
     nav2_only_cmd = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(gps_wpf_dir, "launch", "nav2_only.launch.py")),
@@ -208,7 +213,6 @@ def generate_launch_description():
             ("odometry/gps", "odometry/gps"),
             ("odometry/filtered", "odometry/local"),
         ],
-        condition=IfCondition(use_navsat),
     )
     datum_setter_cmd = Node(
         package="navegacion_gps",
@@ -229,7 +233,9 @@ def generate_launch_description():
                 "datum_retry_delay_s": 0.15,
             }
         ],
-        condition=IfCondition(use_navsat),
+        condition=IfCondition(
+            PythonExpression(["'", datum_setter, "'.lower() == 'true'"])
+        ),
     )
 
     zones_manager_cmd = Node(
@@ -442,6 +448,7 @@ def generate_launch_description():
     ld.add_action(declare_ws_port_cmd)
     ld.add_action(declare_gps_topic_cmd)
     ld.add_action(declare_map_frame_cmd)
+    ld.add_action(declare_datum_setter_cmd)
     ld.add_action(OpaqueFunction(function=_validate_telemetry_backend))
 
     ld.add_action(nav2_only_cmd)

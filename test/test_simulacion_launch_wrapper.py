@@ -72,3 +72,11 @@ def test_simulacion_launch_exposes_ekf_global_toggle() -> None:
     assert '"ekf_local": ekf_local' in launch_contents
     assert 'DeclareLaunchArgument("ekf_global", default_value="False")' in launch_contents
     assert '"ekf_global": ekf_global' in launch_contents
+
+
+def test_simulacion_launch_forwards_datum_setter_toggle() -> None:
+    launch_path = Path(__file__).resolve().parents[1] / "launch" / "simulacion.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert 'DeclareLaunchArgument("datum_setter", default_value="false")' in launch_contents
+    assert '"datum_setter": datum_setter' in launch_contents

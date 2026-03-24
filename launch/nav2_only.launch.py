@@ -136,6 +136,7 @@ def generate_launch_description():
             "use_sim_time": "False",
             "params_file": configured_params,
             "autostart": "True",
+            "use_velocity_smoother": "False",
         }.items(),
     )
 

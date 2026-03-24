@@ -41,6 +41,13 @@ def test_nav_local_v2_does_not_use_frame_override_overlay() -> None:
     assert "configured_nav2_overrides" not in launch_contents
 
 
+def test_nav2_only_launch_disables_velocity_smoother() -> None:
+    launch_path = PACKAGE_ROOT / "launch" / "nav2_only.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert '"use_velocity_smoother": "False"' in launch_contents
+
+
 def test_nav2_no_map_direct_frame_values() -> None:
     nav2_config_path = PACKAGE_ROOT / "config" / "nav2_no_map_params.yaml"
     nav2_config_contents = nav2_config_path.read_text(encoding="utf-8")
@@ -65,11 +72,25 @@ def test_real_launch_includes_datum_setter_node() -> None:
     launch_path = PACKAGE_ROOT / "launch" / "real.launch.py"
     launch_contents = launch_path.read_text(encoding="utf-8")
 
+    assert 'DeclareLaunchArgument(\n        "datum_setter",' in launch_contents
+    assert "default_value=\"true\"" in launch_contents
     assert 'executable="datum_setter"' in launch_contents
     assert '"set_datum_service": "/datum_setter/set_datum"' in launch_contents
     assert '"get_datum_service": "/datum_setter/get_datum"' in launch_contents
     assert '"datum_service": "/datum"' in launch_contents
     assert '"datum_service_fallback": "/navsat_transform/datum"' in launch_contents
+    assert "PythonExpression([\"'\", datum_setter, \"'.lower() == 'true'\"])" in launch_contents
+
+
+def test_real_launch_always_runs_dual_ekf_and_navsat_transform_without_controller_server() -> None:
+    launch_path = PACKAGE_ROOT / "launch" / "real.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert 'name="ekf_filter_node_odom"' in launch_contents
+    assert 'name="ekf_filter_node_map"' in launch_contents
+    assert 'name="navsat_transform"' in launch_contents
+    assert "condition=IfCondition(use_navsat)" not in launch_contents
+    assert 'controller_server' not in launch_contents
 
 
 def test_dual_ekf_navsat_waits_for_runtime_datum() -> None:

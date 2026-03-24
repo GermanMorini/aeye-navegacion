@@ -5,7 +5,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
 from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -40,6 +40,7 @@ def generate_launch_description():
     twist_covariance_yaw_rate = LaunchConfiguration("twist_covariance_yaw_rate")
     ekf_local = LaunchConfiguration("ekf_local")
     ekf_global = LaunchConfiguration("ekf_global")
+    datum_setter = LaunchConfiguration("datum_setter")
 
     return LaunchDescription(
         [
@@ -82,6 +83,7 @@ def generate_launch_description():
             DeclareLaunchArgument("twist_covariance_yaw_rate", default_value="0.1"),
             DeclareLaunchArgument("ekf_local", default_value="True"),
             DeclareLaunchArgument("ekf_global", default_value="False"),
+            DeclareLaunchArgument("datum_setter", default_value="false"),
             Node(
                 package="navegacion_gps",
                 executable="sim_sensor_normalizer_v2",
@@ -240,6 +242,30 @@ def generate_launch_description():
                     "ekf_local": ekf_local,
                     "ekf_global": ekf_global,
                 }.items(),
+            ),
+            Node(
+                package="navegacion_gps",
+                executable="datum_setter",
+                name="datum_setter",
+                output="screen",
+                condition=IfCondition(
+                    PythonExpression(["'", datum_setter, "'.lower() == 'true'"])
+                ),
+                parameters=[
+                    {
+                        "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
+                        "gps_topic": "/gps/fix",
+                        "rtk_status_topic": "/gps/rtk_status",
+                        "set_datum_service": "/datum_setter/set_datum",
+                        "get_datum_service": "/datum_setter/get_datum",
+                        "datum_service": "/datum",
+                        "datum_service_fallback": "/navsat_transform/datum",
+                        "datum_wait_timeout_s": 2.0,
+                        "datum_call_timeout_s": 2.5,
+                        "datum_call_retries": 3,
+                        "datum_retry_delay_s": 0.15,
+                    }
+                ],
             ),
             TimerAction(
                 period=nav_start_delay_s,
