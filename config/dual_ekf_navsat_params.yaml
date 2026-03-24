@@ -11,6 +11,9 @@ ekf_filter_node_odom:
     print_diagnostics: true
     publish_tf: true
     dynamic_process_noise_covariance: true
+    alpha: 0.001
+    beta: 2.0
+    kappa: 0.0
 
     map_frame: map
     odom_frame: odom
@@ -54,6 +57,9 @@ ekf_filter_node_map:
     print_diagnostics: true
     publish_tf: true
     dynamic_process_noise_covariance: true
+    alpha: 0.001
+    beta: 2.0
+    kappa: 0.0
 
     map_frame: map
     odom_frame: odom
@@ -72,7 +78,8 @@ ekf_filter_node_map:
     imu0_relative: false
     imu0_remove_gravitational_acceleration: true
 
-    odom0: /wheel/odometry
+    odom0: /odometry/local
+    # odom0: /wheel/odometry
     odom0_config: [false, false, false,
                    false, false, false,
                    true,  true,  false,
@@ -99,8 +106,9 @@ navsat_transform:
     broadcast_utm_transform: false
     publish_filtered_gps: true
     use_odometry_yaw: false
-    wait_for_datum: true
-    datum: [-31.4858037, -64.2410570, 0.0] # Ejemplo: hub de la UCC, Córdoba, Argentina
+    wait_for_datum: false
+    # wait_for_datum: true
+    # datum: [-31.4858037, -64.2410570, 0.0] # Ejemplo: hub de la UCC, Córdoba, Argentina
 
     gps_topic: /gps/fix
     # odom_topic: /wheel/odometry

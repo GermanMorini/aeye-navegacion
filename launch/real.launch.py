@@ -180,7 +180,7 @@ def generate_launch_description():
 
     ekf_odom_cmd = Node(
         package="robot_localization",
-        executable="ekf_node",
+        executable="ukf_node",
         name="ekf_filter_node_odom",
         output="screen",
         parameters=[
@@ -191,7 +191,7 @@ def generate_launch_description():
     )
     ekf_map_cmd = Node(
         package="robot_localization",
-        executable="ekf_node",
+        executable="ukf_node",
         name="ekf_filter_node_map",
         output="screen",
         parameters=[

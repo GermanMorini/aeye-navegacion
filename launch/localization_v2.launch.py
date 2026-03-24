@@ -132,7 +132,7 @@ def generate_launch_description():
             ),
             Node(
                 package="robot_localization",
-                executable="ekf_node",
+                executable="ukf_node",
                 name="ekf_filter_node_odom",
                 output="screen",
                 condition=IfCondition(ekf_local),
@@ -148,7 +148,7 @@ def generate_launch_description():
             ),
             Node(
                 package="robot_localization",
-                executable="ekf_node",
+                executable="ukf_node",
                 name="ekf_filter_node_map",
                 output="screen",
                 condition=IfCondition(ekf_global),

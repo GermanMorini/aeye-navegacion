@@ -21,6 +21,8 @@ def test_localization_v2_launch_uses_fixed_dual_ekf_odom_node() -> None:
     assert 'name="navsat_transform"' in launch_contents
     assert '("odometry/filtered", "/odometry/global")' in launch_contents
     assert "condition=IfCondition(ekf_global)" in launch_contents
+    assert launch_contents.count('executable="ukf_node"') == 2
+    assert 'executable="ekf_node"' not in launch_contents
     assert 'DeclareLaunchArgument("pixhawk_gps_topic", default_value="/gps/fix")' in launch_contents
     assert 'default_value="/odometry/pixhawk"' in launch_contents
     assert '"gps_topic": pixhawk_gps_topic' in launch_contents
@@ -89,6 +91,8 @@ def test_real_launch_always_runs_dual_ekf_and_navsat_transform_without_controlle
     assert 'name="ekf_filter_node_odom"' in launch_contents
     assert 'name="ekf_filter_node_map"' in launch_contents
     assert 'name="navsat_transform"' in launch_contents
+    assert launch_contents.count('executable="ukf_node"') == 2
+    assert 'executable="ekf_node"' not in launch_contents
     assert "condition=IfCondition(use_navsat)" not in launch_contents
     assert 'controller_server' not in launch_contents
 
