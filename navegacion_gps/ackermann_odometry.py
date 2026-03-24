@@ -4,10 +4,11 @@ import math
 from typing import Optional
 
 import rclpy
-from geometry_msgs.msg import Quaternion, TwistWithCovarianceStamped
+from geometry_msgs.msg import Quaternion, TransformStamped, TwistWithCovarianceStamped
 from interfaces.msg import DriveTelemetry
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
+from tf2_ros import TransformBroadcaster
 
 
 def normalize_angle(angle_rad: float) -> float:
@@ -78,6 +79,26 @@ def stamp_to_seconds(stamp) -> float:
     return float(stamp.sec) + float(stamp.nanosec) / 1_000_000_000.0
 
 
+def build_odom_transform(
+    *,
+    stamp,
+    odom_frame: str,
+    base_frame: str,
+    x_m: float,
+    y_m: float,
+    yaw_rad: float,
+) -> TransformStamped:
+    transform = TransformStamped()
+    transform.header.stamp = stamp
+    transform.header.frame_id = str(odom_frame)
+    transform.child_frame_id = str(base_frame)
+    transform.transform.translation.x = float(x_m)
+    transform.transform.translation.y = float(y_m)
+    transform.transform.translation.z = 0.0
+    transform.transform.rotation = quaternion_from_yaw(yaw_rad)
+    return transform
+
+
 class AckermannOdometryNode(Node):
     def __init__(self) -> None:
         super().__init__("ackermann_odometry")
@@ -97,6 +118,7 @@ class AckermannOdometryNode(Node):
         self.declare_parameter("twist_covariance_vx", 0.05)
         self.declare_parameter("twist_covariance_vy", 0.01)
         self.declare_parameter("twist_covariance_yaw_rate", 0.1)
+        self.declare_parameter("publish_odom_tf", False)
 
         telemetry_topic = str(self.get_parameter("telemetry_topic").value)
         odom_topic = str(self.get_parameter("odom_topic").value)
@@ -126,10 +148,14 @@ class AckermannOdometryNode(Node):
         self._twist_covariance_yaw_rate = float(
             self.get_parameter("twist_covariance_yaw_rate").value
         )
+        self._publish_odom_tf = bool(self.get_parameter("publish_odom_tf").value)
 
         self._odom_pub = self.create_publisher(Odometry, odom_topic, 10)
         self._twist_pub = self.create_publisher(TwistWithCovarianceStamped, twist_topic, 10)
         self.create_subscription(DriveTelemetry, telemetry_topic, self._on_telemetry, 10)
+        self._tf_broadcaster: Optional[TransformBroadcaster] = (
+            TransformBroadcaster(self) if self._publish_odom_tf else None
+        )
 
         self._x_m = 0.0
         self._y_m = 0.0
@@ -138,7 +164,8 @@ class AckermannOdometryNode(Node):
 
         self.get_logger().info(
             "ackermann_odometry ready "
-            f"({telemetry_topic} -> {odom_topic}, wheelbase={self._wheelbase_m:.3f}m)"
+            f"({telemetry_topic} -> {odom_topic}, wheelbase={self._wheelbase_m:.3f}m, "
+            f"publish_odom_tf={self._publish_odom_tf})"
         )
 
     def _publish_messages(
@@ -176,6 +203,17 @@ class AckermannOdometryNode(Node):
         twist_msg.twist.twist = odom_msg.twist.twist
         twist_msg.twist.covariance = odom_msg.twist.covariance
         self._twist_pub.publish(twist_msg)
+
+        if self._publish_odom_tf and self._tf_broadcaster is not None:
+            transform = build_odom_transform(
+                stamp=msg.stamp,
+                odom_frame=self._odom_frame,
+                base_frame=self._base_frame,
+                x_m=self._x_m,
+                y_m=self._y_m,
+                yaw_rad=self._yaw_rad,
+            )
+            self._tf_broadcaster.sendTransform(transform)
 
     def _on_telemetry(self, msg: DriveTelemetry) -> None:
         if not bool(msg.speed_valid):

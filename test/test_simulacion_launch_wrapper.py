@@ -13,6 +13,7 @@ def test_simulacion_launch_uses_requested_defaults() -> None:
     launch_path = Path(__file__).resolve().parents[1] / "launch" / "simulacion.launch.py"
     launch_contents = launch_path.read_text(encoding="utf-8")
 
+    assert "rviz_nav2_full.rviz" in launch_contents
     assert "rviz_ekf_local_tuning.rviz" in launch_contents
     assert "rviz_ekf_global_tuning.rviz" in launch_contents
     assert "nav2_no_map_params.yaml" in launch_contents
@@ -23,7 +24,13 @@ def test_simulacion_launch_exposes_rviz_conf_selector() -> None:
     launch_path = Path(__file__).resolve().parents[1] / "launch" / "simulacion.launch.py"
     launch_contents = launch_path.read_text(encoding="utf-8")
 
-    assert 'DeclareLaunchArgument("rviz_conf", default_value="local", choices=["local", "global"])' in launch_contents
+    assert (
+        'DeclareLaunchArgument(\n'
+        '                "rviz_conf",\n'
+        '                default_value="full",\n'
+        '                choices=["full", "local", "global"],\n'
+        "            )"
+    ) in launch_contents
     assert '"rviz_config": selected_rviz_config' in launch_contents
     assert '"rviz_config": rviz_config' not in launch_contents
 

@@ -4,7 +4,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -40,6 +40,10 @@ def generate_launch_description():
     twist_covariance_yaw_rate = LaunchConfiguration("twist_covariance_yaw_rate")
     ekf_local = LaunchConfiguration("ekf_local")
     ekf_global = LaunchConfiguration("ekf_global")
+    publish_odom_tf = ParameterValue(
+        PythonExpression(["'", ekf_local, "' == 'False'"]),
+        value_type=bool,
+    )
 
     return LaunchDescription(
         [
@@ -111,6 +115,7 @@ def generate_launch_description():
                             value_type=float,
                         )
                     },
+                    {"publish_odom_tf": publish_odom_tf},
                 ],
             ),
             Node(
@@ -152,6 +157,7 @@ def generate_launch_description():
                 ],
                 remappings=[
                     ("imu/data", imu_topic),
+                    ("odometry/filtered", "/odometry/global"),
                 ],
             ),
             Node(
@@ -165,7 +171,7 @@ def generate_launch_description():
                     {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
                 ],
                 remappings=[
-                    ("odometry/filtered", "/odometry/local"),
+                    ("odometry/filtered", "/odometry/global"),
                 ],
             ),
         ]

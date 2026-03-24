@@ -10,6 +10,7 @@ from launch.substitutions import LaunchConfiguration, PythonExpression
 def generate_launch_description():
     gps_wpf_dir = get_package_share_directory("navegacion_gps")
     map_tools_dir = get_package_share_directory("map_tools")
+    rviz_full = os.path.join(gps_wpf_dir, "config", "rviz_nav2_full.rviz")
     rviz_local = os.path.join(gps_wpf_dir, "config", "rviz_ekf_local_tuning.rviz")
     rviz_global = os.path.join(gps_wpf_dir, "config", "rviz_ekf_global_tuning.rviz")
     keepout_mask_yaml = os.path.join(gps_wpf_dir, "config", "keepout_mask.yaml")
@@ -50,6 +51,10 @@ def generate_launch_description():
             rviz_conf,
             "' == 'global' else '",
             rviz_local,
+            "' if '",
+            rviz_conf,
+            "' == 'local' else '",
+            rviz_full,
             "'",
         ]
     )
@@ -58,9 +63,13 @@ def generate_launch_description():
         [
             DeclareLaunchArgument("use_sim_time", default_value="True"),
             DeclareLaunchArgument("use_rviz", default_value="True"),
-            DeclareLaunchArgument("rviz_conf", default_value="local", choices=["local", "global"]),
+            DeclareLaunchArgument(
+                "rviz_conf",
+                default_value="full",
+                choices=["full", "local", "global"],
+            ),
             # Kept for backward compatibility; ignored in simulacion wrapper in favor of rviz_conf.
-            DeclareLaunchArgument("rviz_config", default_value=rviz_local),
+            DeclareLaunchArgument("rviz_config", default_value=rviz_full),
             DeclareLaunchArgument("use_keepout", default_value="True"),
             DeclareLaunchArgument("nav_start_delay_s", default_value="4.0"),
             DeclareLaunchArgument("wheelbase_m", default_value="0.94"),
