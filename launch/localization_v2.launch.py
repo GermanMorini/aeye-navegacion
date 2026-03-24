@@ -29,7 +29,7 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
     drive_telemetry_topic = LaunchConfiguration("drive_telemetry_topic")
     imu_topic = LaunchConfiguration("imu_topic")
-    pixhawk_input_odom_topic = LaunchConfiguration("pixhawk_input_odom_topic")
+    pixhawk_gps_topic = LaunchConfiguration("pixhawk_gps_topic")
     pixhawk_output_odom_topic = LaunchConfiguration("pixhawk_output_odom_topic")
     wheelbase_m = LaunchConfiguration("wheelbase_m")
     invert_measured_steer_sign = LaunchConfiguration("invert_measured_steer_sign")
@@ -53,7 +53,7 @@ def generate_launch_description():
                 default_value="/controller/drive_telemetry",
             ),
             DeclareLaunchArgument("imu_topic", default_value="/imu/data"),
-            DeclareLaunchArgument("pixhawk_input_odom_topic", default_value="/odom_raw"),
+            DeclareLaunchArgument("pixhawk_gps_topic", default_value="/gps/fix"),
             DeclareLaunchArgument(
                 "pixhawk_output_odom_topic",
                 default_value="/odometry/pixhawk",
@@ -125,7 +125,8 @@ def generate_launch_description():
                 output="screen",
                 parameters=[
                     {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
-                    {"input_odom_topic": pixhawk_input_odom_topic},
+                    {"imu_topic": imu_topic},
+                    {"gps_topic": pixhawk_gps_topic},
                     {"output_odom_topic": pixhawk_output_odom_topic},
                 ],
             ),

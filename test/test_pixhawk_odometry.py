@@ -6,8 +6,13 @@ from navegacion_gps.pixhawk_odometry import (
     DelayedMessageQueue,
     add_gaussian_noise,
     diag_covariance,
+    gps_velocity_from_positions,
+    local_xy_from_gps,
+    low_pass_filter,
+    normalized_fusion_weights,
     random_walk_step,
     wrap_angle,
+    world_velocity_to_body,
 )
 
 
@@ -82,10 +87,73 @@ def test_wrap_angle_and_noise_stay_finite_for_zero_velocity_case() -> None:
     assert math.isfinite(drift)
 
 
+def test_local_xy_from_gps_scales_in_meters_for_small_delta() -> None:
+    x_m, y_m = local_xy_from_gps(
+        lat_deg=-31.421785,
+        lon_deg=-64.102348,
+        origin_lat_deg=-31.421785,
+        origin_lon_deg=-64.102448,
+    )
+    assert x_m > 0.0
+    assert math.isfinite(x_m)
+    assert math.isfinite(y_m)
+
+
+def test_gps_velocity_from_positions_rejects_invalid_dt() -> None:
+    rejected = gps_velocity_from_positions(
+        prev_x_m=0.0,
+        prev_y_m=0.0,
+        prev_t_s=1.0,
+        cur_x_m=1.0,
+        cur_y_m=0.0,
+        cur_t_s=1.01,
+        min_dt_s=0.05,
+        max_dt_s=2.5,
+    )
+    assert rejected is None
+
+
+def test_gps_velocity_from_positions_computes_expected_value() -> None:
+    derived = gps_velocity_from_positions(
+        prev_x_m=1.0,
+        prev_y_m=2.0,
+        prev_t_s=10.0,
+        cur_x_m=3.0,
+        cur_y_m=5.0,
+        cur_t_s=11.0,
+        min_dt_s=0.05,
+        max_dt_s=2.5,
+    )
+    assert derived is not None
+    vx, vy = derived
+    assert math.isclose(vx, 2.0, rel_tol=0.0, abs_tol=1.0e-9)
+    assert math.isclose(vy, 3.0, rel_tol=0.0, abs_tol=1.0e-9)
+
+
+def test_low_pass_filter_blends_values() -> None:
+    filtered = low_pass_filter(prev_value=2.0, measurement=6.0, alpha=0.25)
+    assert math.isclose(filtered, 3.0, rel_tol=0.0, abs_tol=1.0e-9)
+
+
+def test_normalized_fusion_weights_defaults_to_imu_when_zero() -> None:
+    w_gps, w_imu = normalized_fusion_weights(0.0, 0.0)
+    assert math.isclose(w_gps, 0.0, rel_tol=0.0, abs_tol=1.0e-9)
+    assert math.isclose(w_imu, 1.0, rel_tol=0.0, abs_tol=1.0e-9)
+
+
+def test_world_velocity_to_body_uses_imu_yaw_rotation() -> None:
+    vx_body, vy_body = world_velocity_to_body(vx_world_mps=1.0, vy_world_mps=0.0, yaw_rad=math.pi / 2.0)
+    assert math.isclose(vx_body, 0.0, rel_tol=0.0, abs_tol=1.0e-9)
+    assert math.isclose(vy_body, -1.0, rel_tol=0.0, abs_tol=1.0e-9)
+
+
 def test_pixhawk_defaults_are_less_confident_for_ekf_weighting() -> None:
     source_path = Path(__file__).resolve().parents[1] / "navegacion_gps" / "pixhawk_odometry.py"
     source_contents = source_path.read_text(encoding="utf-8")
 
+    assert 'self.declare_parameter("imu_topic", "/imu/data")' in source_contents
+    assert 'self.declare_parameter("gps_topic", "/gps/fix")' in source_contents
+    assert 'self.declare_parameter("input_odom_topic", "/odom_raw")' not in source_contents
     assert 'self.declare_parameter("pose_covariance_xy", 1.0)' in source_contents
     assert 'self.declare_parameter("twist_covariance_vx", 1.0)' in source_contents
     assert 'self.declare_parameter("twist_covariance_vy", 1.0)' in source_contents
