@@ -57,6 +57,16 @@
             </box>
           </geometry>
           <max_contacts>10</max_contacts>
+          <surface>
+            <friction>
+              <ode>
+                <mu>2.5</mu>
+                <mu2>2.5</mu2>
+                <slip1>0.0</slip1>
+                <slip2>0.0</slip2>
+              </ode>
+            </friction>
+          </surface>
         </collision>
         <visual name='visual'>
           <geometry>
@@ -66,9 +76,9 @@
             </plane>
           </geometry>
           <material>
-            <ambient>0.8 0.8 0.8 1</ambient>
-            <diffuse>0.8 0.8 0.8 1</diffuse>
-            <specular>0.8 0.8 0.8 1</specular>
+            <ambient>0.20 0.20 0.20 1</ambient>
+            <diffuse>0.23 0.23 0.23 1</diffuse>
+            <specular>0.18 0.18 0.18 1</specular>
           </material>
         </visual>
       </link>
