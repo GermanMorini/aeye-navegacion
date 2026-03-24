@@ -37,6 +37,8 @@ def generate_launch_description():
     twist_covariance_vx = LaunchConfiguration("twist_covariance_vx")
     twist_covariance_vy = LaunchConfiguration("twist_covariance_vy")
     twist_covariance_yaw_rate = LaunchConfiguration("twist_covariance_yaw_rate")
+    ekf_local = LaunchConfiguration("ekf_local")
+    ekf_global = LaunchConfiguration("ekf_global")
     launch_web_zone_server = LaunchConfiguration("launch_web_zone_server")
     web_ws_host = LaunchConfiguration("web_ws_host")
     web_ws_port = LaunchConfiguration("web_ws_port")
@@ -91,6 +93,8 @@ def generate_launch_description():
             DeclareLaunchArgument("twist_covariance_vx", default_value="0.05"),
             DeclareLaunchArgument("twist_covariance_vy", default_value="0.01"),
             DeclareLaunchArgument("twist_covariance_yaw_rate", default_value="0.1"),
+            DeclareLaunchArgument("ekf_local", default_value="True"),
+            DeclareLaunchArgument("ekf_global", default_value="False"),
             DeclareLaunchArgument("launch_web_zone_server", default_value="True"),
             DeclareLaunchArgument("web_ws_host", default_value="0.0.0.0"),
             DeclareLaunchArgument("web_ws_port", default_value="8766"),
@@ -122,6 +126,8 @@ def generate_launch_description():
                     "twist_covariance_vx": twist_covariance_vx,
                     "twist_covariance_vy": twist_covariance_vy,
                     "twist_covariance_yaw_rate": twist_covariance_yaw_rate,
+                    "ekf_local": ekf_local,
+                    "ekf_global": ekf_global,
                 }.items(),
             ),
             IncludeLaunchDescription(

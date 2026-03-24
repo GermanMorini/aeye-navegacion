@@ -3,6 +3,7 @@ from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -37,6 +38,8 @@ def generate_launch_description():
     twist_covariance_vx = LaunchConfiguration("twist_covariance_vx")
     twist_covariance_vy = LaunchConfiguration("twist_covariance_vy")
     twist_covariance_yaw_rate = LaunchConfiguration("twist_covariance_yaw_rate")
+    ekf_local = LaunchConfiguration("ekf_local")
+    ekf_global = LaunchConfiguration("ekf_global")
 
     return LaunchDescription(
         [
@@ -61,6 +64,8 @@ def generate_launch_description():
             DeclareLaunchArgument("twist_covariance_vx", default_value="0.05"),
             DeclareLaunchArgument("twist_covariance_vy", default_value="0.01"),
             DeclareLaunchArgument("twist_covariance_yaw_rate", default_value="0.1"),
+            DeclareLaunchArgument("ekf_local", default_value="True"),
+            DeclareLaunchArgument("ekf_global", default_value="False"),
             Node(
                 package="navegacion_gps",
                 executable="ackermann_odometry",
@@ -124,6 +129,7 @@ def generate_launch_description():
                 executable="ekf_node",
                 name="ekf_filter_node_odom",
                 output="screen",
+                condition=IfCondition(ekf_local),
                 parameters=[
                     dual_ekf_params_file,
                     {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
@@ -131,6 +137,34 @@ def generate_launch_description():
                 remappings=[
                     ("imu/data", imu_topic),
                     ("/odom", "/wheel/odometry"),
+                    ("odometry/filtered", "/odometry/local"),
+                ],
+            ),
+            Node(
+                package="robot_localization",
+                executable="ekf_node",
+                name="ekf_filter_node_map",
+                output="screen",
+                condition=IfCondition(ekf_global),
+                parameters=[
+                    dual_ekf_params_file,
+                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+                ],
+                remappings=[
+                    ("imu/data", imu_topic),
+                ],
+            ),
+            Node(
+                package="robot_localization",
+                executable="navsat_transform_node",
+                name="navsat_transform",
+                output="screen",
+                condition=IfCondition(ekf_global),
+                parameters=[
+                    dual_ekf_params_file,
+                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+                ],
+                remappings=[
                     ("odometry/filtered", "/odometry/local"),
                 ],
             ),

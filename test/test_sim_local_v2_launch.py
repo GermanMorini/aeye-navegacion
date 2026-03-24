@@ -25,3 +25,15 @@ def test_sim_local_v2_launch_exposes_optional_bridge_mode() -> None:
     assert 'executable="sim_drive_telemetry"' in launch_contents
     assert 'DeclareLaunchArgument("invert_measured_steer_sign", default_value="True")' in launch_contents
     assert 'DeclareLaunchArgument("invert_steer_from_cmd_vel", default_value="True")' in launch_contents
+
+
+def test_sim_local_v2_launch_forwards_ekf_global_toggle() -> None:
+    launch_path = (
+        Path(__file__).resolve().parents[1] / "launch" / "sim_local_v2.launch.py"
+    )
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert 'DeclareLaunchArgument("ekf_local", default_value="True")' in launch_contents
+    assert '"ekf_local": ekf_local' in launch_contents
+    assert 'DeclareLaunchArgument("ekf_global", default_value="False")' in launch_contents
+    assert '"ekf_global": ekf_global' in launch_contents

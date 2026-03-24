@@ -10,8 +10,14 @@ def test_localization_v2_launch_uses_fixed_dual_ekf_odom_node() -> None:
 
     assert "dual_ekf_navsat_params.yaml" in launch_contents
     assert 'name="ekf_filter_node_odom"' in launch_contents
+    assert "condition=IfCondition(ekf_local)" in launch_contents
+    assert 'DeclareLaunchArgument("ekf_local", default_value="True")' in launch_contents
+    assert 'DeclareLaunchArgument("ekf_global", default_value="False")' in launch_contents
     assert 'executable="ackermann_odometry"' in launch_contents
     assert 'executable="pixhawk_odometry"' in launch_contents
+    assert 'name="ekf_filter_node_map"' in launch_contents
+    assert 'name="navsat_transform"' in launch_contents
+    assert "condition=IfCondition(ekf_global)" in launch_contents
     assert 'default_value="/odometry/pixhawk"' in launch_contents
     assert 'DeclareLaunchArgument(\n                "localization_params_file",' not in launch_contents
     assert 'DeclareLaunchArgument(\n                "ekf_node_name",' not in launch_contents
@@ -43,5 +49,5 @@ def test_dual_ekf_local_uses_wheel_and_pixhawk_odometry_topics() -> None:
     ekf_config_contents = ekf_config_path.read_text(encoding="utf-8")
 
     assert "ekf_filter_node_odom:" in ekf_config_contents
-    assert "odom0: /wheel/odometry" in ekf_config_contents
-    assert "odom1: /odometry/pixhawk" in ekf_config_contents
+    assert "/wheel/odometry" in ekf_config_contents
+    assert "/odometry/pixhawk" in ekf_config_contents

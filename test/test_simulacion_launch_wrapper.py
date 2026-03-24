@@ -54,3 +54,13 @@ def test_simulacion_launch_includes_web_zone_server_stack() -> None:
     assert 'DeclareLaunchArgument("launch_web_zone_server", default_value="True")' in launch_contents
     assert '"launch_nav_command_server": "false"' in launch_contents
     assert '"map_frame": "odom"' in launch_contents
+
+
+def test_simulacion_launch_exposes_ekf_global_toggle() -> None:
+    launch_path = Path(__file__).resolve().parents[1] / "launch" / "simulacion.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert 'DeclareLaunchArgument("ekf_local", default_value="True")' in launch_contents
+    assert '"ekf_local": ekf_local' in launch_contents
+    assert 'DeclareLaunchArgument("ekf_global", default_value="False")' in launch_contents
+    assert '"ekf_global": ekf_global' in launch_contents
