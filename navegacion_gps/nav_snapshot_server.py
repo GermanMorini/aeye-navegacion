@@ -1,25 +1,95 @@
 import math
 import threading
 import time
+from collections import deque
 from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
 import rclpy
 from geometry_msgs.msg import PolygonStamped
-from nav_msgs.msg import OccupancyGrid, Path
+from nav_msgs.msg import OccupancyGrid, Odometry, Path
 from rclpy.duration import Duration
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
-from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import Imu, LaserScan
 from tf2_ros import Buffer, ConnectivityException, ExtrapolationException, LookupException
 from tf2_ros.transform_listener import TransformListener
 from visualization_msgs.msg import Marker, MarkerArray
 
 from interfaces.msg import NavSnapshotLayers
 from interfaces.srv import GetNavSnapshot
+
+NO_GO_ZONE_COLOR_BGR: Tuple[int, int, int] = (80, 0, 80)
+
+
+def normalize_angle_rad(angle_rad: float) -> float:
+    value = float(angle_rad)
+    while value <= -math.pi:
+        value += 2.0 * math.pi
+    while value > math.pi:
+        value -= 2.0 * math.pi
+    return value
+
+
+def yaw_from_quaternion_xyzw(qx: float, qy: float, qz: float, qw: float) -> float:
+    return math.atan2(
+        2.0 * ((float(qw) * float(qz)) + (float(qx) * float(qy))),
+        1.0 - 2.0 * ((float(qy) * float(qy)) + (float(qz) * float(qz))),
+    )
+
+
+def transform_pose_2d(
+    x_m: float,
+    y_m: float,
+    yaw_rad: float,
+    tf_x_m: float,
+    tf_y_m: float,
+    tf_yaw_rad: float,
+) -> Tuple[float, float, float]:
+    cos_yaw = math.cos(float(tf_yaw_rad))
+    sin_yaw = math.sin(float(tf_yaw_rad))
+    x_out = float(tf_x_m) + (cos_yaw * float(x_m)) - (sin_yaw * float(y_m))
+    y_out = float(tf_y_m) + (sin_yaw * float(x_m)) + (cos_yaw * float(y_m))
+    yaw_out = normalize_angle_rad(float(yaw_rad) + float(tf_yaw_rad))
+    return x_out, y_out, yaw_out
+
+
+def decimate_pose_history_by_distance(
+    poses_xy_yaw: List[Tuple[float, float, float]],
+    spacing_m: float,
+) -> List[Tuple[float, float, float]]:
+    if not poses_xy_yaw:
+        return []
+    if spacing_m <= 0.0:
+        return list(poses_xy_yaw)
+
+    selected: List[Tuple[float, float, float]] = [poses_xy_yaw[0]]
+    last_x, last_y, _ = poses_xy_yaw[0]
+    for x_m, y_m, yaw_rad in poses_xy_yaw[1:]:
+        if math.hypot(float(x_m) - float(last_x), float(y_m) - float(last_y)) >= float(spacing_m):
+            selected.append((float(x_m), float(y_m), float(yaw_rad)))
+            last_x = float(x_m)
+            last_y = float(y_m)
+
+    if selected[-1] != poses_xy_yaw[-1]:
+        selected.append(poses_xy_yaw[-1])
+    return selected
+
+
+def compute_north_yaw_in_target_frame(
+    imu_yaw_enu_rad: float,
+    base_yaw_in_target_rad: float,
+) -> float:
+    return normalize_angle_rad(
+        float(base_yaw_in_target_rad) + (math.pi * 0.5 - float(imu_yaw_enu_rad))
+    )
+
+
+def is_allowed_frame_overlay(frame_name: str) -> bool:
+    return str(frame_name) in {"map", "odom", "base_footprint"}
 
 
 class NavSnapshotServerNode(Node):
@@ -39,12 +109,20 @@ class NavSnapshotServerNode(Node):
         )
         self.declare_parameter("scan_topic", "/scan")
         self.declare_parameter("plan_topic", "/plan")
+        self.declare_parameter("raw_odom_topic", "/wheel/odometry")
+        self.declare_parameter("local_odom_topic", "/odometry/local")
+        self.declare_parameter("global_odom_topic", "/odometry/global")
+        self.declare_parameter("imu_topic", "/imu/data")
         self.declare_parameter("base_frame", "base_footprint")
         self.declare_parameter("snapshot_extent_m", 30.0)
         self.declare_parameter("snapshot_size_px", 512)
         self.declare_parameter("snapshot_global_inset_px", 160)
         self.declare_parameter("snapshot_timeout_ms", 500)
         self.declare_parameter("tf_timeout_s", 0.2)
+        self.declare_parameter("odom_arrow_spacing_m", 1.5)
+        self.declare_parameter("odom_history_max_samples", 2000)
+        self.declare_parameter("overlay_thin_thickness", 1)
+        self.declare_parameter("north_arrow_len_px", 48)
 
         self.get_snapshot_service = str(self.get_parameter("get_snapshot_service").value)
         self.local_costmap_topic = str(self.get_parameter("local_costmap_topic").value)
@@ -61,6 +139,10 @@ class NavSnapshotServerNode(Node):
         )
         self.scan_topic = str(self.get_parameter("scan_topic").value)
         self.plan_topic = str(self.get_parameter("plan_topic").value)
+        self.raw_odom_topic = str(self.get_parameter("raw_odom_topic").value)
+        self.local_odom_topic = str(self.get_parameter("local_odom_topic").value)
+        self.global_odom_topic = str(self.get_parameter("global_odom_topic").value)
+        self.imu_topic = str(self.get_parameter("imu_topic").value)
         self.base_frame = str(self.get_parameter("base_frame").value)
         self.snapshot_extent_m = max(
             5.0, float(self.get_parameter("snapshot_extent_m").value)
@@ -75,6 +157,18 @@ class NavSnapshotServerNode(Node):
             100, int(self.get_parameter("snapshot_timeout_ms").value)
         )
         self.tf_timeout_s = max(0.05, float(self.get_parameter("tf_timeout_s").value))
+        self.odom_arrow_spacing_m = max(
+            0.1, float(self.get_parameter("odom_arrow_spacing_m").value)
+        )
+        self.odom_history_max_samples = max(
+            100, int(self.get_parameter("odom_history_max_samples").value)
+        )
+        self.overlay_thin_thickness = max(
+            1, int(self.get_parameter("overlay_thin_thickness").value)
+        )
+        self.north_arrow_len_px = max(
+            12, int(self.get_parameter("north_arrow_len_px").value)
+        )
 
         self._lock = threading.Lock()
         self._local_costmap: Optional[OccupancyGrid] = None
@@ -85,6 +179,16 @@ class NavSnapshotServerNode(Node):
         self._collision_polygons: Optional[MarkerArray] = None
         self._scan: Optional[LaserScan] = None
         self._plan: Optional[Path] = None
+        self._raw_odom_history: deque[Tuple[str, float, float, float]] = deque(
+            maxlen=self.odom_history_max_samples
+        )
+        self._local_odom_history: deque[Tuple[str, float, float, float]] = deque(
+            maxlen=self.odom_history_max_samples
+        )
+        self._global_odom_history: deque[Tuple[str, float, float, float]] = deque(
+            maxlen=self.odom_history_max_samples
+        )
+        self._latest_imu_yaw_enu_rad: Optional[float] = None
 
         self._tf_buffer = Buffer(cache_time=Duration(seconds=10.0))
         self._tf_listener = TransformListener(self._tf_buffer, self)
@@ -118,12 +222,26 @@ class NavSnapshotServerNode(Node):
             LaserScan, self.scan_topic, self._on_scan, qos_profile_sensor_data
         )
         self._plan_sub = self.create_subscription(Path, self.plan_topic, self._on_plan, 10)
+        self._raw_odom_sub = self.create_subscription(
+            Odometry, self.raw_odom_topic, self._on_raw_odom, 20
+        )
+        self._local_odom_sub = self.create_subscription(
+            Odometry, self.local_odom_topic, self._on_local_odom, 20
+        )
+        self._global_odom_sub = self.create_subscription(
+            Odometry, self.global_odom_topic, self._on_global_odom, 20
+        )
+        self._imu_sub = self.create_subscription(
+            Imu, self.imu_topic, self._on_imu, qos_profile_sensor_data
+        )
 
         self.get_logger().info(
             "nav_snapshot_server ready "
             f"(service={self.get_snapshot_service}, size={self.snapshot_size_px}px, "
             f"local={self.local_costmap_topic}, global={self.global_costmap_topic}, "
-            f"keepout={self.keepout_mask_topic}, scan={self.scan_topic}, plan={self.plan_topic})"
+            f"keepout={self.keepout_mask_topic}, scan={self.scan_topic}, plan={self.plan_topic}, "
+            f"raw_odom={self.raw_odom_topic}, local_odom={self.local_odom_topic}, "
+            f"global_odom={self.global_odom_topic}, imu={self.imu_topic})"
         )
 
     def _on_local_costmap(self, msg: OccupancyGrid) -> None:
@@ -157,6 +275,53 @@ class NavSnapshotServerNode(Node):
     def _on_plan(self, msg: Path) -> None:
         with self._lock:
             self._plan = msg
+
+    def _append_odom_pose(
+        self,
+        buffer: deque[Tuple[str, float, float, float]],
+        msg: Odometry,
+    ) -> None:
+        frame_id = str(msg.header.frame_id).strip() or self.base_frame
+        x_m = float(msg.pose.pose.position.x)
+        y_m = float(msg.pose.pose.position.y)
+        q = msg.pose.pose.orientation
+        yaw_rad = yaw_from_quaternion_xyzw(
+            float(q.x), float(q.y), float(q.z), float(q.w)
+        )
+        if not (
+            np.isfinite(x_m)
+            and np.isfinite(y_m)
+            and np.isfinite(yaw_rad)
+        ):
+            return
+        buffer.append((frame_id, x_m, y_m, yaw_rad))
+
+    def _on_raw_odom(self, msg: Odometry) -> None:
+        with self._lock:
+            self._append_odom_pose(self._raw_odom_history, msg)
+
+    def _on_local_odom(self, msg: Odometry) -> None:
+        with self._lock:
+            self._append_odom_pose(self._local_odom_history, msg)
+
+    def _on_global_odom(self, msg: Odometry) -> None:
+        with self._lock:
+            self._append_odom_pose(self._global_odom_history, msg)
+
+    def _on_imu(self, msg: Imu) -> None:
+        q = msg.orientation
+        if (
+            not np.isfinite(float(q.x))
+            or not np.isfinite(float(q.y))
+            or not np.isfinite(float(q.z))
+            or not np.isfinite(float(q.w))
+        ):
+            return
+        yaw_enu_rad = yaw_from_quaternion_xyzw(
+            float(q.x), float(q.y), float(q.z), float(q.w)
+        )
+        with self._lock:
+            self._latest_imu_yaw_enu_rad = float(yaw_enu_rad)
 
     def _on_get_snapshot(
         self,
@@ -230,6 +395,10 @@ class NavSnapshotServerNode(Node):
             collision_polygons = self._collision_polygons
             scan = self._scan
             plan = self._plan
+            raw_odom_history = list(self._raw_odom_history)
+            local_odom_history = list(self._local_odom_history)
+            global_odom_history = list(self._global_odom_history)
+            latest_imu_yaw_enu_rad = self._latest_imu_yaw_enu_rad
 
         layers = {
             "local_costmap": local_costmap is not None,
@@ -279,12 +448,20 @@ class NavSnapshotServerNode(Node):
 
         if local_footprint is not None:
             layers["footprint"] = self._draw_polygon_stamped(
-                canvas, local_footprint, window, (0, 255, 0), 2
+                canvas,
+                local_footprint,
+                window,
+                (0, 255, 0),
+                self.overlay_thin_thickness,
             )
 
         if stop_zone is not None:
             layers["stop_zone"] = self._draw_polygon_stamped(
-                canvas, stop_zone, window, (0, 0, 255), 2
+                canvas,
+                stop_zone,
+                window,
+                (0, 0, 255),
+                self.overlay_thin_thickness,
             )
 
         if collision_polygons is not None:
@@ -296,7 +473,41 @@ class NavSnapshotServerNode(Node):
             layers["scan"] = self._draw_scan(canvas, scan, window)
 
         if plan is not None:
-            layers["plan"] = self._draw_path(canvas, plan, window, (64, 255, 64), 2)
+            layers["plan"] = self._draw_path(
+                canvas,
+                plan,
+                window,
+                (64, 255, 64),
+                self.overlay_thin_thickness,
+            )
+
+        self._draw_odometry_history(
+            canvas=canvas,
+            odom_history=raw_odom_history,
+            window=window,
+            color_bgr=(0, 165, 255),
+            arrow_len_px=14,
+        )
+        self._draw_odometry_history(
+            canvas=canvas,
+            odom_history=local_odom_history,
+            window=window,
+            color_bgr=(255, 255, 0),
+            arrow_len_px=14,
+        )
+        self._draw_odometry_history(
+            canvas=canvas,
+            odom_history=global_odom_history,
+            window=window,
+            color_bgr=(255, 0, 170),
+            arrow_len_px=14,
+        )
+        self._draw_frame_axes_overlay(canvas=canvas, window=window)
+        self._draw_north_arrow_overlay(
+            canvas=canvas,
+            window=window,
+            latest_imu_yaw_enu_rad=latest_imu_yaw_enu_rad,
+        )
 
         if global_costmap is not None:
             layers["global_inset"] = self._draw_global_inset(
@@ -498,11 +709,9 @@ class NavSnapshotServerNode(Node):
         cost = np.clip(keepout_cost, 0.0, 100.0)
         if not np.any(cost > 0.0):
             return
-        alpha = np.clip(cost / 100.0, 0.05, 0.70)
-        overlay = canvas.copy().astype(np.float32)
-        overlay[:, :, 2] = 255.0
-        overlay[:, :, 1] *= (1.0 - alpha * 0.8)
-        overlay[:, :, 0] *= (1.0 - alpha * 0.8)
+        alpha = np.clip(cost / 100.0, 0.08, 0.70)
+        overlay = np.empty_like(canvas, dtype=np.float32)
+        overlay[:, :] = NO_GO_ZONE_COLOR_BGR
         keep_mask = cost > 0.0
         canvas_float = canvas.astype(np.float32)
         canvas_float[keep_mask] = (
@@ -557,6 +766,91 @@ class NavSnapshotServerNode(Node):
         ys = np.array([p[1] for p in pts_xy], dtype=np.float32)
         x_out, y_out = self._transform_2d_from_tf(tf, xs, ys)
         return list(zip(x_out.tolist(), y_out.tolist()))
+
+    def _transform_pose_history_to_window(
+        self,
+        odom_history: List[Tuple[str, float, float, float]],
+        window_frame: str,
+    ) -> List[Tuple[float, float, float]]:
+        transformed: List[Tuple[float, float, float]] = []
+        for src_frame, x_m, y_m, yaw_rad in odom_history:
+            if (not src_frame) or src_frame == window_frame:
+                transformed.append((float(x_m), float(y_m), float(yaw_rad)))
+                continue
+            tf = self._lookup_transform(window_frame, src_frame)
+            if tf is None:
+                continue
+            t = tf.transform.translation
+            q = tf.transform.rotation
+            tf_yaw_rad = yaw_from_quaternion_xyzw(q.x, q.y, q.z, q.w)
+            x_out, y_out, yaw_out = transform_pose_2d(
+                x_m=x_m,
+                y_m=y_m,
+                yaw_rad=yaw_rad,
+                tf_x_m=float(t.x),
+                tf_y_m=float(t.y),
+                tf_yaw_rad=float(tf_yaw_rad),
+            )
+            transformed.append((x_out, y_out, yaw_out))
+        return transformed
+
+    def _draw_arrow_world(
+        self,
+        canvas: np.ndarray,
+        window: Dict[str, Any],
+        x_m: float,
+        y_m: float,
+        yaw_rad: float,
+        color_bgr: Tuple[int, int, int],
+        arrow_len_px: int,
+        thickness: int = 1,
+    ) -> bool:
+        origin_px = self._world_to_px(float(x_m), float(y_m), window)
+        if origin_px is None:
+            return False
+        dx_px = int(round(float(arrow_len_px) * math.cos(float(yaw_rad))))
+        dy_px = int(round(-float(arrow_len_px) * math.sin(float(yaw_rad))))
+        tip_px = (origin_px[0] + dx_px, origin_px[1] + dy_px)
+        cv2.arrowedLine(
+            canvas,
+            origin_px,
+            tip_px,
+            color_bgr,
+            thickness=max(1, int(thickness)),
+            line_type=cv2.LINE_AA,
+            tipLength=0.35,
+        )
+        return True
+
+    def _draw_odometry_history(
+        self,
+        canvas: np.ndarray,
+        odom_history: List[Tuple[str, float, float, float]],
+        window: Dict[str, Any],
+        color_bgr: Tuple[int, int, int],
+        arrow_len_px: int,
+    ) -> bool:
+        transformed = self._transform_pose_history_to_window(
+            odom_history=odom_history,
+            window_frame=str(window["frame_id"]),
+        )
+        decimated = decimate_pose_history_by_distance(
+            transformed, float(self.odom_arrow_spacing_m)
+        )
+        any_drawn = False
+        for x_m, y_m, yaw_rad in decimated:
+            if self._draw_arrow_world(
+                canvas=canvas,
+                window=window,
+                x_m=x_m,
+                y_m=y_m,
+                yaw_rad=yaw_rad,
+                color_bgr=color_bgr,
+                arrow_len_px=int(arrow_len_px),
+                thickness=1,
+            ):
+                any_drawn = True
+        return any_drawn
 
     def _draw_polyline(
         self,
@@ -773,6 +1067,136 @@ class NavSnapshotServerNode(Node):
 
         return drawn
 
+    def _resolve_frame_pose_in_window(
+        self,
+        frame_name: str,
+        window_frame: str,
+    ) -> Optional[Tuple[float, float, float]]:
+        if not is_allowed_frame_overlay(frame_name):
+            return None
+        if frame_name == window_frame:
+            return 0.0, 0.0, 0.0
+        tf = self._lookup_transform(window_frame, frame_name)
+        if tf is None:
+            return None
+        translation = tf.transform.translation
+        rotation = tf.transform.rotation
+        yaw_rad = yaw_from_quaternion_xyzw(
+            rotation.x, rotation.y, rotation.z, rotation.w
+        )
+        return float(translation.x), float(translation.y), float(yaw_rad)
+
+    def _draw_frame_axes_overlay(self, canvas: np.ndarray, window: Dict[str, Any]) -> bool:
+        window_frame = str(window["frame_id"])
+        any_drawn = False
+        frame_positions_px: Dict[str, Tuple[int, int]] = {}
+        for frame_name in ("map", "odom", "base_footprint"):
+            pose = self._resolve_frame_pose_in_window(frame_name, window_frame)
+            if pose is None:
+                continue
+            x_m, y_m, yaw_rad = pose
+            origin_px = self._world_to_px(float(x_m), float(y_m), window)
+            if origin_px is None:
+                continue
+
+            axis_len_px = 16
+            x_tip = (
+                origin_px[0] + int(round(axis_len_px * math.cos(yaw_rad))),
+                origin_px[1] - int(round(axis_len_px * math.sin(yaw_rad))),
+            )
+            y_tip = (
+                origin_px[0] + int(round(axis_len_px * math.cos(yaw_rad + (math.pi * 0.5)))),
+                origin_px[1] - int(round(axis_len_px * math.sin(yaw_rad + (math.pi * 0.5)))),
+            )
+            cv2.line(canvas, origin_px, x_tip, (80, 80, 255), 1, cv2.LINE_AA)
+            cv2.line(canvas, origin_px, y_tip, (80, 255, 80), 1, cv2.LINE_AA)
+            cv2.circle(canvas, origin_px, 2, (220, 220, 220), thickness=-1, lineType=cv2.LINE_AA)
+            cv2.putText(
+                canvas,
+                frame_name,
+                (origin_px[0] + 4, origin_px[1] - 4),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.35,
+                (230, 230, 230),
+                1,
+                cv2.LINE_AA,
+            )
+            frame_positions_px[frame_name] = origin_px
+            any_drawn = True
+
+        chain = [("map", "odom"), ("odom", "base_footprint")]
+        for src, dst in chain:
+            if src in frame_positions_px and dst in frame_positions_px:
+                cv2.arrowedLine(
+                    canvas,
+                    frame_positions_px[src],
+                    frame_positions_px[dst],
+                    (180, 180, 180),
+                    1,
+                    line_type=cv2.LINE_AA,
+                    tipLength=0.18,
+                )
+
+        cv2.putText(
+            canvas,
+            "TF: map -> odom -> base_footprint",
+            (10, canvas.shape[0] - 10),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.42,
+            (210, 210, 210),
+            1,
+            cv2.LINE_AA,
+        )
+        return any_drawn
+
+    def _draw_north_arrow_overlay(
+        self,
+        canvas: np.ndarray,
+        window: Dict[str, Any],
+        latest_imu_yaw_enu_rad: Optional[float],
+    ) -> bool:
+        if latest_imu_yaw_enu_rad is None:
+            return False
+        base_pose = self._resolve_frame_pose_in_window(
+            frame_name="base_footprint",
+            window_frame=str(window["frame_id"]),
+        )
+        if base_pose is None:
+            return False
+        _, _, base_yaw_in_window_rad = base_pose
+        north_yaw_window_rad = compute_north_yaw_in_target_frame(
+            imu_yaw_enu_rad=float(latest_imu_yaw_enu_rad),
+            base_yaw_in_target_rad=float(base_yaw_in_window_rad),
+        )
+
+        ox = 24
+        oy = 24
+        length_px = int(self.north_arrow_len_px)
+        tip = (
+            ox + int(round(length_px * math.cos(north_yaw_window_rad))),
+            oy - int(round(length_px * math.sin(north_yaw_window_rad))),
+        )
+        cv2.arrowedLine(
+            canvas,
+            (ox, oy),
+            tip,
+            (245, 245, 245),
+            2,
+            line_type=cv2.LINE_AA,
+            tipLength=0.22,
+        )
+        cv2.putText(
+            canvas,
+            "N",
+            (tip[0] + 4, tip[1] - 4),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+        return True
+
     def _draw_global_inset(
         self,
         canvas: np.ndarray,
@@ -805,7 +1229,13 @@ class NavSnapshotServerNode(Node):
                 "max_y": float(global_costmap.info.origin.position.y)
                 + float(global_costmap.info.height) * float(global_costmap.info.resolution),
             }
-            self._draw_path(global_img, plan, inset_window, (96, 255, 96), 2)
+            self._draw_path(
+                global_img,
+                plan,
+                inset_window,
+                (96, 255, 96),
+                self.overlay_thin_thickness,
+            )
 
         robot_tf = self._lookup_transform(
             global_costmap.header.frame_id or self.base_frame, self.base_frame
