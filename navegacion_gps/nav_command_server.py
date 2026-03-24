@@ -1,3 +1,4 @@
+import copy
 import math
 import threading
 import time
@@ -7,6 +8,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import rclpy
 from action_msgs.msg import GoalStatus
+from builtin_interfaces.msg import Time as BuiltinTime
 from geographic_msgs.msg import GeoPoint
 from geometry_msgs.msg import PoseStamped, Quaternion, Twist
 from nav2_msgs.action import FollowWaypoints, NavigateThroughPoses
@@ -657,12 +659,23 @@ class NavCommandServerNode(Node):
             return poses_list
         return poses_list[1:] + [poses_list[0]]
 
+    def _prepare_poses_for_nav2(self, poses: Sequence[PoseStamped]) -> List[PoseStamped]:
+        prepared: List[PoseStamped] = []
+        for pose in poses:
+            cloned_pose = copy.deepcopy(pose)
+            if not str(cloned_pose.header.frame_id).strip():
+                cloned_pose.header.frame_id = self.map_frame
+            cloned_pose.header.stamp = BuiltinTime(sec=0, nanosec=0)
+            prepared.append(cloned_pose)
+        return prepared
+
     def _send_follow_waypoints_goal(
         self, poses: Sequence[PoseStamped], loop_enabled: bool, reason: str
     ) -> Tuple[bool, str]:
         poses_list = list(poses)
         if not poses_list:
             return False, "no waypoint poses to send"
+        prepared_poses = self._prepare_poses_for_nav2(poses_list)
 
         if not self._follow_waypoints_client.wait_for_server(timeout_sec=2.0):
             self.get_logger().error(
@@ -671,7 +684,7 @@ class NavCommandServerNode(Node):
             return False, "FollowWaypoints action server not available"
 
         goal = FollowWaypoints.Goal()
-        goal.poses = poses_list
+        goal.poses = prepared_poses
 
         future = self._follow_waypoints_client.send_goal_async(goal)
         goal_handle = self._wait_for_future(future, timeout_sec=5.0)
@@ -699,6 +712,11 @@ class NavCommandServerNode(Node):
         result_future.add_done_callback(
             partial(self._on_nav_action_result_done, "FollowWaypoints")
         )
+        self.get_logger().info(
+            "Prepared FollowWaypoints goal "
+            f"(poses={len(prepared_poses)}, stamp_mode=zero/latest, "
+            f"default_frame={self.map_frame})"
+        )
 
         self.get_logger().info(
             "FollowWaypoints goal accepted "
@@ -714,6 +732,7 @@ class NavCommandServerNode(Node):
         poses_list = list(poses)
         if not poses_list:
             return False, "no waypoint poses to send"
+        prepared_poses = self._prepare_poses_for_nav2(poses_list)
 
         if not self._navigate_through_poses_client.wait_for_server(timeout_sec=2.0):
             self.get_logger().error(
@@ -722,7 +741,7 @@ class NavCommandServerNode(Node):
             return False, "NavigateThroughPoses action server not available"
 
         goal = NavigateThroughPoses.Goal()
-        goal.poses = poses_list
+        goal.poses = prepared_poses
 
         future = self._navigate_through_poses_client.send_goal_async(goal)
         goal_handle = self._wait_for_future(future, timeout_sec=5.0)
@@ -751,6 +770,11 @@ class NavCommandServerNode(Node):
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(
             partial(self._on_nav_action_result_done, "NavigateThroughPoses")
+        )
+        self.get_logger().info(
+            "Prepared NavigateThroughPoses goal "
+            f"(poses={len(prepared_poses)}, stamp_mode=zero/latest, "
+            f"default_frame={self.map_frame})"
         )
 
         self.get_logger().info(

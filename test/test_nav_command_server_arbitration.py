@@ -19,6 +19,7 @@ class _FakeArbNode:
         self._current_goal_handle = None
         self._last_cmd_vel_safe = None
         self._collision_stop_active = False
+        self.forward_cmd_vel_safe_without_goal = False
         self._last_manual_cmd = CmdVelFinal()
         self._last_manual_cmd_time = None
         self._manual_watchdog_stop_sent = False

@@ -104,7 +104,7 @@ smoother_server:
       path_upsampling_factor: 1
       keep_start_orientation: true
       keep_goal_orientation: true
-      minimum_turning_radius: 1.7
+      minimum_turning_radius: 1.9
       optimizer:
         max_iterations: 80
 
@@ -138,10 +138,10 @@ controller_server:
 
       desired_linear_vel: 1.2
 
-      lookahead_dist: 1.6
+      lookahead_dist: 3.0
       min_lookahead_dist: 1.0
-      max_lookahead_dist: 2.4
-      lookahead_time: 1.2
+      max_lookahead_dist: 3.0
+      lookahead_time: 2.0
       use_velocity_scaled_lookahead_dist: true
 
       min_approach_linear_velocity: 1.0
@@ -162,7 +162,7 @@ controller_server:
 
       max_angular_accel: 3.0
       transform_tolerance: 0.2
-      use_interpolation: false
+      use_interpolation: true
       max_robot_pose_search_dist: 4.0
 
       cost_scaling_dist: 1.0

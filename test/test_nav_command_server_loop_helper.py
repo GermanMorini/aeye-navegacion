@@ -2,6 +2,8 @@ import threading
 from types import SimpleNamespace
 
 from action_msgs.msg import GoalStatus
+from builtin_interfaces.msg import Time
+from geometry_msgs.msg import PoseStamped
 
 from navegacion_gps.nav_command_server import NavCommandServerNode
 
@@ -85,6 +87,170 @@ class _FakeLoopNode:
 
     def get_logger(self):
         return self.logger
+
+
+class _FakeAsyncResultFuture:
+    def add_done_callback(self, _callback) -> None:
+        return None
+
+
+class _FakeGoalHandle:
+    def __init__(self) -> None:
+        self.accepted = True
+
+    def get_result_async(self):
+        return _FakeAsyncResultFuture()
+
+
+class _FakeGoalFuture:
+    def __init__(self, result) -> None:
+        self.result = result
+
+
+class _FakeActionClient:
+    def __init__(self) -> None:
+        self.last_goal = None
+        self.last_timeout = None
+        self._goal_handle = _FakeGoalHandle()
+
+    def wait_for_server(self, timeout_sec: float) -> bool:
+        self.last_timeout = float(timeout_sec)
+        return True
+
+    def send_goal_async(self, goal):
+        self.last_goal = goal
+        return _FakeGoalFuture(self._goal_handle)
+
+
+class _FakeSendNode:
+    _prepare_poses_for_nav2 = NavCommandServerNode._prepare_poses_for_nav2
+    _send_follow_waypoints_goal = NavCommandServerNode._send_follow_waypoints_goal
+    _send_navigate_through_poses_goal = NavCommandServerNode._send_navigate_through_poses_goal
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.map_frame = "map"
+        self._current_goal_handle = None
+        self._loop_waypoint_poses = []
+        self._loop_enabled = False
+        self._is_navigating = False
+        self._auto_mode = "idle"
+        self._nav_result_event_id = 0
+        self._follow_waypoints_client = _FakeActionClient()
+        self._navigate_through_poses_client = _FakeActionClient()
+        self.logger = _FakeLogger()
+
+    def _wait_for_future(self, future, timeout_sec: float):
+        _ = timeout_sec
+        return future.result
+
+    def _publish_telemetry(self, force: bool = False) -> None:
+        _ = force
+
+    def _on_nav_action_result_done(self, _action_name, _future) -> None:
+        return None
+
+    def get_logger(self):
+        return self.logger
+
+
+def _pose(frame_id: str, sec: int, nanosec: int = 0) -> PoseStamped:
+    msg = PoseStamped()
+    msg.header.frame_id = str(frame_id)
+    msg.header.stamp = Time(sec=int(sec), nanosec=int(nanosec))
+    msg.pose.orientation.w = 1.0
+    return msg
+
+
+def test_prepare_poses_for_nav2_clones_and_normalizes_stamps_and_frame() -> None:
+    node = SimpleNamespace(map_frame="map")
+    original_a = _pose("map", sec=159, nanosec=123)
+    original_b = _pose("", sec=160, nanosec=456)
+
+    prepared = NavCommandServerNode._prepare_poses_for_nav2(node, [original_a, original_b])
+
+    assert len(prepared) == 2
+    assert prepared[0] is not original_a
+    assert prepared[1] is not original_b
+    assert prepared[0].header.stamp.sec == 0
+    assert prepared[0].header.stamp.nanosec == 0
+    assert prepared[1].header.stamp.sec == 0
+    assert prepared[1].header.stamp.nanosec == 0
+    assert prepared[0].header.frame_id == "map"
+    assert prepared[1].header.frame_id == "map"
+
+    assert original_a.header.stamp.sec == 159
+    assert original_a.header.stamp.nanosec == 123
+    assert original_b.header.stamp.sec == 160
+    assert original_b.header.stamp.nanosec == 456
+    assert original_b.header.frame_id == ""
+
+
+def test_send_navigate_through_poses_goal_uses_prepared_pose_copies() -> None:
+    node = _FakeSendNode()
+    original_poses = [_pose("map", sec=159, nanosec=1), _pose("", sec=160, nanosec=2)]
+
+    ok, err = NavCommandServerNode._send_navigate_through_poses_goal(
+        node,
+        original_poses,
+        loop_enabled=True,
+        reason="loop_restart_rotated",
+    )
+
+    assert ok is True
+    assert err == "goal accepted"
+    sent_poses = node._navigate_through_poses_client.last_goal.poses
+    assert len(sent_poses) == 2
+    assert sent_poses[0] is not original_poses[0]
+    assert sent_poses[1] is not original_poses[1]
+    assert sent_poses[0].header.stamp.sec == 0
+    assert sent_poses[1].header.stamp.sec == 0
+    assert sent_poses[1].header.frame_id == "map"
+    assert original_poses[0].header.stamp.sec == 159
+    assert original_poses[1].header.stamp.sec == 160
+
+
+def test_send_follow_waypoints_goal_uses_prepared_pose_copies() -> None:
+    node = _FakeSendNode()
+    original_poses = [_pose("", sec=170, nanosec=10)]
+
+    ok, err = NavCommandServerNode._send_follow_waypoints_goal(
+        node,
+        original_poses,
+        loop_enabled=False,
+        reason="set_goal_service",
+    )
+
+    assert ok is True
+    assert err == "goal accepted"
+    sent_poses = node._follow_waypoints_client.last_goal.poses
+    assert len(sent_poses) == 1
+    assert sent_poses[0] is not original_poses[0]
+    assert sent_poses[0].header.stamp.sec == 0
+    assert sent_poses[0].header.stamp.nanosec == 0
+    assert sent_poses[0].header.frame_id == "map"
+    assert original_poses[0].header.stamp.sec == 170
+
+
+def test_send_nav_goal_for_poses_multi_pose_path_uses_zero_stamp_latest() -> None:
+    node = _FakeSendNode()
+    original_poses = [_pose("map", sec=200, nanosec=1), _pose("map", sec=201, nanosec=2)]
+
+    ok, err = NavCommandServerNode._send_nav_goal_for_poses(
+        node,
+        original_poses,
+        loop_enabled=True,
+        reason="loop_restart_rotated",
+    )
+
+    assert ok is True
+    assert err == "goal accepted"
+    sent_poses = node._navigate_through_poses_client.last_goal.poses
+    assert len(sent_poses) == 2
+    assert sent_poses[0].header.stamp.sec == 0
+    assert sent_poses[1].header.stamp.sec == 0
+    assert original_poses[0].header.stamp.sec == 200
+    assert original_poses[1].header.stamp.sec == 201
 
 
 def test_result_callback_restarts_with_rotated_path_on_each_success():
