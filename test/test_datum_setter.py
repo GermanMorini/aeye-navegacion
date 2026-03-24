@@ -1,0 +1,200 @@
+import math
+import threading
+
+from sensor_msgs.msg import NavSatFix, NavSatStatus
+from std_msgs.msg import String
+
+from interfaces.srv import SetDatum
+from navegacion_gps.datum_setter import DatumSetterNode
+
+
+class _FakeLogger:
+    def __init__(self) -> None:
+        self.infos = []
+        self.warnings = []
+
+    def info(self, msg: str) -> None:
+        self.infos.append(str(msg))
+
+    def warning(self, msg: str) -> None:
+        self.warnings.append(str(msg))
+
+
+class _FakeAutoNode:
+    _combined_rtk_locked = DatumSetterNode._combined_rtk_locked
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._last_gps_fix = None
+        self._last_navsat_rtk = False
+        self._last_rtk_status_is_rtk = False
+        self._last_rtk_status_text = ""
+        self._rtk_current = False
+        self._pending_auto_set = False
+        self.logger = _FakeLogger()
+        self.auto_calls = []
+
+    def _auto_set_datum_from_coords(
+        self, lat: float, lon: float, gps_is_rtk: bool, reason: str
+    ) -> None:
+        self.auto_calls.append((float(lat), float(lon), bool(gps_is_rtk), str(reason)))
+
+    def get_logger(self):
+        return self.logger
+
+
+class _FakeSetNode:
+    _combined_rtk_locked = DatumSetterNode._combined_rtk_locked
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._last_gps_fix = None
+        self._last_navsat_rtk = False
+        self._last_rtk_status_is_rtk = False
+        self._rtk_current = False
+        self.already_set = False
+        self.calls = []
+
+    def _apply_datum(
+        self,
+        lat: float,
+        lon: float,
+        source: str,
+        gps_is_rtk: bool,
+        used_current_gps: bool,
+    ):
+        self.calls.append(
+            (
+                float(lat),
+                float(lon),
+                str(source),
+                bool(gps_is_rtk),
+                bool(used_current_gps),
+            )
+        )
+        status = DatumSetterNode._build_status_message(
+            already_set_before=bool(self.already_set),
+            gps_is_rtk=bool(gps_is_rtk),
+            used_current_gps=bool(used_current_gps),
+            source=str(source),
+        )
+        return True, "", status, bool(self.already_set)
+
+
+def _gps_msg(lat: float, lon: float, status: int) -> NavSatFix:
+    msg = NavSatFix()
+    msg.latitude = float(lat)
+    msg.longitude = float(lon)
+    msg.status.status = int(status)
+    return msg
+
+
+def test_parse_coords_accepts_empty_and_pair() -> None:
+    ok, err, use_current, lat, lon = DatumSetterNode._parse_coords([])
+    assert ok is True
+    assert err == ""
+    assert use_current is True
+    assert math.isnan(lat)
+    assert math.isnan(lon)
+
+    ok, err, use_current, lat, lon = DatumSetterNode._parse_coords([-31.5, -64.2])
+    assert ok is True
+    assert err == ""
+    assert use_current is False
+    assert lat == -31.5
+    assert lon == -64.2
+
+
+def test_parse_coords_rejects_invalid_shapes_and_ranges() -> None:
+    ok, _err, _use_current, _lat, _lon = DatumSetterNode._parse_coords([-31.0])
+    assert ok is False
+
+    ok, _err, _use_current, _lat, _lon = DatumSetterNode._parse_coords([-95.0, -64.0])
+    assert ok is False
+
+
+def test_status_text_detection_covers_float_and_fixed() -> None:
+    assert DatumSetterNode._status_text_is_rtk("RTK_FLOAT") is True
+    assert DatumSetterNode._status_text_is_rtk("RTK_FIXED (22 sats)") is True
+    assert DatumSetterNode._status_text_is_rtk("rtk_fix") is True
+    assert DatumSetterNode._status_text_is_rtk("gps_only") is False
+
+
+def test_auto_set_happens_once_on_rtk_edge() -> None:
+    node = _FakeAutoNode()
+
+    DatumSetterNode._on_gps_fix(
+        node,
+        _gps_msg(-31.0, -64.0, NavSatStatus.STATUS_FIX),
+    )
+    assert node.auto_calls == []
+
+    DatumSetterNode._on_gps_fix(
+        node,
+        _gps_msg(-31.0, -64.0, NavSatStatus.STATUS_GBAS_FIX),
+    )
+    assert len(node.auto_calls) == 1
+    assert node.auto_calls[0][3] == "rtk_edge_gps"
+
+    DatumSetterNode._on_gps_fix(
+        node,
+        _gps_msg(-31.1, -64.1, NavSatStatus.STATUS_GBAS_FIX),
+    )
+    assert len(node.auto_calls) == 1
+
+
+def test_auto_set_pending_when_rtk_arrives_before_gps() -> None:
+    node = _FakeAutoNode()
+
+    status_msg = String()
+    status_msg.data = "RTK_FLOAT"
+    DatumSetterNode._on_rtk_status(node, status_msg)
+    assert node.auto_calls == []
+
+    DatumSetterNode._on_gps_fix(
+        node,
+        _gps_msg(-31.25, -64.25, NavSatStatus.STATUS_FIX),
+    )
+    assert len(node.auto_calls) == 1
+    assert node.auto_calls[0][3] == "rtk_edge_pending_gps"
+
+
+def test_set_datum_fails_without_current_gps_for_empty_coords() -> None:
+    node = _FakeSetNode()
+    req = SetDatum.Request()
+    req.coords = []
+    res = SetDatum.Response()
+
+    out = DatumSetterNode._on_set_datum(node, req, res)
+    assert out.ok is False
+    assert "no current GPS sample available" in out.error
+
+
+def test_set_datum_reapplies_when_already_set() -> None:
+    node = _FakeSetNode()
+    node.already_set = True
+    req = SetDatum.Request()
+    req.coords = [-31.5, -64.3]
+    res = SetDatum.Response()
+
+    out = DatumSetterNode._on_set_datum(node, req, res)
+    assert out.ok is True
+    assert out.already_set_before is True
+    assert len(node.calls) == 1
+    assert node.calls[0][2] == "service_manual_coords"
+
+
+def test_set_datum_without_rtk_sets_and_reports_warning() -> None:
+    node = _FakeSetNode()
+    node._last_navsat_rtk = False
+    node._last_rtk_status_is_rtk = False
+    req = SetDatum.Request()
+    req.coords = [-31.4, -64.4]
+    res = SetDatum.Response()
+
+    out = DatumSetterNode._on_set_datum(node, req, res)
+    assert out.ok is True
+    assert out.gps_is_rtk is False
+    assert "without RTK quality" in out.status_message
+    assert len(node.calls) == 1
+    assert node.calls[0][3] is False

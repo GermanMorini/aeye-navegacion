@@ -210,6 +210,27 @@ def generate_launch_description():
         ],
         condition=IfCondition(use_navsat),
     )
+    datum_setter_cmd = Node(
+        package="navegacion_gps",
+        executable="datum_setter",
+        name="datum_setter",
+        output="screen",
+        parameters=[
+            {
+                "gps_topic": gps_topic,
+                "rtk_status_topic": "/gps/rtk_status",
+                "set_datum_service": "/datum_setter/set_datum",
+                "get_datum_service": "/datum_setter/get_datum",
+                "datum_service": "/datum",
+                "datum_service_fallback": "/navsat_transform/datum",
+                "datum_wait_timeout_s": 2.0,
+                "datum_call_timeout_s": 2.5,
+                "datum_call_retries": 3,
+                "datum_retry_delay_s": 0.15,
+            }
+        ],
+        condition=IfCondition(use_navsat),
+    )
 
     zones_manager_cmd = Node(
         package="navegacion_gps",
@@ -431,6 +452,7 @@ def generate_launch_description():
     ld.add_action(ekf_odom_cmd)
     ld.add_action(ekf_map_cmd)
     ld.add_action(navsat_transform_cmd)
+    ld.add_action(datum_setter_cmd)
     ld.add_action(zones_manager_cmd)
     ld.add_action(nav_command_server_cmd)
     ld.add_action(nav_snapshot_server_cmd)

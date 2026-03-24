@@ -56,3 +56,22 @@ def test_dual_ekf_local_uses_wheel_and_pixhawk_odometry_topics() -> None:
     assert "/odometry/pixhawk" in ekf_config_contents
     assert "ekf_filter_node_map:" in ekf_config_contents
     assert "odom1: /odometry/gps" in ekf_config_contents
+
+
+def test_real_launch_includes_datum_setter_node() -> None:
+    launch_path = PACKAGE_ROOT / "launch" / "real.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert 'executable="datum_setter"' in launch_contents
+    assert '"set_datum_service": "/datum_setter/set_datum"' in launch_contents
+    assert '"get_datum_service": "/datum_setter/get_datum"' in launch_contents
+    assert '"datum_service": "/datum"' in launch_contents
+    assert '"datum_service_fallback": "/navsat_transform/datum"' in launch_contents
+
+
+def test_dual_ekf_navsat_waits_for_runtime_datum() -> None:
+    ekf_config_path = PACKAGE_ROOT / "config" / "dual_ekf_navsat_params.yaml"
+    ekf_config_contents = ekf_config_path.read_text(encoding="utf-8")
+
+    assert "wait_for_datum: true" in ekf_config_contents
+    assert "\n    datum:" not in ekf_config_contents

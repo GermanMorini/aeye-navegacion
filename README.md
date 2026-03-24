@@ -4,6 +4,7 @@ Paquete de navegación del workspace. Integra Nav2, `robot_localization`, herram
 
 ## Ejecutables reales
 - `gazebo_utils`
+- `datum_setter`
 - `zones_manager`
 - `nav_command_server`
 - `nav_snapshot_server`
@@ -34,6 +35,13 @@ Este checkout no incluye los antiguos nodos de waypoints interactivos, logger GU
   - `/zones_manager/set_geojson`
   - `/zones_manager/get_state`
   - `/zones_manager/reload_from_disk`
+
+### `datum_setter`
+- Setea automáticamente el datum de `navsat_transform` al detectar entrada a RTK.
+- Permite seteo manual o desde GPS actual.
+- Servicios:
+  - `/datum_setter/set_datum`
+  - `/datum_setter/get_datum`
 
 ### `nav_command_server`
 - Backend ROS para órdenes geográficas y control manual.

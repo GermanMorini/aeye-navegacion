@@ -36,6 +36,7 @@ setup(
             'ackermann_odometry = navegacion_gps.ackermann_odometry:main',
             'cmd_vel_ackermann_bridge_v2 = navegacion_gps.cmd_vel_ackermann_bridge_v2:main',
             'gazebo_utils = navegacion_gps.gazebo_utils:main',
+            'datum_setter = navegacion_gps.datum_setter:main',
             'zones_manager = navegacion_gps.zones_manager:main',
             'nav_command_server = navegacion_gps.nav_command_server:main',
             'nav_snapshot_server = navegacion_gps.nav_snapshot_server:main',
