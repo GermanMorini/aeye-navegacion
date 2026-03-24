@@ -44,6 +44,7 @@ def generate_launch_description():
     nav2_params_file = LaunchConfiguration("nav2_params_file")
     collision_monitor_params_file = LaunchConfiguration("collision_monitor_params_file")
     keepout_mask_yaml = LaunchConfiguration("keepout_mask_yaml")
+    keepout_mask_frame = LaunchConfiguration("keepout_mask_frame")
     configured_nav2_params = ParameterFile(
         RewrittenYaml(
             source_file=nav2_params_file,
@@ -80,12 +81,13 @@ def generate_launch_description():
                 default_value=default_collision_monitor_params,
             ),
             DeclareLaunchArgument("keepout_mask_yaml", default_value=default_keepout_mask),
+            DeclareLaunchArgument("keepout_mask_frame", default_value="map"),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(keepout_launch),
                 launch_arguments={
                     "use_sim_time": use_sim_time,
                     "keepout_mask_yaml": keepout_mask_yaml,
-                    "keepout_mask_frame": "odom",
+                    "keepout_mask_frame": keepout_mask_frame,
                 }.items(),
                 condition=IfCondition(use_keepout),
             ),

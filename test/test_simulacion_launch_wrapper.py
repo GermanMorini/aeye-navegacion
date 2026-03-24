@@ -60,7 +60,8 @@ def test_simulacion_launch_includes_web_zone_server_stack() -> None:
     assert "no_go_editor.launch.py" in launch_contents
     assert 'DeclareLaunchArgument("launch_web_zone_server", default_value="True")' in launch_contents
     assert '"launch_nav_command_server": "false"' in launch_contents
-    assert '"map_frame": "odom"' in launch_contents
+    assert '"map_frame": "map"' in launch_contents
+    assert '"zones_fromll_output_frame": "map"' in launch_contents
 
 
 def test_simulacion_launch_exposes_ekf_global_toggle() -> None:

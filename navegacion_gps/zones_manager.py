@@ -1,5 +1,6 @@
 import copy
 import json
+import math
 import threading
 import time
 from pathlib import Path
@@ -16,10 +17,13 @@ from nav2_msgs.srv import ClearEntireCostmap
 from nav2_msgs.srv import LoadMap
 from nav_msgs.msg import MapMetaData
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
+from rclpy.duration import Duration
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.time import Time
 from robot_localization.srv import FromLL
 from std_srvs.srv import Trigger
+from tf2_ros import Buffer, TransformException, TransformListener
 
 from interfaces.srv import GetZonesState, SetZonesGeoJson
 
@@ -30,6 +34,81 @@ from .zones_geojson_utils import (
     normalize_geojson_object,
     rasterize_polygons_trinary,
 )
+
+
+def yaw_from_quaternion_xyzw(qx: float, qy: float, qz: float, qw: float) -> float:
+    siny_cosp = 2.0 * ((float(qw) * float(qz)) + (float(qx) * float(qy)))
+    cosy_cosp = 1.0 - 2.0 * ((float(qy) * float(qy)) + (float(qz) * float(qz)))
+    return math.atan2(siny_cosp, cosy_cosp)
+
+
+def apply_planar_transform(
+    x_m: float,
+    y_m: float,
+    tx_m: float,
+    ty_m: float,
+    yaw_rad: float,
+) -> Tuple[float, float]:
+    cos_yaw = math.cos(float(yaw_rad))
+    sin_yaw = math.sin(float(yaw_rad))
+    x_out = (cos_yaw * float(x_m)) - (sin_yaw * float(y_m)) + float(tx_m)
+    y_out = (sin_yaw * float(x_m)) + (cos_yaw * float(y_m)) + float(ty_m)
+    return x_out, y_out
+
+
+def lookup_planar_transform_from_buffer(
+    tf_buffer: Any,
+    target_frame: str,
+    source_frame: str,
+    timeout_s: float,
+) -> Tuple[bool, float, float, float, str]:
+    if (not source_frame) or (not target_frame) or (source_frame == target_frame):
+        return True, 0.0, 0.0, 0.0, ""
+
+    try:
+        transform = tf_buffer.lookup_transform(
+            str(target_frame),
+            str(source_frame),
+            Time(),
+            timeout=Duration(seconds=float(timeout_s)),
+        )
+    except TransformException as exc:
+        return (
+            False,
+            0.0,
+            0.0,
+            0.0,
+            f"transform unavailable {target_frame}<-{source_frame}: {exc}",
+        )
+    except Exception as exc:
+        return (
+            False,
+            0.0,
+            0.0,
+            0.0,
+            f"transform lookup failed {target_frame}<-{source_frame}: {exc}",
+        )
+
+    translation = transform.transform.translation
+    rotation = transform.transform.rotation
+    tx_m = float(translation.x)
+    ty_m = float(translation.y)
+    yaw_rad = yaw_from_quaternion_xyzw(
+        float(rotation.x),
+        float(rotation.y),
+        float(rotation.z),
+        float(rotation.w),
+    )
+    if (not np.isfinite(tx_m)) or (not np.isfinite(ty_m)) or (not np.isfinite(yaw_rad)):
+        return (
+            False,
+            0.0,
+            0.0,
+            0.0,
+            f"invalid transform values for {target_frame}<-{source_frame}",
+        )
+
+    return True, tx_m, ty_m, yaw_rad, ""
 
 
 def compose_keepout_cost_mask(
@@ -100,6 +179,9 @@ class ZonesManagerNode(Node):
         self.declare_parameter("fromll_wait_timeout_s", 2.0)
         self.declare_parameter("fromll_call_retries", 4)
         self.declare_parameter("fromll_retry_delay_s", 0.15)
+        self.declare_parameter("fromll_output_frame", "odom")
+        self.declare_parameter("fromll_target_frame", "map")
+        self.declare_parameter("tf_lookup_timeout_s", 0.5)
 
         self.declare_parameter("load_map_service", "/keepout_filter_mask_server/load_map")
         self.declare_parameter("load_map_wait_timeout_s", 8.0)
@@ -144,6 +226,15 @@ class ZonesManagerNode(Node):
         )
         self.fromll_retry_delay_s = max(
             0.0, float(self.get_parameter("fromll_retry_delay_s").value)
+        )
+        self.fromll_output_frame = str(
+            self.get_parameter("fromll_output_frame").value
+        ).strip()
+        self.fromll_target_frame = str(
+            self.get_parameter("fromll_target_frame").value
+        ).strip()
+        self.tf_lookup_timeout_s = max(
+            0.05, float(self.get_parameter("tf_lookup_timeout_s").value)
         )
 
         self.load_map_service = str(self.get_parameter("load_map_service").value)
@@ -227,6 +318,10 @@ class ZonesManagerNode(Node):
         self._active_fromll_name: Optional[str] = None
         self._active_fromll_client: Optional[Any] = None
         self._last_fromll_error: Optional[str] = None
+        self._last_tf_error: Optional[str] = None
+
+        self._tf_buffer = Buffer()
+        self._tf_listener = TransformListener(self._tf_buffer, self, spin_thread=True)
 
         self._load_map_client = self.create_client(
             LoadMap,
@@ -264,6 +359,12 @@ class ZonesManagerNode(Node):
             f"(set_service={self.set_geojson_service}, get_service={self.get_state_service}, "
             f"reload_service={self.reload_from_disk_service}, "
             f"load_map_service={self.load_map_service})"
+        )
+        self.get_logger().info(
+            "fromLL frame transform config "
+            f"(output_frame={self.fromll_output_frame}, "
+            f"target_frame={self._effective_fromll_target_frame()}, "
+            f"tf_lookup_timeout_s={self.tf_lookup_timeout_s:.2f})"
         )
         self.get_logger().info(
             "Global costmap clear config "
@@ -439,6 +540,26 @@ class ZonesManagerNode(Node):
 
         return None
 
+    def _effective_fromll_target_frame(self) -> str:
+        if self.fromll_target_frame:
+            return self.fromll_target_frame
+        return str(self.map_frame)
+
+    def _resolve_fromll_planar_transform(self) -> Optional[Tuple[float, float, float]]:
+        source_frame = str(self.fromll_output_frame)
+        target_frame = self._effective_fromll_target_frame()
+        ok, tx_m, ty_m, yaw_rad, err = lookup_planar_transform_from_buffer(
+            tf_buffer=self._tf_buffer,
+            target_frame=target_frame,
+            source_frame=source_frame,
+            timeout_s=float(self.tf_lookup_timeout_s),
+        )
+        if not ok:
+            self._last_tf_error = str(err)
+            return None
+        self._last_tf_error = None
+        return (tx_m, ty_m, yaw_rad)
+
     def _parse_geojson_text(self, raw_text: str) -> Tuple[Optional[Dict[str, Any]], str]:
         try:
             raw = json.loads(raw_text)
@@ -452,7 +573,14 @@ class ZonesManagerNode(Node):
 
     def _convert_geojson_to_xy(
         self, geojson_doc: Dict[str, Any]
-    ) -> Tuple[List[Dict[str, Any]], List[str], int]:
+    ) -> Tuple[Optional[List[Dict[str, Any]]], List[str], int, str]:
+        planar_transform = self._resolve_fromll_planar_transform()
+        if planar_transform is None:
+            return None, [], 0, str(
+                self._last_tf_error or "transform unavailable for fromLL output frame"
+            )
+        tx_m, ty_m, yaw_rad = planar_transform
+
         xy_polygons: List[Dict[str, Any]] = []
         failed_polygon_ids: List[str] = []
         enabled_polygon_count = 0
@@ -485,7 +613,8 @@ class ZonesManagerNode(Node):
                     failed = True
                     break
                 x, y = converted
-                outer_xy.append({"x": x, "y": y})
+                x_tf, y_tf = apply_planar_transform(x, y, tx_m, ty_m, yaw_rad)
+                outer_xy.append({"x": x_tf, "y": y_tf})
 
             if failed:
                 failed_polygon_ids.append(polygon_id)
@@ -506,7 +635,8 @@ class ZonesManagerNode(Node):
                         failed = True
                         break
                     x, y = converted
-                    hole_xy.append({"x": x, "y": y})
+                    x_tf, y_tf = apply_planar_transform(x, y, tx_m, ty_m, yaw_rad)
+                    hole_xy.append({"x": x_tf, "y": y_tf})
                 if failed:
                     break
                 if len(hole_xy) >= 4:
@@ -525,7 +655,7 @@ class ZonesManagerNode(Node):
                 }
             )
 
-        return xy_polygons, failed_polygon_ids, enabled_polygon_count
+        return xy_polygons, failed_polygon_ids, enabled_polygon_count, ""
 
     def _write_mask_files(self, image: np.ndarray) -> Tuple[bool, str]:
         try:
@@ -609,9 +739,17 @@ class ZonesManagerNode(Node):
         persist_geojson: bool,
     ) -> Tuple[bool, str, bool, int, int]:
         feature_count, polygon_count = feature_and_polygon_counts(geojson_doc)
-        xy_polygons, failed_polygon_ids, enabled_polygon_count = self._convert_geojson_to_xy(
-            geojson_doc
+        xy_polygons, failed_polygon_ids, enabled_polygon_count, tf_error = (
+            self._convert_geojson_to_xy(geojson_doc)
         )
+        if xy_polygons is None:
+            return (
+                False,
+                str(tf_error),
+                False,
+                feature_count,
+                polygon_count,
+            )
         if enabled_polygon_count > 0 and len(xy_polygons) == 0:
             detail = self._last_fromll_error or "fromLL conversion failed"
             return (
@@ -784,7 +922,7 @@ class ZonesManagerNode(Node):
         with self._lock:
             response.ok = True
             response.error = ""
-            response.frame_id = str(self.map_frame)
+            response.frame_id = str(self._effective_fromll_target_frame())
             response.mask_ready = bool(self._mask_ready)
             response.mask_source = str(self._mask_source)
             response.geojson = str(self._geojson_text)

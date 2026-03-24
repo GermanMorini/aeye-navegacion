@@ -479,7 +479,7 @@ Visualization Manager:
       Enabled: true
       Keep: 100
       Name: Odometry Local
-      Position Tolerance: 0.800000011920929
+      Position Tolerance: 1.5
       Shape:
         Alpha: 1
         Axes Length: 1
@@ -518,7 +518,7 @@ Visualization Manager:
       Enabled: true
       Keep: 100
       Name: Odometry Global
-      Position Tolerance: 0.800000011920929
+      Position Tolerance: 1.5
       Shape:
         Alpha: 1
         Axes Length: 1
@@ -557,7 +557,7 @@ Visualization Manager:
       Enabled: true
       Keep: 100
       Name: Odometry Raw
-      Position Tolerance: 0.800000011920929
+      Position Tolerance: 1.5
       Shape:
         Alpha: 1
         Axes Length: 1

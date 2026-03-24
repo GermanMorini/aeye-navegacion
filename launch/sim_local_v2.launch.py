@@ -254,6 +254,7 @@ def generate_launch_description():
                             "nav2_params_file": nav2_params_file,
                             "collision_monitor_params_file": collision_monitor_params_file,
                             "keepout_mask_yaml": keepout_mask_yaml_arg,
+                            "keepout_mask_frame": "map",
                         }.items(),
                     )
                 ],

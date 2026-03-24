@@ -37,3 +37,22 @@ def test_sim_local_v2_launch_forwards_ekf_global_toggle() -> None:
     assert '"ekf_local": ekf_local' in launch_contents
     assert 'DeclareLaunchArgument("ekf_global", default_value="False")' in launch_contents
     assert '"ekf_global": ekf_global' in launch_contents
+
+
+def test_sim_local_v2_launch_forces_keepout_mask_frame_to_map() -> None:
+    launch_path = (
+        Path(__file__).resolve().parents[1] / "launch" / "sim_local_v2.launch.py"
+    )
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert '"keepout_mask_frame": "map"' in launch_contents
+
+
+def test_nav_local_v2_launch_defaults_keepout_mask_frame_to_map() -> None:
+    launch_path = (
+        Path(__file__).resolve().parents[1] / "launch" / "nav_local_v2.launch.py"
+    )
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert 'DeclareLaunchArgument("keepout_mask_frame", default_value="map")' in launch_contents
+    assert '"keepout_mask_frame": keepout_mask_frame' in launch_contents
