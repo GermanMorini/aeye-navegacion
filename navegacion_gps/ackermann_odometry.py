@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import time
 from typing import Optional
 
 import rclpy
@@ -79,6 +80,25 @@ def stamp_to_seconds(stamp) -> float:
     return float(stamp.sec) + float(stamp.nanosec) / 1_000_000_000.0
 
 
+def should_emit_periodic_log(
+    *,
+    enabled: bool,
+    last_log_monotonic_s: Optional[float],
+    now_monotonic_s: float,
+    period_s: float,
+) -> bool:
+    if not bool(enabled):
+        return False
+    if not math.isfinite(now_monotonic_s):
+        return False
+    bounded_period_s = max(0.01, float(period_s))
+    if last_log_monotonic_s is None:
+        return True
+    if not math.isfinite(float(last_log_monotonic_s)):
+        return True
+    return (float(now_monotonic_s) - float(last_log_monotonic_s)) >= bounded_period_s
+
+
 def build_odom_transform(
     *,
     stamp,
@@ -119,6 +139,8 @@ class AckermannOdometryNode(Node):
         self.declare_parameter("twist_covariance_vy", 0.02)
         self.declare_parameter("twist_covariance_yaw_rate", 0.05)
         self.declare_parameter("publish_odom_tf", False)
+        self.declare_parameter("periodic_log_enabled", True)
+        self.declare_parameter("periodic_log_period_s", 0.5)
 
         telemetry_topic = str(self.get_parameter("telemetry_topic").value)
         odom_topic = str(self.get_parameter("odom_topic").value)
@@ -149,6 +171,10 @@ class AckermannOdometryNode(Node):
             self.get_parameter("twist_covariance_yaw_rate").value
         )
         self._publish_odom_tf = bool(self.get_parameter("publish_odom_tf").value)
+        self._periodic_log_enabled = bool(self.get_parameter("periodic_log_enabled").value)
+        self._periodic_log_period_s = max(
+            0.01, float(self.get_parameter("periodic_log_period_s").value)
+        )
 
         self._odom_pub = self.create_publisher(Odometry, odom_topic, 10)
         self._twist_pub = self.create_publisher(TwistWithCovarianceStamped, twist_topic, 10)
@@ -161,6 +187,7 @@ class AckermannOdometryNode(Node):
         self._y_m = 0.0
         self._yaw_rad = 0.0
         self._last_stamp_s: Optional[float] = None
+        self._last_periodic_log_monotonic_s: Optional[float] = None
 
         self.get_logger().info(
             "ackermann_odometry ready "
@@ -215,6 +242,36 @@ class AckermannOdometryNode(Node):
             )
             self._tf_broadcaster.sendTransform(transform)
 
+    def _maybe_log_periodic_state(
+        self,
+        *,
+        msg: DriveTelemetry,
+        speed_mps: float,
+        yaw_rate_rps: float,
+        steer_deg: float,
+        dt_s: float,
+    ) -> None:
+        now_monotonic_s = time.monotonic()
+        if not should_emit_periodic_log(
+            enabled=self._periodic_log_enabled,
+            last_log_monotonic_s=self._last_periodic_log_monotonic_s,
+            now_monotonic_s=now_monotonic_s,
+            period_s=self._periodic_log_period_s,
+        ):
+            return
+        self._last_periodic_log_monotonic_s = now_monotonic_s
+
+        dt_text = f"{float(dt_s):.3f}" if math.isfinite(float(dt_s)) else "nan"
+        self.get_logger().info(
+            "state "
+            f"x={self._x_m:.3f} y={self._y_m:.3f} yaw_deg={math.degrees(self._yaw_rad):.2f} "
+            f"speed_mps={float(speed_mps):.3f} yaw_rate_rps={float(yaw_rate_rps):.3f} "
+            f"steer_deg={float(steer_deg):.2f} dt_s={dt_text} "
+            f"fresh={bool(msg.fresh)} speed_valid={bool(msg.speed_valid)} "
+            f"steer_valid={bool(msg.steer_valid)} "
+            f"odom_frame={self._odom_frame} base_frame={self._base_frame}"
+        )
+
     def _on_telemetry(self, msg: DriveTelemetry) -> None:
         if not bool(msg.speed_valid):
             return
@@ -236,26 +293,37 @@ class AckermannOdometryNode(Node):
         )
         steer_rad = math.radians(steer_deg)
         steer_rad = max(-self._steering_limit_rad, min(self._steering_limit_rad, steer_rad))
+        steer_deg = math.degrees(steer_rad)
         yaw_rate_rps = compute_yaw_rate(speed_mps, steer_rad, self._wheelbase_m)
+        dt_s = float("nan")
+        if self._last_stamp_s is not None:
+            raw_dt_s = stamp_s - self._last_stamp_s
+            if math.isfinite(raw_dt_s):
+                dt_s = float(raw_dt_s)
 
         if bool(msg.fresh):
-            if self._last_stamp_s is not None:
-                dt_s = stamp_s - self._last_stamp_s
-                if 0.0 < dt_s <= self._max_dt_s:
-                    self._x_m, self._y_m, self._yaw_rad = integrate_planar(
-                        self._x_m,
-                        self._y_m,
-                        self._yaw_rad,
-                        speed_mps,
-                        yaw_rate_rps,
-                        dt_s,
-                    )
+            if math.isfinite(dt_s) and 0.0 < dt_s <= self._max_dt_s:
+                self._x_m, self._y_m, self._yaw_rad = integrate_planar(
+                    self._x_m,
+                    self._y_m,
+                    self._yaw_rad,
+                    speed_mps,
+                    yaw_rate_rps,
+                    dt_s,
+                )
             self._last_stamp_s = stamp_s
         else:
             speed_mps = 0.0
             yaw_rate_rps = 0.0
 
         self._publish_messages(msg, speed_mps=speed_mps, yaw_rate_rps=yaw_rate_rps)
+        self._maybe_log_periodic_state(
+            msg=msg,
+            speed_mps=speed_mps,
+            yaw_rate_rps=yaw_rate_rps,
+            steer_deg=steer_deg,
+            dt_s=dt_s,
+        )
 
 
 def main(args=None) -> None:

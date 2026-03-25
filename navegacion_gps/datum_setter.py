@@ -310,7 +310,8 @@ class DatumSetterNode(Node):
             geo_pose.position.latitude = float(lat)
             geo_pose.position.longitude = float(lon)
             geo_pose.position.altitude = 0.0
-            qz, qw = DatumSetterNode._yaw_to_quaternion_z_w(yaw)
+            # qz, qw = DatumSetterNode._yaw_to_quaternion_z_w(yaw)
+            qz, qw = DatumSetterNode._yaw_to_quaternion_z_w(0.0)
             geo_pose.orientation.x = 0.0
             geo_pose.orientation.y = 0.0
             geo_pose.orientation.z = qz

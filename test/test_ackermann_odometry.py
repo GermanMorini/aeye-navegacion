@@ -9,6 +9,7 @@ from navegacion_gps.ackermann_odometry import (
     compute_yaw_rate,
     integrate_planar,
     normalize_angle,
+    should_emit_periodic_log,
 )
 
 
@@ -42,6 +43,42 @@ def test_integrate_planar_uses_midpoint_heading() -> None:
 def test_normalize_angle_wraps_to_pi_interval() -> None:
     wrapped = normalize_angle(4.0 * math.pi + 0.3)
     assert math.isclose(wrapped, 0.3, rel_tol=0.0, abs_tol=1.0e-9)
+
+
+def test_should_emit_periodic_log_first_event_when_enabled() -> None:
+    assert should_emit_periodic_log(
+        enabled=True,
+        last_log_monotonic_s=None,
+        now_monotonic_s=10.0,
+        period_s=0.5,
+    )
+
+
+def test_should_emit_periodic_log_rejects_events_before_period() -> None:
+    assert not should_emit_periodic_log(
+        enabled=True,
+        last_log_monotonic_s=10.0,
+        now_monotonic_s=10.49,
+        period_s=0.5,
+    )
+
+
+def test_should_emit_periodic_log_allows_events_after_period() -> None:
+    assert should_emit_periodic_log(
+        enabled=True,
+        last_log_monotonic_s=10.0,
+        now_monotonic_s=10.5,
+        period_s=0.5,
+    )
+
+
+def test_should_emit_periodic_log_can_be_disabled() -> None:
+    assert not should_emit_periodic_log(
+        enabled=False,
+        last_log_monotonic_s=None,
+        now_monotonic_s=10.0,
+        period_s=0.5,
+    )
 
 
 def test_build_odom_transform_uses_expected_frames_and_stamp() -> None:
@@ -81,6 +118,10 @@ def test_ackermann_odometry_source_exposes_publish_odom_tf_toggle() -> None:
     source_contents = source_path.read_text(encoding="utf-8")
 
     assert 'self.declare_parameter("publish_odom_tf", False)' in source_contents
+    assert 'self.declare_parameter("periodic_log_enabled", True)' in source_contents
+    assert 'self.declare_parameter("periodic_log_period_s", 0.5)' in source_contents
     assert "if self._publish_odom_tf and self._tf_broadcaster is not None:" in source_contents
     assert "self._tf_broadcaster.sendTransform(transform)" in source_contents
     assert "stamp=msg.stamp" in source_contents
+    assert "def _maybe_log_periodic_state(" in source_contents
+    assert "self._maybe_log_periodic_state(" in source_contents
