@@ -56,6 +56,7 @@ def _build_robot_state_publisher(context):
 
 def generate_launch_description():
     gps_wpf_dir = get_package_share_directory("navegacion_gps")
+    map_tools_dir = get_package_share_directory("map_tools")
     sensores_dir = get_package_share_directory("sensores")
     default_rviz = os.path.join(gps_wpf_dir, "config", "rviz_local_v2.rviz")
 
@@ -71,6 +72,8 @@ def generate_launch_description():
     use_cyclone_dds = LaunchConfiguration("use_cyclone_dds")
     nav_start_delay_s = LaunchConfiguration("nav_start_delay_s")
     use_keepout = LaunchConfiguration("use_keepout")
+    launch_web_app = LaunchConfiguration("launch_web_app")
+    web_app_port = LaunchConfiguration("web_app_port")
     use_rviz = LaunchConfiguration("use_rviz")
     rviz_config = LaunchConfiguration("rviz_config")
     vx_deadband_mps = LaunchConfiguration("vx_deadband_mps")
@@ -106,6 +109,8 @@ def generate_launch_description():
             DeclareLaunchArgument("use_cyclone_dds", default_value="false"),
             DeclareLaunchArgument("nav_start_delay_s", default_value="4.0"),
             DeclareLaunchArgument("use_keepout", default_value="True"),
+            DeclareLaunchArgument("launch_web_app", default_value="True"),
+            DeclareLaunchArgument("web_app_port", default_value="8766"),
             DeclareLaunchArgument("use_rviz", default_value="True"),
             DeclareLaunchArgument("rviz_config", default_value=default_rviz),
             DeclareLaunchArgument("vx_deadband_mps", default_value="0.01"),
@@ -254,6 +259,20 @@ def generate_launch_description():
                         }.items(),
                     )
                 ],
+            ),
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    os.path.join(map_tools_dir, "launch", "no_go_editor.launch.py")
+                ),
+                launch_arguments={
+                    "ws_host": "0.0.0.0",
+                    "ws_port": web_app_port,
+                    "map_frame": "odom",
+                    "launch_zones_manager": "false",
+                    "launch_nav_command_server": "false",
+                    "launch_nav_snapshot_server": "false",
+                }.items(),
+                condition=IfCondition(launch_web_app),
             ),
             Node(
                 package="rviz2",
