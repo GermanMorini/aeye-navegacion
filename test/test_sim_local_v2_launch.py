@@ -67,3 +67,16 @@ def test_nav_local_v2_launch_defaults_keepout_mask_frame_to_map() -> None:
 
     assert 'DeclareLaunchArgument("keepout_mask_frame", default_value="map")' in launch_contents
     assert '"keepout_mask_frame": keepout_mask_frame' in launch_contents
+
+
+def test_sim_local_v2_launch_sets_imu_yaw_auto_calibration_defaults() -> None:
+    launch_path = (
+        Path(__file__).resolve().parents[1] / "launch" / "sim_local_v2.launch.py"
+    )
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert '"imu_auto_calibrate_yaw_from_odom": True' in launch_contents
+    assert '"imu_yaw_offset_rad": 0.0' in launch_contents
+    assert '"imu_yaw_calib_odom_topic": "/odom_raw"' in launch_contents
+    assert '"imu_yaw_calib_speed_threshold_mps": 0.05' in launch_contents
+    assert '"imu_yaw_calib_timeout_s": 3.0' in launch_contents

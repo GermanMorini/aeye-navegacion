@@ -11,7 +11,7 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from robot_localization.srv import SetDatum as RobotLocalizationSetDatum
-from sensor_msgs.msg import NavSatFix, NavSatStatus
+from sensor_msgs.msg import Imu, NavSatFix, NavSatStatus
 from std_msgs.msg import String
 
 from interfaces.srv import GetDatum, SetDatum
@@ -23,10 +23,12 @@ class DatumSetterNode(Node):
 
         self.declare_parameter("gps_topic", "/gps/fix")
         self.declare_parameter("rtk_status_topic", "/gps/rtk_status")
+        self.declare_parameter("imu_topic", "/imu/data")
         self.declare_parameter("set_datum_service", "/datum_setter/set_datum")
         self.declare_parameter("get_datum_service", "/datum_setter/get_datum")
         self.declare_parameter("datum_service", "/datum")
         self.declare_parameter("datum_service_fallback", "/navsat_transform/datum")
+        self.declare_parameter("imu_yaw_max_age_s", 1.0)
         self.declare_parameter("datum_wait_timeout_s", 2.0)
         self.declare_parameter("datum_call_timeout_s", 2.5)
         self.declare_parameter("datum_call_retries", 3)
@@ -34,11 +36,15 @@ class DatumSetterNode(Node):
 
         self.gps_topic = str(self.get_parameter("gps_topic").value)
         self.rtk_status_topic = str(self.get_parameter("rtk_status_topic").value)
+        self.imu_topic = str(self.get_parameter("imu_topic").value)
         self.set_datum_service = str(self.get_parameter("set_datum_service").value)
         self.get_datum_service = str(self.get_parameter("get_datum_service").value)
         self.datum_service = str(self.get_parameter("datum_service").value)
         self.datum_service_fallback = str(
             self.get_parameter("datum_service_fallback").value
+        )
+        self.imu_yaw_max_age_s = max(
+            0.05, float(self.get_parameter("imu_yaw_max_age_s").value)
         )
         self.datum_wait_timeout_s = max(
             0.05, float(self.get_parameter("datum_wait_timeout_s").value)
@@ -61,6 +67,8 @@ class DatumSetterNode(Node):
         self._last_navsat_rtk = False
         self._last_rtk_status_is_rtk = False
         self._last_rtk_status_text = ""
+        self._last_imu_yaw: Optional[float] = None
+        self._last_imu_yaw_monotonic: Optional[float] = None
         self._rtk_current = False
         self._pending_auto_set = False
 
@@ -92,6 +100,9 @@ class DatumSetterNode(Node):
         self._gps_sub = self.create_subscription(
             NavSatFix, self.gps_topic, self._on_gps_fix, qos_profile_sensor_data
         )
+        self._imu_sub = self.create_subscription(
+            Imu, self.imu_topic, self._on_imu, qos_profile_sensor_data
+        )
         self._rtk_status_sub = self.create_subscription(
             String, self.rtk_status_topic, self._on_rtk_status, 10
         )
@@ -111,7 +122,8 @@ class DatumSetterNode(Node):
         self.get_logger().info(
             "Datum setter ready "
             f"(set_service={self.set_datum_service}, get_service={self.get_datum_service}, "
-            f"gps_topic={self.gps_topic}, rtk_status_topic={self.rtk_status_topic}, "
+            f"gps_topic={self.gps_topic}, imu_topic={self.imu_topic}, "
+            f"rtk_status_topic={self.rtk_status_topic}, "
             f"datum_service={self.datum_service}, "
             f"datum_service_fallback={self.datum_service_fallback})"
         )
@@ -131,6 +143,29 @@ class DatumSetterNode(Node):
             and (-90.0 <= lat <= 90.0)
             and (-180.0 <= lon <= 180.0)
         )
+
+    @staticmethod
+    def _extract_yaw_from_quaternion(
+        x: float, y: float, z: float, w: float
+    ) -> Tuple[bool, float]:
+        if not (math.isfinite(x) and math.isfinite(y) and math.isfinite(z) and math.isfinite(w)):
+            return False, float("nan")
+        norm = math.sqrt((x * x) + (y * y) + (z * z) + (w * w))
+        if norm < 1e-8:
+            return False, float("nan")
+
+        x_n = x / norm
+        y_n = y / norm
+        z_n = z / norm
+        w_n = w / norm
+        siny_cosp = 2.0 * ((w_n * z_n) + (x_n * y_n))
+        cosy_cosp = 1.0 - (2.0 * ((y_n * y_n) + (z_n * z_n)))
+        return True, float(math.atan2(siny_cosp, cosy_cosp))
+
+    @staticmethod
+    def _yaw_to_quaternion_z_w(yaw: float) -> Tuple[float, float]:
+        half = 0.5 * float(yaw)
+        return float(math.sin(half)), float(math.cos(half))
 
     @staticmethod
     def _parse_coords(
@@ -185,6 +220,27 @@ class DatumSetterNode(Node):
 
     def _combined_rtk_locked(self) -> bool:
         return bool(self._last_navsat_rtk or self._last_rtk_status_is_rtk)
+
+    def _get_fresh_imu_yaw(self) -> Tuple[bool, float, str]:
+        now_monotonic = time.monotonic()
+        with self._lock:
+            yaw = self._last_imu_yaw
+            stamp = self._last_imu_yaw_monotonic
+
+        if yaw is None or stamp is None:
+            return False, float("nan"), "no valid IMU yaw sample available"
+
+        age_s = max(0.0, now_monotonic - stamp)
+        if age_s > self.imu_yaw_max_age_s:
+            return (
+                False,
+                float("nan"),
+                (
+                    "no fresh IMU yaw sample available "
+                    f"(age={age_s:.2f}s > {self.imu_yaw_max_age_s:.2f}s)"
+                ),
+            )
+        return True, float(yaw), ""
 
     def _wait_for_future(self, future: Any, timeout_sec: float) -> Optional[Any]:
         start = time.monotonic()
@@ -241,7 +297,7 @@ class DatumSetterNode(Node):
         )
         return None
 
-    def _call_set_datum(self, lat: float, lon: float) -> Tuple[bool, str]:
+    def _call_set_datum(self, lat: float, lon: float, yaw: float) -> Tuple[bool, str]:
         for attempt in range(self.datum_call_retries):
             client = self._resolve_datum_client()
             if client is None:
@@ -254,7 +310,11 @@ class DatumSetterNode(Node):
             geo_pose.position.latitude = float(lat)
             geo_pose.position.longitude = float(lon)
             geo_pose.position.altitude = 0.0
-            geo_pose.orientation.w = 1.0
+            qz, qw = DatumSetterNode._yaw_to_quaternion_z_w(yaw)
+            geo_pose.orientation.x = 0.0
+            geo_pose.orientation.y = 0.0
+            geo_pose.orientation.z = qz
+            geo_pose.orientation.w = qw
             req.geo_pose = geo_pose
 
             future = client.call_async(req)
@@ -285,11 +345,15 @@ class DatumSetterNode(Node):
         gps_is_rtk: bool,
         used_current_gps: bool,
     ) -> Tuple[bool, str, str, bool]:
+        yaw_ok, yaw, yaw_error = self._get_fresh_imu_yaw()
+        if not yaw_ok:
+            return False, str(yaw_error), "", bool(self.already_set)
+
         with self._set_operation_lock:
             with self._lock:
                 already_set_before = bool(self.already_set)
 
-            ok, error = self._call_set_datum(lat=lat, lon=lon)
+            ok, error = self._call_set_datum(lat=lat, lon=lon, yaw=yaw)
             if not ok:
                 return False, str(error), "", already_set_before
 
@@ -366,7 +430,12 @@ class DatumSetterNode(Node):
                 self._rtk_current = True
 
         if auto_set_payload is not None:
-            self._auto_set_datum_from_coords(*auto_set_payload)
+            yaw_ok, _yaw, _err = self._get_fresh_imu_yaw()
+            if yaw_ok:
+                self._auto_set_datum_from_coords(*auto_set_payload)
+            else:
+                with self._lock:
+                    self._pending_auto_set = True
 
     def _on_rtk_status(self, msg: String) -> None:
         status_text = str(msg.data)
@@ -399,6 +468,36 @@ class DatumSetterNode(Node):
             self.get_logger().warning(
                 "RTK detected but no valid GPS sample yet; datum auto-set will run on next GPS fix"
             )
+        if auto_set_payload is not None:
+            yaw_ok, _yaw, _err = self._get_fresh_imu_yaw()
+            if yaw_ok:
+                self._auto_set_datum_from_coords(*auto_set_payload)
+            else:
+                with self._lock:
+                    self._pending_auto_set = True
+                self.get_logger().warning(
+                    "RTK detected but no valid IMU yaw yet; datum auto-set will run on next valid IMU sample"
+                )
+
+    def _on_imu(self, msg: Imu) -> None:
+        quat = msg.orientation
+        ok, yaw = DatumSetterNode._extract_yaw_from_quaternion(
+            quat.x, quat.y, quat.z, quat.w
+        )
+        if not ok:
+            return
+
+        auto_set_payload: Optional[Tuple[float, float, bool, str]] = None
+        with self._lock:
+            self._last_imu_yaw = float(yaw)
+            self._last_imu_yaw_monotonic = time.monotonic()
+
+            combined_rtk = self._combined_rtk_locked()
+            if combined_rtk and self._pending_auto_set and self._last_gps_fix is not None:
+                self._pending_auto_set = False
+                lat, lon = self._last_gps_fix
+                auto_set_payload = (lat, lon, combined_rtk, "rtk_edge_pending_imu")
+
         if auto_set_payload is not None:
             self._auto_set_datum_from_coords(*auto_set_payload)
 

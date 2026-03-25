@@ -1,6 +1,9 @@
 import math
 import threading
+import time
 
+from builtin_interfaces.msg import Time
+from sensor_msgs.msg import Imu
 from sensor_msgs.msg import NavSatFix, NavSatStatus
 from std_msgs.msg import String
 
@@ -22,6 +25,7 @@ class _FakeLogger:
 
 class _FakeAutoNode:
     _combined_rtk_locked = DatumSetterNode._combined_rtk_locked
+    _get_fresh_imu_yaw = DatumSetterNode._get_fresh_imu_yaw
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -29,6 +33,9 @@ class _FakeAutoNode:
         self._last_navsat_rtk = False
         self._last_rtk_status_is_rtk = False
         self._last_rtk_status_text = ""
+        self._last_imu_yaw = None
+        self._last_imu_yaw_monotonic = None
+        self.imu_yaw_max_age_s = 1.0
         self._rtk_current = False
         self._pending_auto_set = False
         self.logger = _FakeLogger()
@@ -81,11 +88,61 @@ class _FakeSetNode:
         return True, "", status, bool(self.already_set)
 
 
+class _FakeClockNow:
+    def to_msg(self) -> Time:
+        return Time()
+
+
+class _FakeClock:
+    def now(self) -> _FakeClockNow:
+        return _FakeClockNow()
+
+
+class _FakeSetWithImuNode:
+    _combined_rtk_locked = DatumSetterNode._combined_rtk_locked
+    _get_fresh_imu_yaw = DatumSetterNode._get_fresh_imu_yaw
+    _apply_datum = DatumSetterNode._apply_datum
+    _on_set_datum = DatumSetterNode._on_set_datum
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._set_operation_lock = threading.Lock()
+        self._last_gps_fix = (-31.42, -64.18)
+        self._last_navsat_rtk = False
+        self._last_rtk_status_is_rtk = False
+        self._last_imu_yaw = None
+        self._last_imu_yaw_monotonic = None
+        self.imu_yaw_max_age_s = 1.0
+        self.already_set = False
+        self._datum_lat = None
+        self._datum_lon = None
+        self._last_set_stamp = None
+        self._last_set_source = ""
+        self._last_set_with_rtk = False
+        self.calls = []
+
+    def _call_set_datum(self, lat: float, lon: float, yaw: float):
+        self.calls.append((float(lat), float(lon), float(yaw)))
+        return True, ""
+
+    def get_clock(self) -> _FakeClock:
+        return _FakeClock()
+
+
 def _gps_msg(lat: float, lon: float, status: int) -> NavSatFix:
     msg = NavSatFix()
     msg.latitude = float(lat)
     msg.longitude = float(lon)
     msg.status.status = int(status)
+    return msg
+
+
+def _imu_msg(yaw_rad: float) -> Imu:
+    msg = Imu()
+    msg.orientation.x = 0.0
+    msg.orientation.y = 0.0
+    msg.orientation.z = math.sin(0.5 * float(yaw_rad))
+    msg.orientation.w = math.cos(0.5 * float(yaw_rad))
     return msg
 
 
@@ -122,6 +179,7 @@ def test_status_text_detection_covers_float_and_fixed() -> None:
 
 def test_auto_set_happens_once_on_rtk_edge() -> None:
     node = _FakeAutoNode()
+    DatumSetterNode._on_imu(node, _imu_msg(0.2))
 
     DatumSetterNode._on_gps_fix(
         node,
@@ -145,6 +203,7 @@ def test_auto_set_happens_once_on_rtk_edge() -> None:
 
 def test_auto_set_pending_when_rtk_arrives_before_gps() -> None:
     node = _FakeAutoNode()
+    DatumSetterNode._on_imu(node, _imu_msg(0.3))
 
     status_msg = String()
     status_msg.data = "RTK_FLOAT"
@@ -157,6 +216,21 @@ def test_auto_set_pending_when_rtk_arrives_before_gps() -> None:
     )
     assert len(node.auto_calls) == 1
     assert node.auto_calls[0][3] == "rtk_edge_pending_gps"
+
+
+def test_auto_set_is_deferred_until_imu_yaw_becomes_available() -> None:
+    node = _FakeAutoNode()
+
+    DatumSetterNode._on_gps_fix(
+        node,
+        _gps_msg(-31.5, -64.5, NavSatStatus.STATUS_GBAS_FIX),
+    )
+    assert node.auto_calls == []
+    assert node._pending_auto_set is True
+
+    DatumSetterNode._on_imu(node, _imu_msg(0.6))
+    assert len(node.auto_calls) == 1
+    assert node.auto_calls[0][3] == "rtk_edge_pending_imu"
 
 
 def test_set_datum_fails_without_current_gps_for_empty_coords() -> None:
@@ -198,3 +272,49 @@ def test_set_datum_without_rtk_sets_and_reports_warning() -> None:
     assert "without RTK quality" in out.status_message
     assert len(node.calls) == 1
     assert node.calls[0][3] is False
+
+
+def test_extract_yaw_from_quaternion_handles_wrap() -> None:
+    ok, yaw = DatumSetterNode._extract_yaw_from_quaternion(
+        0.0,
+        0.0,
+        math.sin(-3.0 / 2.0),
+        math.cos(-3.0 / 2.0),
+    )
+    assert ok is True
+    assert math.isclose(yaw, -3.0, rel_tol=1e-6, abs_tol=1e-6)
+
+    ok, yaw = DatumSetterNode._extract_yaw_from_quaternion(
+        0.0,
+        0.0,
+        math.sin((3.1) / 2.0),
+        math.cos((3.1) / 2.0),
+    )
+    assert ok is True
+    assert math.isclose(yaw, 3.1, rel_tol=1e-6, abs_tol=1e-6)
+
+
+def test_set_datum_manual_fails_when_no_fresh_imu_yaw() -> None:
+    node = _FakeSetWithImuNode()
+    req = SetDatum.Request()
+    req.coords = [-31.5, -64.3]
+    res = SetDatum.Response()
+
+    out = DatumSetterNode._on_set_datum(node, req, res)
+    assert out.ok is False
+    assert "IMU yaw" in out.error
+    assert node.calls == []
+
+
+def test_set_datum_manual_uses_imu_yaw_in_setdatum_call() -> None:
+    node = _FakeSetWithImuNode()
+    node._last_imu_yaw = 1.234
+    node._last_imu_yaw_monotonic = time.monotonic()
+    req = SetDatum.Request()
+    req.coords = [-31.5, -64.3]
+    res = SetDatum.Response()
+
+    out = DatumSetterNode._on_set_datum(node, req, res)
+    assert out.ok is True
+    assert len(node.calls) == 1
+    assert math.isclose(node.calls[0][2], 1.234, rel_tol=1e-6, abs_tol=1e-6)

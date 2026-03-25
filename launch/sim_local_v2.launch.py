@@ -89,7 +89,14 @@ def generate_launch_description():
                 executable="sim_sensor_normalizer_v2",
                 name="sim_sensor_normalizer_v2",
                 output="screen",
-                parameters=[{"use_sim_time": ParameterValue(use_sim_time, value_type=bool)}],
+                parameters=[
+                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+                    {"imu_auto_calibrate_yaw_from_odom": True},
+                    {"imu_yaw_offset_rad": 0.0},
+                    {"imu_yaw_calib_odom_topic": "/odom_raw"},
+                    {"imu_yaw_calib_speed_threshold_mps": 0.05},
+                    {"imu_yaw_calib_timeout_s": 3.0},
+                ],
             ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
@@ -255,11 +262,13 @@ def generate_launch_description():
                     {
                         "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
                         "gps_topic": "/gps/fix",
+                        "imu_topic": "/imu/data",
                         "rtk_status_topic": "/gps/rtk_status",
                         "set_datum_service": "/datum_setter/set_datum",
                         "get_datum_service": "/datum_setter/get_datum",
                         "datum_service": "/datum",
                         "datum_service_fallback": "/navsat_transform/datum",
+                        "imu_yaw_max_age_s": 1.0,
                         "datum_wait_timeout_s": 2.0,
                         "datum_call_timeout_s": 2.5,
                         "datum_call_retries": 3,

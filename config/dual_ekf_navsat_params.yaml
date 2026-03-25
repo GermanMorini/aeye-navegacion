@@ -106,9 +106,9 @@ navsat_transform:
     broadcast_utm_transform: false
     publish_filtered_gps: true
     use_odometry_yaw: false
-    wait_for_datum: false
-    # wait_for_datum: true
-    # datum: [-31.4858037, -64.2410570, 0.0] # Ejemplo: hub de la UCC, Córdoba, Argentina
+    # wait_for_datum: false
+    wait_for_datum: true
+    # datum: [-31.4858037, -64.2410570, 2.35619449019] # Ejemplo: hub de la UCC, Córdoba, Argentina
 
     gps_topic: /gps/fix
     # odom_topic: /wheel/odometry

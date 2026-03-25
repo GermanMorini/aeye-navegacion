@@ -222,11 +222,13 @@ def generate_launch_description():
         parameters=[
             {
                 "gps_topic": gps_topic,
+                "imu_topic": "/imu/data",
                 "rtk_status_topic": "/gps/rtk_status",
                 "set_datum_service": "/datum_setter/set_datum",
                 "get_datum_service": "/datum_setter/get_datum",
                 "datum_service": "/datum",
                 "datum_service_fallback": "/navsat_transform/datum",
+                "imu_yaw_max_age_s": 1.0,
                 "datum_wait_timeout_s": 2.0,
                 "datum_call_timeout_s": 2.5,
                 "datum_call_retries": 3,
