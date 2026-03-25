@@ -185,7 +185,7 @@ local_costmap:
       height: 20
       resolution: 0.1
       transform_tolerance: 1.0
-      footprint: "[[1.19,0.46],[1.19,-0.46],[-0.25,-0.46],[-0.25,0.46]]"
+      footprint: "[[1.05,0.38],[1.05,-0.38],[-0.12,-0.38],[-0.12,0.38]]"
       footprint_padding: 0.0
       plugins: ["voxel_layer", "inflation_layer"]
       filters: ["keepout_filter"]
@@ -193,7 +193,7 @@ local_costmap:
 
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        inflation_radius: 1.2
+        inflation_radius: 0.75
         cost_scaling_factor: 2.0
       voxel_layer:
         plugin: "nav2_costmap_2d::VoxelLayer"
@@ -245,7 +245,7 @@ global_costmap:
       publish_frequency: 1.0
       global_frame: odom
       robot_base_frame: base_footprint
-      footprint: "[[1.19,0.46],[1.19,-0.46],[-0.25,-0.46],[-0.25,0.46]]"
+      footprint: "[[1.05,0.38],[1.05,-0.38],[-0.12,-0.38],[-0.12,0.38]]"
       footprint_padding: 0.0
       rolling_window: true
       width: 250
@@ -283,7 +283,7 @@ global_costmap:
 
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        inflation_radius: 1.2
+        inflation_radius: 0.75
         cost_scaling_factor: 3.5
       keepout_filter:
         plugin: "nav2_costmap_2d::KeepoutFilter"
