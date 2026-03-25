@@ -1,0 +1,176 @@
+# ============================================================================
+# localization_global_v2.yaml
+#
+# Este archivo define SOLO la capa global de localización para `sim_global_v2`.
+#
+# Arquitectura buscada:
+#   1. El EKF local existente calcula `/odometry/local`
+#      y publica TF: `odom -> base_footprint`
+#   2. `navsat_transform` convierte GPS geográfico (`/gps/fix`)
+#      a una odometría en coordenadas del frame global (`/odometry/gps`)
+#   3. El EKF global fusiona:
+#      - `/odometry/local`  -> referencia local continua
+#      - `/odometry/gps`    -> corrección global
+#      - `/imu/data`        -> yaw_rate
+#      y publica:
+#      - `/odometry/global`
+#      - TF `map -> odom`
+#
+# Árbol TF esperado:
+#   map -> odom -> base_footprint
+#
+# Nota conceptual:
+# - `odom` debe ser suave y continuo, aunque derive.
+# - `map` debe ser globalmente consistente, aunque pueda corregir a `odom`.
+# ============================================================================
+
+ekf_filter_node_map:
+  ros__parameters:
+    # Frecuencia de actualización del filtro global.
+    frequency: 30.0
+
+    # Si una medición tarda más que esto en llegar, el filtro la considera vieja.
+    sensor_timeout: 0.2
+
+    # Todo el filtro se resuelve en 2D: ignora z, roll y pitch.
+    two_d_mode: true
+    transform_time_offset: 0.0
+    transform_timeout: 0.0
+    print_diagnostics: true
+
+    # Este EKF publica el TF global `map -> odom`.
+    publish_tf: true
+
+    # `map` = frame global corregido
+    # `odom` = frame local continuo
+    # `base_footprint` = base del robot en 2D
+    #
+    # Como `world_frame = map`, este filtro trabaja en global y la salida TF
+    # corrige la relación entre `map` y `odom`.
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_footprint
+    world_frame: map
+
+    # ------------------------------------------------------------------------
+    # Fuente 0: odometría local ya filtrada
+    #
+    # `/odometry/local` viene del EKF local actual:
+    #   wheel odometry + IMU
+    #
+    # Esta fuente aporta continuidad y suavidad. En esta variante la usamos
+    # solo para la parte cinemática, evitando arrastrar a `map` la pose absoluta
+    # driftada del frame local.
+    # ------------------------------------------------------------------------
+    odom0: /odometry/local
+
+    # Configuración de estados:
+    # [x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az]
+    #
+    # Aquí se usan de `/odometry/local`:
+    # - vx
+    # - vyaw
+    #
+    # No se usan x, y ni yaw absolutos para que el frame global no copie la
+    # deriva acumulada del EKF local. Tampoco usamos vy porque para Ackermann
+    # idealmente la velocidad lateral debe ser muy baja y puede inyectar ruido.
+    odom0_config: [false, false, false,
+                   false, false, false,
+                   true,  false, false,
+                   false, false, true,
+                   false, false, false]
+    odom0_queue_size: 10
+    odom0_differential: false
+    odom0_relative: false
+
+    # ------------------------------------------------------------------------
+    # Fuente 1: observación global derivada del GPS
+    #
+    # `/odometry/gps` no viene directo del GPS crudo:
+    # lo genera `navsat_transform` usando:
+    # - `/gps/fix`
+    # - `/odometry/local`
+    # - la orientación disponible
+    #
+    # Esta fuente aporta la corrección absoluta del frame `map`.
+    # ------------------------------------------------------------------------
+    odom1: /odometry/gps
+
+    # De esta fuente se usan solo x e y.
+    # No se usa yaw ni velocidades, porque el GPS es bueno para posición
+    # absoluta pero no para orientar el robot en este setup.
+    odom1_config: [true,  true,  false,
+                   false, false, false,
+                   false, false, false,
+                   false, false, false,
+                   false, false, false]
+    odom1_queue_size: 10
+    odom1_differential: false
+    odom1_relative: false
+
+    # ------------------------------------------------------------------------
+    # Fuente 2: IMU
+    #
+    # En esta capa global la IMU se usa de forma conservadora:
+    # solo aporta yaw_rate (velocidad angular z).
+    #
+    # No estamos usando yaw absoluto de la IMU en este EKF para no acoplar
+    # el heading global demasiado fuerte a una orientación que puede no cerrar
+    # bien con el GPS.
+    # ------------------------------------------------------------------------
+    imu0: /imu/data
+    imu0_config: [false, false, false,
+                  false, false, false,
+                  false, false, false,
+                  false, false, true,
+                  false, false, false]
+    imu0_queue_size: 20
+    imu0_differential: false
+    imu0_relative: false
+    imu0_remove_gravitational_acceleration: true
+
+# ----------------------------------------------------------------------------
+# navsat_transform
+#
+# Este nodo toma el GPS geográfico y lo proyecta al frame global.
+#
+# Entrada conceptual:
+#   `/gps/fix` + `/odometry/local` + orientación
+#
+# Salida:
+#   `/odometry/gps`
+#
+# Importante:
+# - No publica directamente `map -> odom`
+# - Solo produce una observación global que luego el EKF global fusiona
+# ----------------------------------------------------------------------------
+navsat_transform:
+  ros__parameters:
+    frequency: 30.0
+    magnetic_declination_radians: 0.0
+    yaw_offset: 0.0
+
+    # Fuerza z=0 para mantener navegación planar.
+    zero_altitude: true
+
+    # No necesitamos UTM en esta variante.
+    broadcast_utm_transform: false
+
+    # Publica la salida ya convertida en `/odometry/gps`.
+    publish_filtered_gps: true
+
+    # Aquí NO usamos yaw tomado de `/odometry/local`.
+    # La idea es desacoplar el heading global de la orientación local.
+    use_odometry_yaw: false
+
+    # En simulacion usamos un datum fijo para que la conversion fromLL sea
+    # estable y consistente con el origen geodesico del mundo cargado.
+    # Eso permite que la web app envie goals LL sin depender de un datum
+    # dinamico ni del nodo datum_setter.
+    wait_for_datum: false
+    datum: [-31.4858037, -64.2410570, 2.35619449019]
+
+    # Contrato de tópicos del nodo.
+    gps_topic: /gps/fix
+    odom_topic: /odometry/local
+    output_topic: /odometry/gps

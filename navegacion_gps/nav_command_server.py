@@ -49,6 +49,12 @@ class NavCommandServerNode(Node):
         self.declare_parameter("fromll_wait_timeout_s", 2.0)
         self.declare_parameter("fromll_call_retries", 4)
         self.declare_parameter("fromll_retry_delay_s", 0.15)
+        self.declare_parameter("approx_fromll_fallback_enabled", False)
+        self.declare_parameter("approx_fromll_datum_lat", float("nan"))
+        self.declare_parameter("approx_fromll_datum_lon", float("nan"))
+        self.declare_parameter("approx_fromll_datum_yaw_deg", 0.0)
+        self.declare_parameter("approx_fromll_zero_threshold_m", 1.0e-3)
+        self.declare_parameter("approx_fromll_min_distance_for_fallback_m", 0.5)
         self.declare_parameter("fromll_frame", "odom")
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("tf_lookup_timeout_s", 0.5)
@@ -87,6 +93,26 @@ class NavCommandServerNode(Node):
         )
         self.fromll_retry_delay_s = max(
             0.0, float(self.get_parameter("fromll_retry_delay_s").value)
+        )
+        self.approx_fromll_fallback_enabled = bool(
+            self.get_parameter("approx_fromll_fallback_enabled").value
+        )
+        self.approx_fromll_datum_lat = float(
+            self.get_parameter("approx_fromll_datum_lat").value
+        )
+        self.approx_fromll_datum_lon = float(
+            self.get_parameter("approx_fromll_datum_lon").value
+        )
+        self.approx_fromll_datum_yaw_deg = float(
+            self.get_parameter("approx_fromll_datum_yaw_deg").value
+        )
+        self.approx_fromll_zero_threshold_m = max(
+            1.0e-6,
+            float(self.get_parameter("approx_fromll_zero_threshold_m").value),
+        )
+        self.approx_fromll_min_distance_for_fallback_m = max(
+            0.0,
+            float(self.get_parameter("approx_fromll_min_distance_for_fallback_m").value),
         )
         self.fromll_frame = str(self.get_parameter("fromll_frame").value).strip() or "odom"
         self.map_frame = str(self.get_parameter("map_frame").value)
@@ -275,10 +301,94 @@ class NavCommandServerNode(Node):
             time.sleep(0.01)
         return None
 
+    @staticmethod
+    def _ll_delta_to_north_east_m(
+        lat: float,
+        lon: float,
+        ref_lat: float,
+        ref_lon: float,
+    ) -> Tuple[float, float]:
+        meters_per_deg_lat = 111_320.0
+        cos_lat = max(1.0e-6, abs(math.cos(math.radians(float(ref_lat)))))
+        meters_per_deg_lon = meters_per_deg_lat * cos_lat
+        north_m = (float(lat) - float(ref_lat)) * meters_per_deg_lat
+        east_m = (float(lon) - float(ref_lon)) * meters_per_deg_lon
+        return north_m, east_m
+
+    @staticmethod
+    def _rotate_enu_to_map(
+        east_m: float,
+        north_m: float,
+        yaw_deg: float,
+    ) -> Tuple[float, float]:
+        yaw_rad = math.radians(float(yaw_deg))
+        cos_yaw = math.cos(yaw_rad)
+        sin_yaw = math.sin(yaw_rad)
+        map_x = east_m * cos_yaw - north_m * sin_yaw
+        map_y = east_m * sin_yaw + north_m * cos_yaw
+        return map_x, map_y
+
+    def _approx_from_ll(self, lat: float, lon: float) -> Optional[Tuple[float, float, float]]:
+        if not self.approx_fromll_fallback_enabled:
+            return None
+        if not (
+            math.isfinite(self.approx_fromll_datum_lat)
+            and math.isfinite(self.approx_fromll_datum_lon)
+            and math.isfinite(self.approx_fromll_datum_yaw_deg)
+        ):
+            return None
+
+        north_m, east_m = self._ll_delta_to_north_east_m(
+            lat=lat,
+            lon=lon,
+            ref_lat=self.approx_fromll_datum_lat,
+            ref_lon=self.approx_fromll_datum_lon,
+        )
+        map_x, map_y = self._rotate_enu_to_map(
+            east_m=east_m,
+            north_m=north_m,
+            yaw_deg=self.approx_fromll_datum_yaw_deg,
+        )
+        return float(map_x), float(map_y), 0.0
+
+    def _should_use_approx_from_ll(
+        self,
+        lat: float,
+        lon: float,
+        converted: Tuple[float, float, float],
+    ) -> bool:
+        if not self.approx_fromll_fallback_enabled:
+            return False
+        if not (
+            math.isfinite(self.approx_fromll_datum_lat)
+            and math.isfinite(self.approx_fromll_datum_lon)
+        ):
+            return False
+
+        x, y, z = converted
+        if max(abs(float(x)), abs(float(y)), abs(float(z))) > self.approx_fromll_zero_threshold_m:
+            return False
+
+        north_m, east_m = self._ll_delta_to_north_east_m(
+            lat=lat,
+            lon=lon,
+            ref_lat=self.approx_fromll_datum_lat,
+            ref_lon=self.approx_fromll_datum_lon,
+        )
+        return math.hypot(north_m, east_m) >= self.approx_fromll_min_distance_for_fallback_m
+
     def _call_from_ll(self, lat: float, lon: float) -> Optional[Tuple[float, float, float]]:
         for attempt in range(self.fromll_call_retries):
             fromll_client = self._resolve_fromll_client()
             if fromll_client is None:
+                approx = self._approx_from_ll(lat, lon)
+                if approx is not None:
+                    self.get_logger().warning(
+                        "Using approximate fromLL fallback because the service is unavailable "
+                        f"(lat={lat:.8f}, lon={lon:.8f})"
+                    )
+                    self._last_fromll_error = None
+                    return approx
                 if attempt + 1 < self.fromll_call_retries and self.fromll_retry_delay_s > 0.0:
                     time.sleep(self.fromll_retry_delay_s)
                 continue
@@ -299,8 +409,24 @@ class NavCommandServerNode(Node):
                     time.sleep(self.fromll_retry_delay_s)
                 continue
 
+            converted = (
+                float(res.map_point.x),
+                float(res.map_point.y),
+                float(res.map_point.z),
+            )
+            if self._should_use_approx_from_ll(lat, lon, converted):
+                approx = self._approx_from_ll(lat, lon)
+                if approx is not None:
+                    self.get_logger().warning(
+                        "Using approximate fromLL fallback because the service returned a "
+                        "degenerate origin result "
+                        f"(lat={lat:.8f}, lon={lon:.8f})"
+                    )
+                    self._last_fromll_error = None
+                    return approx
+
             self._last_fromll_error = None
-            return (float(res.map_point.x), float(res.map_point.y), float(res.map_point.z))
+            return converted
 
         self.get_logger().warning(
             "fromLL conversion failed "

@@ -35,6 +35,7 @@ setup(
         'console_scripts': [
             'ackermann_odometry = navegacion_gps.ackermann_odometry:main',
             'cmd_vel_ackermann_bridge_v2 = navegacion_gps.cmd_vel_ackermann_bridge_v2:main',
+            'datum_setter = navegacion_gps.datum_setter:main',
             'gazebo_utils = navegacion_gps.gazebo_utils:main',
             'goal_pose_to_follow_path_v2 = navegacion_gps.goal_pose_to_follow_path_v2:main',
             'zones_manager = navegacion_gps.zones_manager:main',
