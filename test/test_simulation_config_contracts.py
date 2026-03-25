@@ -84,6 +84,28 @@ def test_real_launch_includes_datum_setter_node() -> None:
     assert "PythonExpression([\"'\", datum_setter, \"'.lower() == 'true'\"])" in launch_contents
 
 
+def test_real_launch_includes_ackermann_odometry_by_default() -> None:
+    launch_path = PACKAGE_ROOT / "launch" / "real.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert 'DeclareLaunchArgument(\n        "ackermann_odometry",' in launch_contents
+    assert 'default_value="true"' in launch_contents
+    assert 'executable="ackermann_odometry"' in launch_contents
+    assert "PythonExpression([\"'\", ackermann_odometry, \"'.lower() == 'true'\"])" in launch_contents
+    assert '"telemetry_topic": "/controller/drive_telemetry"' in launch_contents
+    assert '"odom_topic": "/wheel/odometry"' in launch_contents
+
+
+def test_real_launch_includes_zones_manager_toggle() -> None:
+    launch_path = PACKAGE_ROOT / "launch" / "real.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert 'DeclareLaunchArgument(\n        "zones_manager",' in launch_contents
+    assert 'default_value="true"' in launch_contents
+    assert 'executable="zones_manager"' in launch_contents
+    assert "PythonExpression([\"'\", zones_manager, \"'.lower() == 'true'\"])" in launch_contents
+
+
 def test_real_launch_exposes_dual_ekf_toggles_and_no_controller_server() -> None:
     launch_path = PACKAGE_ROOT / "launch" / "real.launch.py"
     launch_contents = launch_path.read_text(encoding="utf-8")

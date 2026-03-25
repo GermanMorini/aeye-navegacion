@@ -67,7 +67,9 @@ def generate_launch_description():
     ws_port = LaunchConfiguration("ws_port")
     gps_topic = LaunchConfiguration("gps_topic")
     map_frame = LaunchConfiguration("map_frame")
+    zones_manager = LaunchConfiguration("zones_manager")
     datum_setter = LaunchConfiguration("datum_setter")
+    ackermann_odometry = LaunchConfiguration("ackermann_odometry")
     ekf_local = LaunchConfiguration("ekf_local")
     ekf_global = LaunchConfiguration("ekf_global")
 
@@ -161,10 +163,20 @@ def generate_launch_description():
         default_value="map",
         description="Global map frame for navigation web backend",
     )
+    declare_zones_manager_cmd = DeclareLaunchArgument(
+        "zones_manager",
+        default_value="true",
+        description="Enable zones_manager node",
+    )
     declare_datum_setter_cmd = DeclareLaunchArgument(
         "datum_setter",
         default_value="true",
         description="Enable datum_setter node",
+    )
+    declare_ackermann_odometry_cmd = DeclareLaunchArgument(
+        "ackermann_odometry",
+        default_value="true",
+        description="Enable ackermann_odometry node",
     )
     declare_ekf_local_cmd = DeclareLaunchArgument(
         "ekf_local",
@@ -201,6 +213,20 @@ def generate_launch_description():
             {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
         ],
         remappings=[("odometry/filtered", "odometry/local")],
+    )
+    ackermann_odometry_cmd = Node(
+        package="navegacion_gps",
+        executable="ackermann_odometry",
+        name="ackermann_odometry",
+        output="screen",
+        condition=IfCondition(
+            PythonExpression(["'", ackermann_odometry, "'.lower() == 'true'"])
+        ),
+        parameters=[
+            {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+            {"telemetry_topic": "/controller/drive_telemetry"},
+            {"odom_topic": "/wheel/odometry"},
+        ],
     )
     ekf_map_cmd = Node(
         package="robot_localization",
@@ -260,6 +286,9 @@ def generate_launch_description():
         executable="zones_manager",
         name="zones_manager",
         output="screen",
+        condition=IfCondition(
+            PythonExpression(["'", zones_manager, "'.lower() == 'true'"])
+        ),
         parameters=[
             {
                 "fromll_service": "/fromLL",
@@ -465,7 +494,9 @@ def generate_launch_description():
     ld.add_action(declare_ws_port_cmd)
     ld.add_action(declare_gps_topic_cmd)
     ld.add_action(declare_map_frame_cmd)
+    ld.add_action(declare_zones_manager_cmd)
     ld.add_action(declare_datum_setter_cmd)
+    ld.add_action(declare_ackermann_odometry_cmd)
     ld.add_action(declare_ekf_local_cmd)
     ld.add_action(declare_ekf_global_cmd)
     ld.add_action(OpaqueFunction(function=_validate_telemetry_backend))
@@ -475,6 +506,7 @@ def generate_launch_description():
     ld.add_action(pixhawk_cmd)
     ld.add_action(camera_cmd)
     ld.add_action(lidar_cmd)
+    ld.add_action(ackermann_odometry_cmd)
     ld.add_action(ekf_odom_cmd)
     ld.add_action(ekf_map_cmd)
     ld.add_action(navsat_transform_cmd)
