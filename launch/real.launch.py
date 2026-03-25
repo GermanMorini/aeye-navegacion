@@ -68,6 +68,8 @@ def generate_launch_description():
     gps_topic = LaunchConfiguration("gps_topic")
     map_frame = LaunchConfiguration("map_frame")
     datum_setter = LaunchConfiguration("datum_setter")
+    ekf_local = LaunchConfiguration("ekf_local")
+    ekf_global = LaunchConfiguration("ekf_global")
 
     declare_use_sim_time_cmd = DeclareLaunchArgument(
         "use_sim_time",
@@ -164,6 +166,16 @@ def generate_launch_description():
         default_value="true",
         description="Enable datum_setter node",
     )
+    declare_ekf_local_cmd = DeclareLaunchArgument(
+        "ekf_local",
+        default_value="true",
+        description="Enable local UKF filter node",
+    )
+    declare_ekf_global_cmd = DeclareLaunchArgument(
+        "ekf_global",
+        default_value="true",
+        description="Enable global UKF filter node",
+    )
 
     nav2_only_cmd = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(gps_wpf_dir, "launch", "nav2_only.launch.py")),
@@ -183,6 +195,7 @@ def generate_launch_description():
         executable="ukf_node",
         name="ekf_filter_node_odom",
         output="screen",
+        condition=IfCondition(ekf_local),
         parameters=[
             rl_params_file,
             {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
@@ -194,6 +207,7 @@ def generate_launch_description():
         executable="ukf_node",
         name="ekf_filter_node_map",
         output="screen",
+        condition=IfCondition(ekf_global),
         parameters=[
             rl_params_file,
             {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
@@ -204,6 +218,7 @@ def generate_launch_description():
         executable="navsat_transform_node",
         name="navsat_transform",
         output="screen",
+        condition=IfCondition(ekf_global),
         parameters=[
             rl_params_file,
             {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
@@ -451,6 +466,8 @@ def generate_launch_description():
     ld.add_action(declare_gps_topic_cmd)
     ld.add_action(declare_map_frame_cmd)
     ld.add_action(declare_datum_setter_cmd)
+    ld.add_action(declare_ekf_local_cmd)
+    ld.add_action(declare_ekf_global_cmd)
     ld.add_action(OpaqueFunction(function=_validate_telemetry_backend))
 
     ld.add_action(nav2_only_cmd)

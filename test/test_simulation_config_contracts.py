@@ -84,10 +84,15 @@ def test_real_launch_includes_datum_setter_node() -> None:
     assert "PythonExpression([\"'\", datum_setter, \"'.lower() == 'true'\"])" in launch_contents
 
 
-def test_real_launch_always_runs_dual_ekf_and_navsat_transform_without_controller_server() -> None:
+def test_real_launch_exposes_dual_ekf_toggles_and_no_controller_server() -> None:
     launch_path = PACKAGE_ROOT / "launch" / "real.launch.py"
     launch_contents = launch_path.read_text(encoding="utf-8")
 
+    assert 'DeclareLaunchArgument(\n        "ekf_local",' in launch_contents
+    assert 'default_value="true"' in launch_contents
+    assert 'DeclareLaunchArgument(\n        "ekf_global",' in launch_contents
+    assert "condition=IfCondition(ekf_local)" in launch_contents
+    assert "condition=IfCondition(ekf_global)" in launch_contents
     assert 'name="ekf_filter_node_odom"' in launch_contents
     assert 'name="ekf_filter_node_map"' in launch_contents
     assert 'name="navsat_transform"' in launch_contents
