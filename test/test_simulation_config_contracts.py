@@ -52,6 +52,33 @@ def test_nav2_only_launch_disables_velocity_smoother() -> None:
     assert '"use_velocity_smoother": "False"' in launch_contents
 
 
+def test_nav2_only_launch_defaults_keepout_mask_frame_to_odom() -> None:
+    launch_path = PACKAGE_ROOT / "launch" / "nav2_only.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert 'DeclareLaunchArgument(\n        "map_frame",' in launch_contents
+    assert 'default_value="odom"' in launch_contents
+    assert '"frame_id": resolved_map_frame' in launch_contents
+    assert "not in ('', 'auto') else 'odom'" in launch_contents
+
+
+def test_nav2_only_launch_exposes_use_keepout_toggle() -> None:
+    launch_path = PACKAGE_ROOT / "launch" / "nav2_only.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert 'DeclareLaunchArgument(\n        "use_keepout",' in launch_contents
+    assert 'default_value="True"' in launch_contents
+    assert "condition=IfCondition(use_keepout)" in launch_contents
+    assert (
+        '"local_costmap.local_costmap.ros__parameters.keepout_filter.enabled": use_keepout'
+        in launch_contents
+    )
+    assert (
+        '"global_costmap.global_costmap.ros__parameters.keepout_filter.enabled": use_keepout'
+        in launch_contents
+    )
+
+
 def test_nav2_no_map_direct_frame_values() -> None:
     nav2_config_path = PACKAGE_ROOT / "config" / "nav2_no_map_params.yaml"
     nav2_config_contents = nav2_config_path.read_text(encoding="utf-8")
@@ -96,6 +123,8 @@ def test_real_launch_includes_ackermann_odometry_by_default() -> None:
     assert "PythonExpression([\"'\", ackermann_odometry, \"'.lower() == 'true'\"])" in launch_contents
     assert '"telemetry_topic": "/controller/drive_telemetry"' in launch_contents
     assert '"odom_topic": "/wheel/odometry"' in launch_contents
+    assert '"publish_odom_tf": ParameterValue(' in launch_contents
+    assert "PythonExpression([\"'\", ekf_local, \"'.lower() != 'true'\"])" in launch_contents
 
 
 def test_real_launch_includes_zones_manager_toggle() -> None:
@@ -106,6 +135,7 @@ def test_real_launch_includes_zones_manager_toggle() -> None:
     assert 'default_value="true"' in launch_contents
     assert 'executable="zones_manager"' in launch_contents
     assert "PythonExpression([\"'\", zones_manager, \"'.lower() == 'true'\"])" in launch_contents
+    assert '"use_keepout": PythonExpression(["\'", zones_manager, "\'.lower() == \'true\'"])' in launch_contents
 
 
 def test_real_launch_exposes_dual_ekf_toggles_and_no_controller_server() -> None:
@@ -126,6 +156,19 @@ def test_real_launch_exposes_dual_ekf_toggles_and_no_controller_server() -> None
     assert "\"'.lower() == 'true' else 'ekf_node'\"" in launch_contents
     assert "condition=IfCondition(use_navsat)" not in launch_contents
     assert 'controller_server' not in launch_contents
+
+
+def test_real_launch_auto_resolves_map_frame_from_ekf_global_toggle() -> None:
+    launch_path = PACKAGE_ROOT / "launch" / "real.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert 'DeclareLaunchArgument(\n        "map_frame",' in launch_contents
+    assert 'default_value="auto"' in launch_contents
+    assert "resolved_map_frame = PythonExpression(" in launch_contents
+    assert "else ('map' if '" in launch_contents
+    assert "'.lower() == 'true' else 'odom'))" in launch_contents
+    assert '"map_frame": resolved_map_frame,' in launch_contents
+    assert '"fromll_target_frame": resolved_map_frame,' in launch_contents
 
 
 def test_dual_ekf_navsat_waits_for_runtime_datum() -> None:

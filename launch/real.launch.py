@@ -75,6 +75,16 @@ def generate_launch_description():
     ukf = LaunchConfiguration("ukf")
     localization_filter_executable = PythonExpression(
         ["'ukf_node' if '", ukf, "'.lower() == 'true' else 'ekf_node'"]
+    resolved_map_frame = PythonExpression(
+        [
+            "('",
+            map_frame,
+            "'.strip().lower() if '",
+            map_frame,
+            "'.strip().lower() not in ('', 'auto') else ('map' if '",
+            ekf_global,
+            "'.lower() == 'true' else 'odom'))",
+        ]
     )
 
     declare_use_sim_time_cmd = DeclareLaunchArgument(
@@ -164,8 +174,8 @@ def generate_launch_description():
     )
     declare_map_frame_cmd = DeclareLaunchArgument(
         "map_frame",
-        default_value="map",
-        description="Global map frame for navigation web backend",
+        default_value="auto",
+        description="Navigation frame: auto (map when ekf_global=true, odom when false) or explicit",
     )
     declare_zones_manager_cmd = DeclareLaunchArgument(
         "zones_manager",
@@ -202,7 +212,8 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(os.path.join(gps_wpf_dir, "launch", "nav2_only.launch.py")),
         launch_arguments={
             "use_sim_time": use_sim_time,
-            "map_frame": map_frame,
+            "map_frame": resolved_map_frame,
+            "use_keepout": PythonExpression(["'", zones_manager, "'.lower() == 'true'"]),
             "use_collision_monitor": use_collision_monitor,
             "use_rviz": use_rviz,
             "rviz_config": rviz_config,
@@ -235,6 +246,12 @@ def generate_launch_description():
             {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
             {"telemetry_topic": "/controller/drive_telemetry"},
             {"odom_topic": "/wheel/odometry"},
+            {
+                "publish_odom_tf": ParameterValue(
+                    PythonExpression(["'", ekf_local, "'.lower() != 'true'"]),
+                    value_type=bool,
+                )
+            },
         ],
     )
     ekf_map_cmd = Node(
@@ -307,7 +324,8 @@ def generate_launch_description():
                 "set_geojson_service": "/zones_manager/set_geojson",
                 "get_state_service": "/zones_manager/get_state",
                 "reload_from_disk_service": "/zones_manager/reload_from_disk",
-                "map_frame": map_frame,
+                "map_frame": resolved_map_frame,
+                "fromll_target_frame": resolved_map_frame,
                 "geojson_file": zones_geojson_path,
                 "mask_image_file": keepout_mask_image_path,
                 "mask_yaml_file": keepout_mask_yaml_path,
@@ -336,7 +354,7 @@ def generate_launch_description():
                 "fromll_service": "/fromLL",
                 "fromll_service_fallback": "/navsat_transform/fromLL",
                 "fromll_wait_timeout_s": 2.0,
-                "map_frame": map_frame,
+                "map_frame": resolved_map_frame,
                 "gps_topic": gps_topic,
                 "cmd_vel_safe_topic": "/cmd_vel_safe",
                 "brake_topic": "/cmd_vel_safe",
@@ -389,7 +407,7 @@ def generate_launch_description():
             "ws_host": ws_host,
             "ws_port": ws_port,
             "gps_topic": gps_topic,
-            "map_frame": map_frame,
+            "map_frame": resolved_map_frame,
             "launch_zones_manager": "false",
             "launch_nav_command_server": "false",
             "launch_nav_snapshot_server": "false",

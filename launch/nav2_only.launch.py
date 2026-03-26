@@ -74,12 +74,15 @@ def generate_launch_description():
     bt_through_poses_xml = _resolve_config_file_path(
         gps_wpf_dir, "navigate_through_poses_w_replanning_and_recovery_no_spin.xml"
     )
+    use_keepout = LaunchConfiguration("use_keepout")
     configured_params = RewrittenYaml(
         source_file=nav2_params,
         root_key="",
         param_rewrites={
             "default_nav_to_pose_bt_xml": bt_xml,
             "default_nav_through_poses_bt_xml": bt_through_poses_xml,
+            "local_costmap.local_costmap.ros__parameters.keepout_filter.enabled": use_keepout,
+            "global_costmap.global_costmap.ros__parameters.keepout_filter.enabled": use_keepout,
         },
         convert_types=True,
     )
@@ -88,6 +91,15 @@ def generate_launch_description():
     nav2_use_sim_time = False
     use_sim_time = LaunchConfiguration("use_sim_time")
     map_frame = LaunchConfiguration("map_frame")
+    resolved_map_frame = PythonExpression(
+        [
+            "('",
+            map_frame,
+            "'.strip().lower() if '",
+            map_frame,
+            "'.strip().lower() not in ('', 'auto') else 'odom')",
+        ]
+    )
     use_collision_monitor = LaunchConfiguration("use_collision_monitor")
     use_rviz = LaunchConfiguration("use_rviz")
     rviz_config = LaunchConfiguration("rviz_config")
@@ -99,8 +111,13 @@ def generate_launch_description():
     )
     declare_map_frame_cmd = DeclareLaunchArgument(
         "map_frame",
-        default_value="map",
-        description="Global map frame used by keepout filter mask",
+        default_value="odom",
+        description="Frame used by keepout filter mask (odom/map; auto resolves to odom)",
+    )
+    declare_use_keepout_cmd = DeclareLaunchArgument(
+        "use_keepout",
+        default_value="True",
+        description="Enable keepout filter servers and keepout layer in Nav2 costmaps",
     )
     declare_use_collision_monitor_cmd = DeclareLaunchArgument(
         "use_collision_monitor",
@@ -149,10 +166,11 @@ def generate_launch_description():
             {
                 "yaml_filename": keepout_mask_yaml_path,
                 "topic_name": "/keepout_filter_mask",
-                "frame_id": map_frame,
+                "frame_id": resolved_map_frame,
             },
             {"use_sim_time": nav2_use_sim_time},
         ],
+        condition=IfCondition(use_keepout),
     )
     keepout_costmap_filter_info_server_cmd = Node(
         package="nav2_map_server",
@@ -169,6 +187,7 @@ def generate_launch_description():
             },
             {"use_sim_time": nav2_use_sim_time},
         ],
+        condition=IfCondition(use_keepout),
     )
     keepout_lifecycle_cmd = Node(
         package="nav2_lifecycle_manager",
@@ -186,6 +205,7 @@ def generate_launch_description():
             },
             {"use_sim_time": nav2_use_sim_time},
         ],
+        condition=IfCondition(use_keepout),
     )
 
     collision_monitor_cmd = Node(
@@ -233,6 +253,7 @@ def generate_launch_description():
     ld = LaunchDescription()
     ld.add_action(declare_use_sim_time_cmd)
     ld.add_action(declare_map_frame_cmd)
+    ld.add_action(declare_use_keepout_cmd)
     ld.add_action(declare_use_collision_monitor_cmd)
     ld.add_action(declare_use_rviz_cmd)
     ld.add_action(declare_rviz_config_cmd)

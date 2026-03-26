@@ -114,6 +114,11 @@ Real:
 ./tools/exec.sh "source /opt/ros/humble/setup.bash && source /ros2_ws/install/setup.bash && ros2 launch navegacion_gps real.launch.py"
 ```
 
+Frame de navegación en `real.launch.py`:
+- `map_frame:=auto` (default) selecciona `map` cuando `ekf_global:=true` y `odom` cuando `ekf_global:=false`.
+- Se puede forzar manualmente con `map_frame:=map` o `map_frame:=odom`.
+- `zones_manager:=false` también desactiva keepout en Nav2 (no lanza `keepout_filter_mask_server`/`costmap_filter_info_server` y apaga la capa `keepout_filter` en costmaps).
+
 Real con fallback al driver histórico:
 ```bash
 ./tools/exec.sh "source /opt/ros/humble/setup.bash && source /ros2_ws/install/setup.bash && ros2 launch navegacion_gps real.launch.py telemetry_backend:=pixhawk_driver"
