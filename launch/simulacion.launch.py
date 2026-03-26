@@ -40,6 +40,7 @@ def generate_launch_description():
     twist_covariance_yaw_rate = LaunchConfiguration("twist_covariance_yaw_rate")
     ekf_local = LaunchConfiguration("ekf_local")
     ekf_global = LaunchConfiguration("ekf_global")
+    ukf = LaunchConfiguration("ukf")
     datum_setter = LaunchConfiguration("datum_setter")
     launch_web_zone_server = LaunchConfiguration("launch_web_zone_server")
     web_ws_host = LaunchConfiguration("web_ws_host")
@@ -105,6 +106,7 @@ def generate_launch_description():
             DeclareLaunchArgument("twist_covariance_yaw_rate", default_value="0.05"),
             DeclareLaunchArgument("ekf_local", default_value="True"),
             DeclareLaunchArgument("ekf_global", default_value="False"),
+            DeclareLaunchArgument("ukf", default_value="False"),
             DeclareLaunchArgument("datum_setter", default_value="false"),
             DeclareLaunchArgument("launch_web_zone_server", default_value="True"),
             DeclareLaunchArgument("web_ws_host", default_value="0.0.0.0"),
@@ -139,6 +141,7 @@ def generate_launch_description():
                     "twist_covariance_yaw_rate": twist_covariance_yaw_rate,
                     "ekf_local": ekf_local,
                     "ekf_global": ekf_global,
+                    "ukf": ukf,
                     "datum_setter": datum_setter,
                 }.items(),
             ),

@@ -39,6 +39,16 @@ def test_sim_local_v2_launch_forwards_ekf_global_toggle() -> None:
     assert '"ekf_global": ekf_global' in launch_contents
 
 
+def test_sim_local_v2_launch_forwards_ukf_toggle() -> None:
+    launch_path = (
+        Path(__file__).resolve().parents[1] / "launch" / "sim_local_v2.launch.py"
+    )
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert 'DeclareLaunchArgument("ukf", default_value="False")' in launch_contents
+    assert '"ukf": ukf' in launch_contents
+
+
 def test_sim_local_v2_launch_exposes_datum_setter_toggle() -> None:
     launch_path = (
         Path(__file__).resolve().parents[1] / "launch" / "sim_local_v2.launch.py"

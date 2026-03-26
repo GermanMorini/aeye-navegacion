@@ -74,6 +74,14 @@ def test_simulacion_launch_exposes_ekf_global_toggle() -> None:
     assert '"ekf_global": ekf_global' in launch_contents
 
 
+def test_simulacion_launch_forwards_ukf_toggle() -> None:
+    launch_path = Path(__file__).resolve().parents[1] / "launch" / "simulacion.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert 'DeclareLaunchArgument("ukf", default_value="False")' in launch_contents
+    assert '"ukf": ukf' in launch_contents
+
+
 def test_simulacion_launch_forwards_datum_setter_toggle() -> None:
     launch_path = Path(__file__).resolve().parents[1] / "launch" / "simulacion.launch.py"
     launch_contents = launch_path.read_text(encoding="utf-8")

@@ -72,6 +72,10 @@ def generate_launch_description():
     ackermann_odometry = LaunchConfiguration("ackermann_odometry")
     ekf_local = LaunchConfiguration("ekf_local")
     ekf_global = LaunchConfiguration("ekf_global")
+    ukf = LaunchConfiguration("ukf")
+    localization_filter_executable = PythonExpression(
+        ["'ukf_node' if '", ukf, "'.lower() == 'true' else 'ekf_node'"]
+    )
 
     declare_use_sim_time_cmd = DeclareLaunchArgument(
         "use_sim_time",
@@ -181,12 +185,17 @@ def generate_launch_description():
     declare_ekf_local_cmd = DeclareLaunchArgument(
         "ekf_local",
         default_value="true",
-        description="Enable local UKF filter node",
+        description="Enable local robot_localization filter node",
     )
     declare_ekf_global_cmd = DeclareLaunchArgument(
         "ekf_global",
         default_value="true",
-        description="Enable global UKF filter node",
+        description="Enable global robot_localization filter node",
+    )
+    declare_ukf_cmd = DeclareLaunchArgument(
+        "ukf",
+        default_value="False",
+        description="Use UKF for local/global robot_localization filters; if false, use EKF",
     )
 
     nav2_only_cmd = IncludeLaunchDescription(
@@ -204,7 +213,7 @@ def generate_launch_description():
 
     ekf_odom_cmd = Node(
         package="robot_localization",
-        executable="ukf_node",
+        executable=localization_filter_executable,
         name="ekf_filter_node_odom",
         output="screen",
         condition=IfCondition(ekf_local),
@@ -230,7 +239,7 @@ def generate_launch_description():
     )
     ekf_map_cmd = Node(
         package="robot_localization",
-        executable="ukf_node",
+        executable=localization_filter_executable,
         name="ekf_filter_node_map",
         output="screen",
         condition=IfCondition(ekf_global),
@@ -499,6 +508,7 @@ def generate_launch_description():
     ld.add_action(declare_ackermann_odometry_cmd)
     ld.add_action(declare_ekf_local_cmd)
     ld.add_action(declare_ekf_global_cmd)
+    ld.add_action(declare_ukf_cmd)
     ld.add_action(OpaqueFunction(function=_validate_telemetry_backend))
 
     ld.add_action(nav2_only_cmd)

@@ -13,6 +13,7 @@ def test_localization_v2_launch_uses_fixed_dual_ekf_odom_node() -> None:
     assert "condition=IfCondition(ekf_local)" in launch_contents
     assert 'DeclareLaunchArgument("ekf_local", default_value="True")' in launch_contents
     assert 'DeclareLaunchArgument("ekf_global", default_value="False")' in launch_contents
+    assert 'DeclareLaunchArgument("ukf", default_value="False")' in launch_contents
     assert 'executable="ackermann_odometry"' in launch_contents
     assert "publish_odom_tf = ParameterValue(" in launch_contents
     assert '"publish_odom_tf": publish_odom_tf' in launch_contents
@@ -21,8 +22,9 @@ def test_localization_v2_launch_uses_fixed_dual_ekf_odom_node() -> None:
     assert 'name="navsat_transform"' in launch_contents
     assert '("odometry/filtered", "/odometry/global")' in launch_contents
     assert "condition=IfCondition(ekf_global)" in launch_contents
-    assert launch_contents.count('executable="ukf_node"') == 2
-    assert 'executable="ekf_node"' not in launch_contents
+    assert "localization_filter_executable = PythonExpression(" in launch_contents
+    assert "\"'ukf_node' if '\"" in launch_contents
+    assert "\"'.lower() == 'true' else 'ekf_node'\"" in launch_contents
     assert 'DeclareLaunchArgument("pixhawk_gps_topic", default_value="/gps/fix")' in launch_contents
     assert 'default_value="/odometry/pixhawk"' in launch_contents
     assert '"gps_topic": pixhawk_gps_topic' in launch_contents
@@ -113,13 +115,15 @@ def test_real_launch_exposes_dual_ekf_toggles_and_no_controller_server() -> None
     assert 'DeclareLaunchArgument(\n        "ekf_local",' in launch_contents
     assert 'default_value="true"' in launch_contents
     assert 'DeclareLaunchArgument(\n        "ekf_global",' in launch_contents
+    assert 'DeclareLaunchArgument(\n        "ukf",' in launch_contents
     assert "condition=IfCondition(ekf_local)" in launch_contents
     assert "condition=IfCondition(ekf_global)" in launch_contents
     assert 'name="ekf_filter_node_odom"' in launch_contents
     assert 'name="ekf_filter_node_map"' in launch_contents
     assert 'name="navsat_transform"' in launch_contents
-    assert launch_contents.count('executable="ukf_node"') == 2
-    assert 'executable="ekf_node"' not in launch_contents
+    assert "localization_filter_executable = PythonExpression(" in launch_contents
+    assert "\"'ukf_node' if '\"" in launch_contents
+    assert "\"'.lower() == 'true' else 'ekf_node'\"" in launch_contents
     assert "condition=IfCondition(use_navsat)" not in launch_contents
     assert 'controller_server' not in launch_contents
 

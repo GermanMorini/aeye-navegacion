@@ -40,6 +40,10 @@ def generate_launch_description():
     twist_covariance_yaw_rate = LaunchConfiguration("twist_covariance_yaw_rate")
     ekf_local = LaunchConfiguration("ekf_local")
     ekf_global = LaunchConfiguration("ekf_global")
+    ukf = LaunchConfiguration("ukf")
+    localization_filter_executable = PythonExpression(
+        ["'ukf_node' if '", ukf, "'.lower() == 'true' else 'ekf_node'"]
+    )
     publish_odom_tf = ParameterValue(
         PythonExpression(["'", ekf_local, "' == 'False'"]),
         value_type=bool,
@@ -70,6 +74,7 @@ def generate_launch_description():
             DeclareLaunchArgument("twist_covariance_yaw_rate", default_value="0.05"),
             DeclareLaunchArgument("ekf_local", default_value="True"),
             DeclareLaunchArgument("ekf_global", default_value="False"),
+            DeclareLaunchArgument("ukf", default_value="False"),
             Node(
                 package="navegacion_gps",
                 executable="ackermann_odometry",
@@ -132,7 +137,7 @@ def generate_launch_description():
             ),
             Node(
                 package="robot_localization",
-                executable="ukf_node",
+                executable=localization_filter_executable,
                 name="ekf_filter_node_odom",
                 output="screen",
                 condition=IfCondition(ekf_local),
@@ -148,7 +153,7 @@ def generate_launch_description():
             ),
             Node(
                 package="robot_localization",
-                executable="ukf_node",
+                executable=localization_filter_executable,
                 name="ekf_filter_node_map",
                 output="screen",
                 condition=IfCondition(ekf_global),
