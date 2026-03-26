@@ -1,7 +1,8 @@
 # ============================================================================
 # localization_global_v2.yaml
 #
-# Este archivo define SOLO la capa global de localización para `sim_global_v2`.
+# Este archivo define SOLO la capa global de localización para los perfiles
+# `sim_global_v2` y `real_global_v2`.
 #
 # Arquitectura buscada:
 #   1. El EKF local existente calcula `/odometry/local`
@@ -163,10 +164,10 @@ navsat_transform:
     # La idea es desacoplar el heading global de la orientación local.
     use_odometry_yaw: false
 
-    # En simulacion usamos un datum fijo para que la conversion fromLL sea
-    # estable y consistente con el origen geodesico del mundo cargado.
-    # Eso permite que la web app envie goals LL sin depender de un datum
-    # dinamico ni del nodo datum_setter.
+    # El default mantiene un datum fijo para que la conversion fromLL sea
+    # estable y consistente con el sitio o mundo activo.
+    # En `real_global_v2` ese datum puede overridearse por argumentos de launch
+    # sin cambiar este archivo base.
     wait_for_datum: false
     datum: [-31.4858037, -64.2410570, 2.35619449019]
 

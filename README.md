@@ -18,8 +18,12 @@ Este checkout no incluye los antiguos nodos de waypoints interactivos, logger GU
   - `realism_mode:=false`: preserva el flujo legacy de simulación con passthrough directo de `/cmd_vel_final`
 - `ros2 launch navegacion_gps real.launch.py`
   - robot_localization + Nav2 + backend de telemetría seleccionable (`mavros` por defecto, `pixhawk_driver` como fallback) + zonas + backend web opcional
+- `ros2 launch navegacion_gps real_global_v2.launch.py`
+  - bringup global real para la Raspberry: cadena real `v2` + `navsat_transform` + EKF global + Nav2 sobre `map`, con datum configurable por launch
 - `ros2 launch navegacion_gps rviz_real.launch.py`
   - RViz + `robot_state_publisher` usando el URDF real
+- `ros2 launch navegacion_gps rviz_real_global_v2.launch.py`
+  - RViz global `v2` para correr en la PC local, apuntando al robot real y con `robot_state_publisher` local opcional
 
 ## Navegacion Local V2
 La `v2` agrega una base nueva de navegacion local para el robot Ackermann, separada de la `v1` y sin depender de GPS en `odom -> base_footprint`.
@@ -28,6 +32,8 @@ Launches nuevos:
 
 - `ros2 launch navegacion_gps sim_local_v2.launch.py`
 - `ros2 launch navegacion_gps real_local_v2.launch.py`
+- `ros2 launch navegacion_gps sim_global_v2.launch.py`
+- `ros2 launch navegacion_gps real_global_v2.launch.py`
 
 La `v2` usa:
 
@@ -37,9 +43,17 @@ La `v2` usa:
 - keepout filter estatico compartido por `sim_local_v2` y `real_local_v2`;
 - visualizacion de `/plan`, `/stop_zone`, `/keepout_filter_mask` y `/costmap_filter_info` en RViz.
 
+Perfiles `v2` relevantes:
+
+- `real_local_v2` mantiene navegacion local-only en `odom`.
+- `sim_global_v2` y `real_global_v2` agregan la capa global `map -> odom` con `navsat_transform` + EKF global.
+- `real_global_v2` mueve goals LL y la web al frame `map`, y permite override del datum por launch con `datum_lat`, `datum_lon` y `datum_yaw_deg`.
+- `rviz_real_global_v2` usa `rviz_global_v2.rviz` para visualizar ese stack desde la PC local.
+
 Flag de launch util para diagnostico:
 
 - `use_keepout:=True` por defecto en `sim_local_v2`, `real_local_v2` y `nav_local_v2`
+- `use_keepout:=True` por defecto tambien en `sim_global_v2` y `real_global_v2`
 - si se pasa `use_keepout:=False`, no se levantan los servidores keepout y los costmaps cargan una variante de params sin `keepout_filter`
 
 Guia tecnica detallada:
@@ -47,6 +61,7 @@ Guia tecnica detallada:
 - [LOCAL_NAV_V2.md](LOCAL_NAV_V2.md)
 - [SIM_LOCAL_V2_FIDELITY.md](SIM_LOCAL_V2_FIDELITY.md)
 - [REAL_LOCAL_V2_CHECKLIST.md](REAL_LOCAL_V2_CHECKLIST.md)
+- [REAL_GLOBAL_V2_CHECKLIST.md](REAL_GLOBAL_V2_CHECKLIST.md)
 
 ## Flujo de control
 - Nav2 publica `/cmd_vel`.
@@ -179,6 +194,26 @@ Build:
 Real:
 ```bash
 ./tools/exec.sh "source /opt/ros/humble/setup.bash && source /ros2_ws/install/setup.bash && ros2 launch navegacion_gps real.launch.py"
+```
+
+Real global `v2`:
+```bash
+./tools/exec.sh "source /opt/ros/humble/setup.bash && source /ros2_ws/install/setup.bash && ros2 launch navegacion_gps real_global_v2.launch.py"
+```
+
+Real global `v2` con override de datum:
+```bash
+./tools/exec.sh "source /opt/ros/humble/setup.bash && source /ros2_ws/install/setup.bash && ros2 launch navegacion_gps real_global_v2.launch.py datum_lat:=<lat> datum_lon:=<lon> datum_yaw_deg:=<yaw_deg>"
+```
+
+RViz global `v2` en la PC local:
+```bash
+ros2 launch navegacion_gps rviz_real_global_v2.launch.py
+```
+
+RViz global `v2` en la PC local con `robot_state_publisher` local:
+```bash
+ros2 launch navegacion_gps rviz_real_global_v2.launch.py launch_robot_state_publisher:=true
 ```
 
 Real con fallback al driver histórico:

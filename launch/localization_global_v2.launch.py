@@ -1,13 +1,19 @@
+import math
 from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+
+
+DEFAULT_DATUM_LAT = -31.4858037
+DEFAULT_DATUM_LON = -64.2410570
+DEFAULT_DATUM_YAW_DEG = 135.0
 
 
 def _resolve_config_file_path(package_share_dir: str, filename: str) -> str:
@@ -21,6 +27,42 @@ def _resolve_config_file_path(package_share_dir: str, filename: str) -> str:
     except IndexError:
         pass
     return str(default_path)
+
+
+def _build_navsat_transform(context):
+    use_sim_time = LaunchConfiguration("use_sim_time").perform(context).lower() == "true"
+    imu_topic = LaunchConfiguration("imu_topic").perform(context)
+    gps_topic = LaunchConfiguration("gps_topic").perform(context)
+    global_localization_params_file = LaunchConfiguration(
+        "global_localization_params_file"
+    ).perform(context)
+    datum_lat = float(LaunchConfiguration("datum_lat").perform(context))
+    datum_lon = float(LaunchConfiguration("datum_lon").perform(context))
+    datum_yaw_deg = float(LaunchConfiguration("datum_yaw_deg").perform(context))
+    datum_yaw_rad = math.radians(datum_yaw_deg)
+
+    return [
+        Node(
+            package="robot_localization",
+            executable="navsat_transform_node",
+            name="navsat_transform",
+            output="screen",
+            parameters=[
+                global_localization_params_file,
+                {
+                    "use_sim_time": use_sim_time,
+                    "wait_for_datum": False,
+                    "datum": [datum_lat, datum_lon, datum_yaw_rad],
+                },
+            ],
+            remappings=[
+                ("imu/data", imu_topic),
+                ("gps/fix", gps_topic),
+                ("odometry/filtered", "/odometry/local"),
+                ("odometry/gps", "/odometry/gps"),
+            ],
+        )
+    ]
 
 
 def generate_launch_description():
@@ -67,6 +109,9 @@ def generate_launch_description():
                 default_value=default_global_params_file,
             ),
             DeclareLaunchArgument("datum_setter", default_value="false"),
+            DeclareLaunchArgument("datum_lat", default_value=str(DEFAULT_DATUM_LAT)),
+            DeclareLaunchArgument("datum_lon", default_value=str(DEFAULT_DATUM_LON)),
+            DeclareLaunchArgument("datum_yaw_deg", default_value=str(DEFAULT_DATUM_YAW_DEG)),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
                     str(Path(gps_wpf_dir) / "launch" / "localization_v2.launch.py")
@@ -98,22 +143,7 @@ def generate_launch_description():
                     ("odometry/filtered", "/odometry/global"),
                 ],
             ),
-            Node(
-                package="robot_localization",
-                executable="navsat_transform_node",
-                name="navsat_transform",
-                output="screen",
-                parameters=[
-                    global_localization_params_file,
-                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
-                ],
-                remappings=[
-                    ("imu/data", imu_topic),
-                    ("gps/fix", gps_topic),
-                    ("odometry/filtered", "/odometry/local"),
-                    ("odometry/gps", "/odometry/gps"),
-                ],
-            ),
+            OpaqueFunction(function=_build_navsat_transform),
             Node(
                 package="navegacion_gps",
                 executable="datum_setter",
