@@ -11,6 +11,8 @@ from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from tf2_ros import TransformBroadcaster
 
+BOOTSTRAP_TF_PERIOD_S = 0.1
+
 
 def normalize_angle(angle_rad: float) -> float:
     while angle_rad <= -math.pi:
@@ -119,6 +121,34 @@ def build_odom_transform(
     return transform
 
 
+def maybe_publish_bootstrap_tf(
+    *,
+    tf_broadcaster: Optional[TransformBroadcaster],
+    publish_odom_tf: bool,
+    has_received_valid_telemetry: bool,
+    stamp,
+    odom_frame: str,
+    base_frame: str,
+) -> bool:
+    if (
+        (not bool(publish_odom_tf))
+        or bool(has_received_valid_telemetry)
+        or (tf_broadcaster is None)
+    ):
+        return False
+
+    transform = build_odom_transform(
+        stamp=stamp,
+        odom_frame=odom_frame,
+        base_frame=base_frame,
+        x_m=0.0,
+        y_m=0.0,
+        yaw_rad=0.0,
+    )
+    tf_broadcaster.sendTransform(transform)
+    return True
+
+
 class AckermannOdometryNode(Node):
     def __init__(self) -> None:
         super().__init__("ackermann_odometry")
@@ -188,11 +218,27 @@ class AckermannOdometryNode(Node):
         self._yaw_rad = 0.0
         self._last_stamp_s: Optional[float] = None
         self._last_periodic_log_monotonic_s: Optional[float] = None
+        self._has_received_valid_telemetry = False
+        self._bootstrap_tf_timer = (
+            self.create_timer(BOOTSTRAP_TF_PERIOD_S, self._on_bootstrap_tf_timer)
+            if self._publish_odom_tf
+            else None
+        )
 
         self.get_logger().info(
             "ackermann_odometry ready "
             f"({telemetry_topic} -> {odom_topic}, wheelbase={self._wheelbase_m:.3f}m, "
             f"publish_odom_tf={self._publish_odom_tf})"
+        )
+
+    def _on_bootstrap_tf_timer(self) -> None:
+        maybe_publish_bootstrap_tf(
+            tf_broadcaster=self._tf_broadcaster,
+            publish_odom_tf=self._publish_odom_tf,
+            has_received_valid_telemetry=self._has_received_valid_telemetry,
+            stamp=self.get_clock().now().to_msg(),
+            odom_frame=self._odom_frame,
+            base_frame=self._base_frame,
         )
 
     def _publish_messages(
@@ -277,6 +323,8 @@ class AckermannOdometryNode(Node):
             return
         if self._require_steer_valid and not bool(msg.steer_valid):
             return
+
+        self._has_received_valid_telemetry = True
 
         stamp_s = stamp_to_seconds(msg.stamp)
         if stamp_s <= 0.0:

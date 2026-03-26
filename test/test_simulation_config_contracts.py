@@ -86,7 +86,7 @@ def test_nav2_no_map_direct_frame_values() -> None:
     assert "bt_navigator:" in nav2_config_contents
     assert "behavior_server:" in nav2_config_contents
     assert "global_costmap:" in nav2_config_contents
-    assert "global_frame: odom" in nav2_config_contents
+    assert "global_frame: map" in nav2_config_contents
 
 
 def test_dual_ekf_local_uses_wheel_and_pixhawk_odometry_topics() -> None:
@@ -169,6 +169,33 @@ def test_real_launch_auto_resolves_map_frame_from_ekf_global_toggle() -> None:
     assert "'.lower() == 'true' else 'odom'))" in launch_contents
     assert '"map_frame": resolved_map_frame,' in launch_contents
     assert '"fromll_target_frame": resolved_map_frame,' in launch_contents
+
+
+def test_real_launch_includes_tf_consistency_fail_fast_validation() -> None:
+    launch_path = PACKAGE_ROOT / "launch" / "real.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert "def _validate_tf_configuration(context, nav2_params_file: str):" in launch_contents
+    assert "nav2_no_map_params.yaml is using frame 'map'" in launch_contents
+    assert "Para modo map: usar `ekf_global:=True`." in launch_contents
+    assert "ekf_local:=False and ackermann_odometry:=False" in launch_contents
+    assert "Si desactivas `ekf_local`, mantener `ackermann_odometry:=true`." in launch_contents
+    assert "OpaqueFunction(" in launch_contents
+    assert "_validate_tf_configuration(context, nav2_params_file)" in launch_contents
+
+
+def test_real_launch_starts_nav2_after_tf_providers_in_global_only_mode() -> None:
+    launch_path = PACKAGE_ROOT / "launch" / "real.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    nav2_index = launch_contents.index("ld.add_action(nav2_only_cmd)")
+    ackermann_index = launch_contents.index("ld.add_action(ackermann_odometry_cmd)")
+    ekf_map_index = launch_contents.index("ld.add_action(ekf_map_cmd)")
+    navsat_index = launch_contents.index("ld.add_action(navsat_transform_cmd)")
+
+    assert nav2_index > ackermann_index
+    assert nav2_index > ekf_map_index
+    assert nav2_index > navsat_index
 
 
 def test_dual_ekf_navsat_waits_for_runtime_datum() -> None:

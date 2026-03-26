@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
@@ -35,6 +36,67 @@ def _validate_telemetry_backend(context):
     return []
 
 
+def _as_bool(value: str) -> bool:
+    return str(value).strip().lower() == "true"
+
+
+def _nav2_uses_map_frame(nav2_params_file: str) -> bool:
+    use_map = True
+    try:
+        with open(nav2_params_file, "r", encoding="utf-8") as file_handle:
+            data = yaml.safe_load(file_handle) or {}
+    except Exception:
+        return use_map
+
+    candidate_paths = [
+        ["bt_navigator", "ros__parameters", "global_frame"],
+        ["behavior_server", "ros__parameters", "global_frame"],
+        ["local_costmap", "local_costmap", "ros__parameters", "global_frame"],
+        ["global_costmap", "global_costmap", "ros__parameters", "global_frame"],
+    ]
+
+    frames = []
+    for path in candidate_paths:
+        node = data
+        valid = True
+        for key in path:
+            if isinstance(node, dict) and key in node:
+                node = node[key]
+            else:
+                valid = False
+                break
+        if valid:
+            frames.append(str(node).strip().lower())
+
+    if frames:
+        return any(frame == "map" for frame in frames)
+    return use_map
+
+
+def _validate_tf_configuration(context, nav2_params_file: str):
+    ekf_local_enabled = _as_bool(LaunchConfiguration("ekf_local").perform(context))
+    ekf_global_enabled = _as_bool(LaunchConfiguration("ekf_global").perform(context))
+    ackermann_enabled = _as_bool(
+        LaunchConfiguration("ackermann_odometry").perform(context)
+    )
+    nav2_requires_map = _nav2_uses_map_frame(nav2_params_file)
+
+    if nav2_requires_map and (not ekf_global_enabled):
+        raise RuntimeError(
+            "Invalid TF configuration: nav2_no_map_params.yaml is using frame 'map', "
+            "but ekf_global:=False removes map->odom publication. "
+            "Para modo map: usar `ekf_global:=True`."
+        )
+
+    if (not ekf_local_enabled) and (not ackermann_enabled):
+        raise RuntimeError(
+            "Invalid TF configuration: ekf_local:=False and ackermann_odometry:=False "
+            "leave no provider for odom->base_footprint. "
+            "Si desactivas `ekf_local`, mantener `ackermann_odometry:=true`."
+        )
+    return []
+
+
 def generate_launch_description():
     gps_wpf_dir = get_package_share_directory("navegacion_gps")
     map_tools_dir = get_package_share_directory("map_tools")
@@ -44,6 +106,7 @@ def generate_launch_description():
     keepout_mask_image_path = _resolve_config_file_path(gps_wpf_dir, "keepout_mask.pgm")
     keepout_mask_yaml_path = _resolve_config_file_path(gps_wpf_dir, "keepout_mask.yaml")
     rl_params_file = _resolve_config_file_path(gps_wpf_dir, "dual_ekf_navsat_params.yaml")
+    nav2_params_file = _resolve_config_file_path(gps_wpf_dir, "nav2_no_map_params.yaml")
     lidar_to_scan_params = _resolve_config_file_path(
         gps_wpf_dir, "pointcloud_to_laserscan.yaml"
     )
@@ -75,6 +138,7 @@ def generate_launch_description():
     ukf = LaunchConfiguration("ukf")
     localization_filter_executable = PythonExpression(
         ["'ukf_node' if '", ukf, "'.lower() == 'true' else 'ekf_node'"]
+    )
     resolved_map_frame = PythonExpression(
         [
             "('",
@@ -246,6 +310,7 @@ def generate_launch_description():
             {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
             {"telemetry_topic": "/controller/drive_telemetry"},
             {"odom_topic": "/wheel/odometry"},
+            {"periodic_log_enabled": False},
             {
                 "publish_odom_tf": ParameterValue(
                     PythonExpression(["'", ekf_local, "'.lower() != 'true'"]),
@@ -528,8 +593,12 @@ def generate_launch_description():
     ld.add_action(declare_ekf_global_cmd)
     ld.add_action(declare_ukf_cmd)
     ld.add_action(OpaqueFunction(function=_validate_telemetry_backend))
+    ld.add_action(
+        OpaqueFunction(
+            function=lambda context: _validate_tf_configuration(context, nav2_params_file)
+        )
+    )
 
-    ld.add_action(nav2_only_cmd)
     ld.add_action(mavros_cmd)
     ld.add_action(pixhawk_cmd)
     ld.add_action(camera_cmd)
@@ -538,6 +607,7 @@ def generate_launch_description():
     ld.add_action(ekf_odom_cmd)
     ld.add_action(ekf_map_cmd)
     ld.add_action(navsat_transform_cmd)
+    ld.add_action(nav2_only_cmd)
     ld.add_action(datum_setter_cmd)
     ld.add_action(zones_manager_cmd)
     ld.add_action(nav_command_server_cmd)

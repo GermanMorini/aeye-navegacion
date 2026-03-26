@@ -8,6 +8,7 @@ from navegacion_gps.ackermann_odometry import (
     build_odom_transform,
     compute_yaw_rate,
     integrate_planar,
+    maybe_publish_bootstrap_tf,
     normalize_angle,
     should_emit_periodic_log,
 )
@@ -113,6 +114,60 @@ def test_build_odom_transform_uses_expected_frames_and_stamp() -> None:
     )
 
 
+class _FakeTransformBroadcaster:
+    def __init__(self) -> None:
+        self.transforms = []
+
+    def sendTransform(self, transform) -> None:  # noqa: N802
+        self.transforms.append(transform)
+
+
+def test_bootstrap_tf_publishes_identity_before_first_valid_telemetry() -> None:
+    broadcaster = _FakeTransformBroadcaster()
+    emitted = maybe_publish_bootstrap_tf(
+        tf_broadcaster=broadcaster,
+        publish_odom_tf=True,
+        has_received_valid_telemetry=False,
+        stamp=Time(sec=5, nanosec=100),
+        odom_frame="odom",
+        base_frame="base_footprint",
+    )
+
+    assert emitted is True
+    assert len(broadcaster.transforms) == 1
+    tf_msg = broadcaster.transforms[0]
+    assert tf_msg.header.frame_id == "odom"
+    assert tf_msg.child_frame_id == "base_footprint"
+    assert math.isclose(tf_msg.transform.translation.x, 0.0, rel_tol=0.0, abs_tol=1.0e-9)
+    assert math.isclose(tf_msg.transform.translation.y, 0.0, rel_tol=0.0, abs_tol=1.0e-9)
+    assert math.isclose(tf_msg.transform.rotation.w, 1.0, rel_tol=0.0, abs_tol=1.0e-9)
+    assert math.isclose(tf_msg.transform.rotation.z, 0.0, rel_tol=0.0, abs_tol=1.0e-9)
+
+
+def test_bootstrap_tf_stops_after_valid_telemetry_is_received() -> None:
+    broadcaster = _FakeTransformBroadcaster()
+    first_emitted = maybe_publish_bootstrap_tf(
+        tf_broadcaster=broadcaster,
+        publish_odom_tf=True,
+        has_received_valid_telemetry=False,
+        stamp=Time(sec=5, nanosec=100),
+        odom_frame="odom",
+        base_frame="base_footprint",
+    )
+    second_emitted = maybe_publish_bootstrap_tf(
+        tf_broadcaster=broadcaster,
+        publish_odom_tf=True,
+        has_received_valid_telemetry=True,
+        stamp=Time(sec=6, nanosec=200),
+        odom_frame="odom",
+        base_frame="base_footprint",
+    )
+
+    assert first_emitted is True
+    assert second_emitted is False
+    assert len(broadcaster.transforms) == 1
+
+
 def test_ackermann_odometry_source_exposes_publish_odom_tf_toggle() -> None:
     source_path = Path(__file__).resolve().parents[1] / "navegacion_gps" / "ackermann_odometry.py"
     source_contents = source_path.read_text(encoding="utf-8")
@@ -122,6 +177,11 @@ def test_ackermann_odometry_source_exposes_publish_odom_tf_toggle() -> None:
     assert 'self.declare_parameter("periodic_log_period_s", 0.5)' in source_contents
     assert "if self._publish_odom_tf and self._tf_broadcaster is not None:" in source_contents
     assert "self._tf_broadcaster.sendTransform(transform)" in source_contents
+    assert "self._has_received_valid_telemetry = False" in source_contents
+    assert "self._has_received_valid_telemetry = True" in source_contents
+    assert "self.create_timer(BOOTSTRAP_TF_PERIOD_S, self._on_bootstrap_tf_timer)" in source_contents
+    assert "def _on_bootstrap_tf_timer(self) -> None:" in source_contents
+    assert "maybe_publish_bootstrap_tf(" in source_contents
     assert "stamp=msg.stamp" in source_contents
     assert "def _maybe_log_periodic_state(" in source_contents
     assert "self._maybe_log_periodic_state(" in source_contents
