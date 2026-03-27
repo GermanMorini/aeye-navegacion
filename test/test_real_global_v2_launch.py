@@ -24,10 +24,11 @@ def test_real_global_v2_launch_reuses_real_stack_with_global_navigation() -> Non
     assert '"launch_nav_command_server": "false"' in launch_contents
     assert 'DeclareLaunchArgument("datum_lat"' in launch_contents
     assert 'DeclareLaunchArgument("datum_lon"' in launch_contents
-    assert 'DeclareLaunchArgument("datum_yaw_deg"' in launch_contents
+    assert 'DeclareLaunchArgument("datum_yaw_deg", default_value="0.0")' in launch_contents
     assert 'DeclareLaunchArgument("use_rviz", default_value="False")' in launch_contents
     assert 'DeclareLaunchArgument("rviz_config", default_value=default_rviz)' in launch_contents
     assert "rviz_global_v2.rviz" in launch_contents
+    assert 'executable="gps_course_heading"' not in launch_contents
 
 
 def test_localization_global_v2_launch_supports_datum_overrides() -> None:
@@ -36,8 +37,25 @@ def test_localization_global_v2_launch_supports_datum_overrides() -> None:
     assert 'DeclareLaunchArgument("datum_lat"' in launch_contents
     assert 'DeclareLaunchArgument("datum_lon"' in launch_contents
     assert 'DeclareLaunchArgument("datum_yaw_deg"' in launch_contents
+    assert 'DeclareLaunchArgument(\n                "enable_global_odom_stationary_gate"' in launch_contents
+    assert 'DeclareLaunchArgument(\n                "enable_global_imu_stationary_gate"' in launch_contents
+    assert 'DeclareLaunchArgument(\n                "enable_global_stationary_yaw_hold"' in launch_contents
+    assert 'DeclareLaunchArgument(\n                "enable_map_gps_absolute_measurement"' in launch_contents
+    assert 'name="global_odom_stationary_gate"' in launch_contents
+    assert 'name="global_imu_stationary_gate"' in launch_contents
+    assert 'name="global_yaw_stationary_hold"' in launch_contents
+    assert 'name="map_gps_absolute_measurement"' in launch_contents
     assert "OpaqueFunction(function=_build_navsat_transform)" in launch_contents
-    assert '"wait_for_datum": False' in launch_contents
+    assert '"wait_for_datum": True' in launch_contents
+    assert 'DeclareLaunchArgument("navsat_use_odometry_yaw", default_value="false")' in launch_contents
+    assert 'DeclareLaunchArgument("enable_gps_course_heading", default_value="false")' in launch_contents
+    assert 'DeclareLaunchArgument("gps_course_heading_topic", default_value="/gps/course_heading")' in launch_contents
+    assert '"use_odometry_yaw": navsat_use_odometry_yaw' in launch_contents
+    assert 'DeclareLaunchArgument(\n                "map_gps_absolute_topic"' in launch_contents
+    assert '{"odom1": map_gps_absolute_topic}' in launch_contents
+    assert '"odom2": global_stationary_yaw_hold_topic' in launch_contents
+    assert '"odom2_config": [' in launch_contents
+    assert '"imu1": gps_course_heading_topic' in launch_contents
     assert '"datum": [datum_lat, datum_lon, datum_yaw_rad]' in launch_contents
     assert "math.radians(datum_yaw_deg)" in launch_contents
 

@@ -506,6 +506,57 @@ class NavCommandServerNode(Node):
         qw = math.cos(half_yaw)
         return Quaternion(x=0.0, y=0.0, z=qz, w=qw)
 
+    @staticmethod
+    def _normalize_yaw_deg(yaw_deg: float) -> float:
+        yaw = float(yaw_deg)
+        while yaw <= -180.0:
+            yaw += 360.0
+        while yaw > 180.0:
+            yaw -= 360.0
+        return yaw
+
+    @staticmethod
+    def _north_east_m_to_ll(
+        lat: float,
+        lon: float,
+        north_m: float,
+        east_m: float,
+    ) -> Tuple[float, float]:
+        meters_per_deg_lat = 111_320.0
+        cos_lat = max(1.0e-6, abs(math.cos(math.radians(float(lat)))))
+        meters_per_deg_lon = meters_per_deg_lat * cos_lat
+        out_lat = float(lat) + float(north_m) / meters_per_deg_lat
+        out_lon = float(lon) + float(east_m) / meters_per_deg_lon
+        return out_lat, out_lon
+
+    def _fallback_fromll_yaw(self, yaw_deg: float) -> float:
+        if self.approx_fromll_fallback_enabled and math.isfinite(self.approx_fromll_datum_yaw_deg):
+            return self._normalize_yaw_deg(float(yaw_deg) + float(self.approx_fromll_datum_yaw_deg))
+        return self._normalize_yaw_deg(yaw_deg)
+
+    def _project_geographic_yaw_to_fromll(
+        self,
+        lat: float,
+        lon: float,
+        yaw_deg: float,
+        origin_xy: Tuple[float, float, float],
+        projection_distance_m: float = 1.0,
+    ) -> float:
+        heading_rad = math.radians(float(yaw_deg))
+        north_m = float(projection_distance_m) * math.sin(heading_rad)
+        east_m = float(projection_distance_m) * math.cos(heading_rad)
+        tip_lat, tip_lon = self._north_east_m_to_ll(lat, lon, north_m, east_m)
+        tip_converted = self._call_from_ll(tip_lat, tip_lon)
+        if tip_converted is None:
+            return self._fallback_fromll_yaw(yaw_deg)
+
+        dx = float(tip_converted[0]) - float(origin_xy[0])
+        dy = float(tip_converted[1]) - float(origin_xy[1])
+        if math.hypot(dx, dy) <= 1.0e-6:
+            return self._fallback_fromll_yaw(yaw_deg)
+
+        return self._normalize_yaw_deg(math.degrees(math.atan2(dy, dx)))
+
     def _transform_pose_to_map(self, pose: PoseStamped) -> Optional[PoseStamped]:
         if pose.header.frame_id == self.map_frame:
             pose.header.stamp = self.get_clock().now().to_msg()
@@ -953,6 +1004,7 @@ class NavCommandServerNode(Node):
         if converted is None:
             return None
         x, y, _ = converted
+        fromll_yaw_deg = self._project_geographic_yaw_to_fromll(lat, lon, yaw_deg, converted)
 
         pose = PoseStamped()
         pose.header.frame_id = self.fromll_frame
@@ -960,7 +1012,7 @@ class NavCommandServerNode(Node):
         pose.pose.position.x = float(x)
         pose.pose.position.y = float(y)
         pose.pose.position.z = 0.0
-        pose.pose.orientation = self._yaw_to_quaternion(yaw_deg)
+        pose.pose.orientation = self._yaw_to_quaternion(fromll_yaw_deg)
         return self._transform_pose_to_map(pose)
 
     def _convert_waypoints_to_poses(

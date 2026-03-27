@@ -12,6 +12,8 @@ def test_sim_local_v2_launch_uses_realistic_command_chain() -> None:
     assert '"transport_backend": "sim_gazebo"' in launch_contents
     assert '"cmd_vel_final_topic": "/cmd_vel_final"' in launch_contents
     assert '"forward_cmd_vel_safe_without_goal": True' in launch_contents
+    assert 'DeclareLaunchArgument("gps_profile", default_value="ideal")' in launch_contents
+    assert '"gps_profile": gps_profile' in launch_contents
 
 
 def test_sim_local_v2_launch_disables_legacy_bridge_nodes() -> None:

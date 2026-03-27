@@ -34,6 +34,7 @@ def generate_launch_description():
     twist_covariance_vx = LaunchConfiguration("twist_covariance_vx")
     twist_covariance_vy = LaunchConfiguration("twist_covariance_vy")
     twist_covariance_yaw_rate = LaunchConfiguration("twist_covariance_yaw_rate")
+    gps_profile = LaunchConfiguration("gps_profile")
 
     return LaunchDescription(
         [
@@ -65,12 +66,23 @@ def generate_launch_description():
             DeclareLaunchArgument("twist_covariance_vx", default_value="0.05"),
             DeclareLaunchArgument("twist_covariance_vy", default_value="0.01"),
             DeclareLaunchArgument("twist_covariance_yaw_rate", default_value="0.1"),
+            # Shared simulated GPS profiles:
+            # - ideal: architecture/smoke tests
+            # - f9p_rtk: RTK-fixed approximation
+            # - m8n: degraded single-band GPS
+            DeclareLaunchArgument("gps_profile", default_value="ideal"),
             Node(
                 package="navegacion_gps",
                 executable="sim_sensor_normalizer_v2",
                 name="sim_sensor_normalizer_v2",
                 output="screen",
-                parameters=[{"use_sim_time": ParameterValue(use_sim_time, value_type=bool)}],
+                parameters=[
+                    {
+                        "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
+                        "gps_profile": gps_profile,
+                        "gps_rtk_status_topic": "/gps/rtk_status",
+                    }
+                ],
             ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(

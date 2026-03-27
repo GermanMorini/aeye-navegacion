@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 import math
-import random
 import sys
 from functools import lru_cache
 from pathlib import Path
@@ -13,13 +12,19 @@ from interfaces.msg import CmdVelFinal
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from sensor_msgs.msg import Imu, LaserScan, NavSatFix, PointCloud2
+from std_msgs.msg import String
+
+from navegacion_gps.gps_profiles import (
+    SimGpsFixProcessor,
+    build_custom_gps_profile,
+    resolve_gps_profile_from_legacy,
+    stamp_to_nanoseconds,
+)
 
 
 DEFAULT_IMU_ORIENTATION_VARIANCE = 0.01
 DEFAULT_IMU_ANGULAR_VELOCITY_VARIANCE = 0.001
 DEFAULT_IMU_LINEAR_ACCELERATION_VARIANCE = 0.02
-DEFAULT_GPS_HORIZONTAL_VARIANCE = 0.35**2
-DEFAULT_GPS_VERTICAL_VARIANCE = 0.75**2
 
 
 def _fallback_command_from_cmd_vel(
@@ -104,25 +109,6 @@ def _load_command_from_cmd_vel():
     return _fallback_command_from_cmd_vel
 
 
-def _stamp_to_nanoseconds(msg) -> int:
-    return int(msg.header.stamp.sec) * 1_000_000_000 + int(msg.header.stamp.nanosec)
-
-
-def _offset_geodetic_fix(
-    latitude_deg: float,
-    longitude_deg: float,
-    north_m: float,
-    east_m: float,
-) -> tuple[float, float]:
-    meters_per_deg_lat = 111_320.0
-    cos_lat = max(1.0e-6, abs(math.cos(math.radians(float(latitude_deg)))))
-    meters_per_deg_lon = meters_per_deg_lat * cos_lat
-    return (
-        float(latitude_deg) + float(north_m) / meters_per_deg_lat,
-        float(longitude_deg) + float(east_m) / meters_per_deg_lon,
-    )
-
-
 def _covariance_is_zero(values) -> bool:
     return all(abs(float(value)) <= 1.0e-12 for value in values)
 
@@ -139,6 +125,11 @@ class GazeboUtilsNode(Node):
         self.declare_parameter("gps_in_topic", "/gps/fix_raw")
         self.declare_parameter("gps_out_topic", "/gps/fix")
         self.declare_parameter("gps_frame_id", "gps_link")
+        self.declare_parameter("gps_profile", "")
+        self.declare_parameter("gps_rtk_status_topic", "/gps/rtk_status")
+        self.declare_parameter("gps_hold_when_stationary", False)
+        self.declare_parameter("gps_hold_linear_speed_threshold_mps", 0.02)
+        self.declare_parameter("gps_hold_yaw_rate_threshold_rps", 0.01)
         self.declare_parameter("use_realistic_gps", False)
         self.declare_parameter("gps_publish_rate_hz", 5.0)
         self.declare_parameter("gps_publish_jitter_stddev_s", 0.03)
@@ -216,6 +207,16 @@ class GazeboUtilsNode(Node):
 
         self.strip_prefix = self.get_parameter("strip_prefix").value
         self.use_realistic_gps = bool(self.get_parameter("use_realistic_gps").value)
+        gps_profile_name = str(self.get_parameter("gps_profile").value).strip()
+        self.gps_hold_when_stationary = bool(
+            self.get_parameter("gps_hold_when_stationary").value
+        )
+        self.gps_hold_linear_speed_threshold_mps = float(
+            self.get_parameter("gps_hold_linear_speed_threshold_mps").value
+        )
+        self.gps_hold_yaw_rate_threshold_rps = float(
+            self.get_parameter("gps_hold_yaw_rate_threshold_rps").value
+        )
         self.enable_ultrasound_bridge = bool(
             self.get_parameter("enable_ultrasound_bridge").value
         )
@@ -273,12 +274,28 @@ class GazeboUtilsNode(Node):
             0.0, float(self.get_parameter("gps_bias_walk_stddev_m_per_sqrt_s").value)
         )
         gps_random_seed = int(self.get_parameter("gps_random_seed").value)
-        self._gps_random = random.Random(None if gps_random_seed == 0 else gps_random_seed)
-        self._gps_next_publish_time_ns = 0
-        self._gps_last_publish_time_ns = None
-        self._gps_bias_north_m = 0.0
-        self._gps_bias_east_m = 0.0
-        self._gps_bias_alt_m = 0.0
+        if gps_profile_name:
+            self._gps_profile = resolve_gps_profile_from_legacy(gps_profile_name, False)
+        elif self.use_realistic_gps:
+            self._gps_profile = build_custom_gps_profile(
+                name="legacy_realistic",
+                publish_rate_hz=self.gps_publish_rate_hz,
+                publish_jitter_stddev_s=self.gps_publish_jitter_stddev_s,
+                horizontal_noise_stddev_m=self.gps_horizontal_noise_stddev_m,
+                vertical_noise_stddev_m=self.gps_vertical_noise_stddev_m,
+                bias_walk_stddev_m_per_sqrt_s=self.gps_bias_walk_stddev_m_per_sqrt_s,
+                navsat_status=NavSatFix().status.STATUS_FIX,
+                rtk_status_text="3D_FIX",
+                description="Legacy realistic GPS profile derived from gazebo_utils params.",
+            )
+        else:
+            self._gps_profile = resolve_gps_profile_from_legacy("", False)
+        self._gps_processor = SimGpsFixProcessor(
+            self._gps_profile, random_seed=gps_random_seed
+        )
+        self._last_odom_linear_speed_mps = 0.0
+        self._last_odom_yaw_rate_rps = 0.0
+        self._last_gps_out: NavSatFix | None = None
 
         self.imu_frame_id = self.get_parameter("imu_frame_id").value
         self.gps_frame_id = self.get_parameter("gps_frame_id").value
@@ -342,6 +359,9 @@ class GazeboUtilsNode(Node):
 
         self.imu_pub = self.create_publisher(Imu, imu_out_topic, 10)
         self.gps_pub = self.create_publisher(NavSatFix, gps_out_topic, 10)
+        self.gps_rtk_status_pub = self.create_publisher(
+            String, str(self.get_parameter("gps_rtk_status_topic").value), 10
+        )
         self.lidar_pub = self.create_publisher(PointCloud2, lidar_out_topic, 10)
         self.ultrasound_rear_center_pub = None
         self.ultrasound_rear_left_pub = None
@@ -478,97 +498,25 @@ class GazeboUtilsNode(Node):
             now_ns = int(self.get_clock().now().nanoseconds)
         except AttributeError:
             pass
-        return max(now_ns, _stamp_to_nanoseconds(msg))
-
-    def _advance_gps_bias(self, dt_s: float) -> None:
-        if self.gps_bias_walk_stddev_m_per_sqrt_s <= 0.0:
-            return
-        sigma = self.gps_bias_walk_stddev_m_per_sqrt_s * math.sqrt(max(0.0, dt_s))
-        self._gps_bias_north_m += self._gps_random.gauss(0.0, sigma)
-        self._gps_bias_east_m += self._gps_random.gauss(0.0, sigma)
-        self._gps_bias_alt_m += self._gps_random.gauss(0.0, sigma)
-
-    def _schedule_next_gps_publish(self, reference_time_ns: int) -> None:
-        if self.gps_publish_rate_hz <= 0.0:
-            self._gps_next_publish_time_ns = reference_time_ns
-            return
-        base_period_s = 1.0 / self.gps_publish_rate_hz
-        jitter_s = self._gps_random.gauss(0.0, self.gps_publish_jitter_stddev_s)
-        period_s = max(0.02, base_period_s + jitter_s)
-        self._gps_next_publish_time_ns = reference_time_ns + int(period_s * 1_000_000_000)
+        return max(now_ns, stamp_to_nanoseconds(msg))
 
     def _apply_realistic_gps(self, msg: NavSatFix, reference_time_ns: int) -> NavSatFix | None:
-        if reference_time_ns < self._gps_next_publish_time_ns:
-            return None
-
-        if self._gps_last_publish_time_ns is None:
-            dt_s = 0.0
-        else:
-            dt_s = max(
-                0.0,
-                (reference_time_ns - self._gps_last_publish_time_ns) / 1_000_000_000.0,
-            )
-        self._gps_last_publish_time_ns = reference_time_ns
-        self._advance_gps_bias(dt_s)
-
-        noisy_msg = deepcopy(msg)
-        north_m = self._gps_bias_north_m + self._gps_random.gauss(
-            0.0, self.gps_horizontal_noise_stddev_m
-        )
-        east_m = self._gps_bias_east_m + self._gps_random.gauss(
-            0.0, self.gps_horizontal_noise_stddev_m
-        )
-        noisy_msg.latitude, noisy_msg.longitude = _offset_geodetic_fix(
-            noisy_msg.latitude,
-            noisy_msg.longitude,
-            north_m,
-            east_m,
-        )
-        noisy_msg.altitude = (
-            float(noisy_msg.altitude)
-            + self._gps_bias_alt_m
-            + self._gps_random.gauss(0.0, self.gps_vertical_noise_stddev_m)
-        )
-
-        horizontal_variance = self.gps_horizontal_noise_stddev_m**2
-        vertical_variance = self.gps_vertical_noise_stddev_m**2
-        noisy_msg.position_covariance = [
-            horizontal_variance,
-            0.0,
-            0.0,
-            0.0,
-            horizontal_variance,
-            0.0,
-            0.0,
-            0.0,
-            vertical_variance,
-        ]
-        noisy_msg.position_covariance_type = NavSatFix.COVARIANCE_TYPE_DIAGONAL_KNOWN
-        self._schedule_next_gps_publish(reference_time_ns)
-        return noisy_msg
+        return self._gps_processor.process_fix(msg, reference_time_ns)
 
     def _gps_cb(self, msg: NavSatFix):
-        out_msg = msg
-        if self.use_realistic_gps:
+        if self._should_hold_gps():
+            out_msg = deepcopy(self._last_gps_out)
+            out_msg.header.stamp = msg.header.stamp
+        else:
             out_msg = self._apply_realistic_gps(msg, self._get_reference_time_ns(msg))
             if out_msg is None:
                 return
-        elif _covariance_is_zero(out_msg.position_covariance):
-            out_msg = deepcopy(msg)
-            out_msg.position_covariance = [
-                DEFAULT_GPS_HORIZONTAL_VARIANCE,
-                0.0,
-                0.0,
-                0.0,
-                DEFAULT_GPS_HORIZONTAL_VARIANCE,
-                0.0,
-                0.0,
-                0.0,
-                DEFAULT_GPS_VERTICAL_VARIANCE,
-            ]
-            out_msg.position_covariance_type = NavSatFix.COVARIANCE_TYPE_DIAGONAL_KNOWN
+            self._last_gps_out = deepcopy(out_msg)
         out_msg.header.frame_id = self._resolve_frame(out_msg.header.frame_id, self.gps_frame_id)
         self.gps_pub.publish(out_msg)
+        self.gps_rtk_status_pub.publish(
+            String(data=self._gps_processor.rtk_status_text())
+        )
 
     def _lidar_cb(self, msg: PointCloud2):
         msg.header.frame_id = self._resolve_frame(msg.header.frame_id, self.lidar_frame_id)
@@ -615,9 +563,24 @@ class GazeboUtilsNode(Node):
         self.ultrasound_front_right_pub.publish(msg)
 
     def _odom_cb(self, msg: Odometry):
+        self._last_odom_linear_speed_mps = math.hypot(
+            float(msg.twist.twist.linear.x),
+            float(msg.twist.twist.linear.y),
+        )
+        self._last_odom_yaw_rate_rps = abs(float(msg.twist.twist.angular.z))
         msg.header.frame_id = self._resolve_frame(msg.header.frame_id, self.odom_frame_id)
         msg.child_frame_id = self._resolve_frame(msg.child_frame_id, self.base_link_frame_id)
         self.odom_pub.publish(msg)
+
+    def _should_hold_gps(self) -> bool:
+        return (
+            self.gps_hold_when_stationary
+            and self._gps_profile.name == "f9p_rtk"
+            and self._last_gps_out is not None
+            and self._last_odom_linear_speed_mps
+            <= self.gps_hold_linear_speed_threshold_mps
+            and self._last_odom_yaw_rate_rps <= self.gps_hold_yaw_rate_threshold_rps
+        )
 
     def _publish_cmd_vel_gazebo(self, linear_x: float, angular_z: float) -> None:
         if self.cmd_vel_gazebo_pub is None:

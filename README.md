@@ -14,7 +14,7 @@ Este checkout no incluye los antiguos nodos de waypoints interactivos, logger GU
 - `ros2 launch navegacion_gps simulacion.launch.py`
   - Gazebo Sim + bridge ROS/GZ + robot_localization + Nav2 + zonas + backend web opcional
   - `realism_mode:=true` por defecto: reutiliza `nav2_only.launch.py`, desactiva ultrasounds en `collision_monitor` y emula la lógica del actuador real
-  - En ese modo el GPS también se degrada hacia un comportamiento más realista: baja frecuencia de publicación, ruido horizontal/vertical y deriva lenta
+  - Nuevo `gps_profile:=ideal|f9p_rtk|m8n`: si se pasa, tiene precedencia; si no, el launch legacy sigue mapeando `realism_mode:=false -> ideal` y `realism_mode:=true -> m8n`
   - `realism_mode:=false`: preserva el flujo legacy de simulación con passthrough directo de `/cmd_vel_final`
 - `ros2 launch navegacion_gps real.launch.py`
   - robot_localization + Nav2 + backend de telemetría seleccionable (`mavros` por defecto, `pixhawk_driver` como fallback) + zonas + backend web opcional
@@ -47,8 +47,16 @@ Perfiles `v2` relevantes:
 
 - `real_local_v2` mantiene navegacion local-only en `odom`.
 - `sim_global_v2` y `real_global_v2` agregan la capa global `map -> odom` con `navsat_transform` + EKF global.
+- `sim_local_v2` y `sim_global_v2` exponen `gps_profile:=ideal|f9p_rtk|m8n`; ambos arrancan en `ideal` por defecto.
 - `real_global_v2` mueve goals LL y la web al frame `map`, y permite override del datum por launch con `datum_lat`, `datum_lon` y `datum_yaw_deg`.
 - `rviz_real_global_v2` usa `rviz_global_v2.rviz` para visualizar ese stack desde la PC local.
+
+Convencion fija operativa para `global v2`:
+
+- por default el repo asume que el robot arranca mirando al Este
+- `datum_yaw_deg` usa convencion ROS ENU, asi que `0.0` significa Este
+- esto no representa un heading global medido; es solo una hipotesis operativa visible
+- si el robot no arranca mirando al Este, hay que overridear `datum_yaw_deg`
 
 Flag de launch util para diagnostico:
 
@@ -114,12 +122,14 @@ Guia tecnica detallada:
 - Normaliza `frame_id` y tópicos de sensores bridged desde Gazebo Sim.
 - Puede puentear `/cmd_vel_final` hacia `/cmd_vel_gazebo` en simulación.
 - En `realism_mode:=true` desactiva el bridge de ultrasounds y usa una emulación de actuador alineada con el robot real.
+- En la ruta legacy de simulación también aplica perfiles GPS explícitos y publica `/gps/rtk_status`.
 
 ### `sim_local_v2`
 - Usa la misma cadena de mando ROS que `real_local_v2`:
   - `/cmd_vel_safe -> nav_command_server -> /cmd_vel_final -> vehicle_controller_server`
 - Mantiene `sim_v2_base.launch.py` y `sim_sensor_normalizer_v2` para sensores/bridges.
 - La telemetría de conducción para `ackermann_odometry` sale de `/controller/drive_telemetry`, igual que en el robot real.
+- Expone `gps_profile:=ideal|f9p_rtk|m8n`; por defecto usa `ideal` para no ensuciar los diagnósticos de arquitectura.
 
 ## Observabilidad y debugging
 - Telemetría de navegación:
@@ -201,6 +211,12 @@ Real global `v2`:
 ./tools/exec.sh "source /opt/ros/humble/setup.bash && source /ros2_ws/install/setup.bash && ros2 launch navegacion_gps real_global_v2.launch.py"
 ```
 
+Default visible de `global v2`:
+
+- `datum_yaw_deg:=0.0`
+- eso significa que el stack arranca asumiendo robot mirando al Este
+- si el robot arranca en otra orientacion, hay que pasar `datum_yaw_deg:=...`
+
 Real global `v2` con override de datum:
 ```bash
 ./tools/exec.sh "source /opt/ros/humble/setup.bash && source /ros2_ws/install/setup.bash && ros2 launch navegacion_gps real_global_v2.launch.py datum_lat:=<lat> datum_lon:=<lon> datum_yaw_deg:=<yaw_deg>"
@@ -243,10 +259,13 @@ Parámetros nuevos de la emulación del actuador en simulación:
 - `sim_max_reverse_mps`
 - `sim_max_abs_angular_z`
 
-Parámetros principales del GPS realista en simulación:
-- `gps_realism_publish_rate_hz`
-- `gps_realism_horizontal_noise_stddev_m`
-- `gps_realism_vertical_noise_stddev_m`
+Perfiles principales del GPS simulado:
+- `gps_profile:=ideal`
+  - sin ruido ni bias walk; covarianza pequeña conocida; `/gps/rtk_status=SIM_IDEAL`
+- `gps_profile:=f9p_rtk`
+  - aproximación RTK fija tipo F9P; `/gps/rtk_status=RTK_FIXED`
+- `gps_profile:=m8n`
+  - GNSS degradado tipo NEO-M8N; `/gps/rtk_status=3D_FIX`
 
 Benchmark de localización en simulación:
 ```bash

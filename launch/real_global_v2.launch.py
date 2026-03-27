@@ -146,7 +146,9 @@ def generate_launch_description():
             DeclareLaunchArgument("twist_covariance_yaw_rate", default_value="0.1"),
             DeclareLaunchArgument("datum_lat", default_value="-31.4858037"),
             DeclareLaunchArgument("datum_lon", default_value="-64.2410570"),
-            DeclareLaunchArgument("datum_yaw_deg", default_value="135.0"),
+            # Convencion fija operativa para `global v2`: por default el robot
+            # arranca mirando al Este (`datum_yaw_deg = 0.0` en ROS ENU).
+            DeclareLaunchArgument("datum_yaw_deg", default_value="0.0"),
             OpaqueFunction(function=_build_robot_state_publisher),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(

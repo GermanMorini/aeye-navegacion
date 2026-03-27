@@ -5,6 +5,7 @@
 - Confirmar que Pixhawk, RS16 y controlador esten conectados.
 - Confirmar que el datum elegido corresponda al sitio operativo actual.
 - Confirmar que `keepout_mask.yaml` este alineado con ese mismo sitio.
+- Antes de arrancar `real_global_v2`, alinear fisicamente el robot al Este o pasar `datum_yaw_deg:=...`.
 - Para la primera validacion, preferir ruedas levantadas o un area amplia y controlada.
 
 ## Arranque Basico

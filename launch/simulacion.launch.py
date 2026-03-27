@@ -34,6 +34,8 @@ from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from nav2_common.launch import RewrittenYaml
 
+from navegacion_gps.gps_profiles import supported_gps_profiles
+
 
 def _read_file(path):
     with open(path, "r", encoding="utf-8") as file_handle:
@@ -327,6 +329,7 @@ def generate_launch_description():
     use_collision_monitor = LaunchConfiguration("use_collision_monitor")
     use_gazebo_utils = LaunchConfiguration("use_gazebo_utils")
     realism_mode = LaunchConfiguration("realism_mode")
+    gps_profile = LaunchConfiguration("gps_profile")
     gps_realism_publish_rate_hz = LaunchConfiguration("gps_realism_publish_rate_hz")
     gps_realism_horizontal_noise_stddev_m = LaunchConfiguration(
         "gps_realism_horizontal_noise_stddev_m"
@@ -340,6 +343,17 @@ def generate_launch_description():
     ws_port = LaunchConfiguration("ws_port")
     gps_topic = LaunchConfiguration("gps_topic")
     map_frame = LaunchConfiguration("map_frame")
+    resolved_gps_profile = PythonExpression(
+        [
+            "'",
+            gps_profile,
+            "' if '",
+            gps_profile,
+            "' != '' else ('m8n' if '",
+            realism_mode,
+            "'.lower() in ['true', '1'] else 'ideal')",
+        ]
+    )
 
     declare_use_sim_time_cmd = DeclareLaunchArgument(
         "use_sim_time",
@@ -385,6 +399,16 @@ def generate_launch_description():
         "realism_mode",
         default_value="True",
         description="Use the real Nav2 stack and realistic actuator emulation in simulation",
+    )
+    declare_gps_profile_cmd = DeclareLaunchArgument(
+        "gps_profile",
+        default_value="",
+        description=(
+            "Optional simulated GPS profile. Valid values: "
+            f"{', '.join(supported_gps_profiles())}. "
+            "If omitted, legacy realism_mode keeps controlling the profile "
+            "(false -> ideal, true -> m8n)."
+        ),
     )
     declare_gps_realism_publish_rate_hz_cmd = DeclareLaunchArgument(
         "gps_realism_publish_rate_hz",
@@ -741,6 +765,8 @@ def generate_launch_description():
             {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
             {"imu_in_topic": "/imu/data_raw", "imu_out_topic": "/imu/data"},
             {"gps_in_topic": "/gps/fix_raw", "gps_out_topic": "/gps/fix"},
+            {"gps_profile": resolved_gps_profile},
+            {"gps_rtk_status_topic": "/gps/rtk_status"},
             {"lidar_in_topic": "/scan_3d_raw", "lidar_out_topic": "/scan_3d"},
             {"use_realistic_gps": ParameterValue(realism_mode, value_type=bool)},
             {
@@ -842,6 +868,7 @@ def generate_launch_description():
     ld.add_action(declare_use_collision_monitor_cmd)
     ld.add_action(declare_use_gazebo_utils_cmd)
     ld.add_action(declare_realism_mode_cmd)
+    ld.add_action(declare_gps_profile_cmd)
     ld.add_action(declare_gps_realism_publish_rate_hz_cmd)
     ld.add_action(declare_gps_realism_horizontal_noise_stddev_m_cmd)
     ld.add_action(declare_gps_realism_vertical_noise_stddev_m_cmd)

@@ -14,8 +14,10 @@ def test_simulation_realism_mode_reuses_nav2_only_launch() -> None:
 
     assert '"realism_mode"' in simulation_launch
     assert 'default_value="True"' in simulation_launch
+    assert '"gps_profile"' in simulation_launch
     assert "nav2_only.launch.py" in simulation_launch
     assert "collision_monitor_lidar_only.yaml" in simulation_launch
+    assert "else ('m8n'" in simulation_launch
 
 
 def test_real_and_simulation_share_navigation_contracts() -> None:
@@ -28,6 +30,7 @@ def test_real_and_simulation_share_navigation_contracts() -> None:
     assert 'default_value="/gps/fix"' in real_launch
     assert '"odometry/local"' in simulation_launch
     assert '"odometry/local"' in real_launch
+    assert '"/gps/rtk_status"' in simulation_launch
 
 
 def test_simulation_launch_exposes_localization_profiles() -> None:

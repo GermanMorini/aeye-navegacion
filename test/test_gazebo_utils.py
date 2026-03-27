@@ -1,11 +1,14 @@
-import random
-
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import NavSatFix
 
 from interfaces.msg import CmdVelFinal
 from navegacion_gps.gazebo_utils import GazeboUtilsNode
+from navegacion_gps.gps_profiles import (
+    SimGpsFixProcessor,
+    build_custom_gps_profile,
+    resolve_gps_profile,
+)
 
 
 class _FakePublisher:
@@ -51,27 +54,54 @@ class _FakeGpsNode:
     _strip = GazeboUtilsNode._strip
     _resolve_frame = GazeboUtilsNode._resolve_frame
     _get_reference_time_ns = GazeboUtilsNode._get_reference_time_ns
-    _advance_gps_bias = GazeboUtilsNode._advance_gps_bias
-    _schedule_next_gps_publish = GazeboUtilsNode._schedule_next_gps_publish
     _apply_realistic_gps = GazeboUtilsNode._apply_realistic_gps
+    _should_hold_gps = GazeboUtilsNode._should_hold_gps
     _gps_cb = GazeboUtilsNode._gps_cb
 
-    def __init__(self) -> None:
+    def __init__(self, *, profile_name: str = "m8n", hold_when_stationary: bool = False) -> None:
         self.strip_prefix = True
         self.gps_frame_id = "gps_link"
         self.gps_pub = _FakePublisher()
-        self.use_realistic_gps = True
+        self.gps_rtk_status_pub = _FakePublisher()
+        self.gps_hold_when_stationary = hold_when_stationary
+        self.gps_hold_linear_speed_threshold_mps = 0.02
+        self.gps_hold_yaw_rate_threshold_rps = 0.01
+        self.use_realistic_gps = profile_name == "legacy_realistic"
         self.gps_publish_rate_hz = 5.0
         self.gps_publish_jitter_stddev_s = 0.0
         self.gps_horizontal_noise_stddev_m = 0.35
         self.gps_vertical_noise_stddev_m = 0.75
         self.gps_bias_walk_stddev_m_per_sqrt_s = 0.02
-        self._gps_random = random.Random(123)
-        self._gps_next_publish_time_ns = 0
-        self._gps_last_publish_time_ns = None
-        self._gps_bias_north_m = 0.0
-        self._gps_bias_east_m = 0.0
-        self._gps_bias_alt_m = 0.0
+        if profile_name == "legacy_realistic":
+            profile = build_custom_gps_profile(
+                name="legacy_realistic",
+                publish_rate_hz=self.gps_publish_rate_hz,
+                publish_jitter_stddev_s=self.gps_publish_jitter_stddev_s,
+                horizontal_noise_stddev_m=self.gps_horizontal_noise_stddev_m,
+                vertical_noise_stddev_m=self.gps_vertical_noise_stddev_m,
+                bias_walk_stddev_m_per_sqrt_s=self.gps_bias_walk_stddev_m_per_sqrt_s,
+                navsat_status=NavSatFix().status.STATUS_FIX,
+                rtk_status_text="3D_FIX",
+                description="legacy",
+            )
+        else:
+            profile = resolve_gps_profile(profile_name)
+        self._gps_profile = profile
+        self._gps_processor = SimGpsFixProcessor(profile, random_seed=123)
+        self._last_odom_linear_speed_mps = 0.0
+        self._last_odom_yaw_rate_rps = 0.0
+        self._last_gps_out = None
+
+    def get_clock(self):
+        class _FakeClock:
+            class _Now:
+                nanoseconds = 0
+
+            @staticmethod
+            def now():
+                return _FakeClock._Now()
+
+        return _FakeClock()
 
 
 def test_cmd_vel_final_without_brake_is_forwarded() -> None:
@@ -212,7 +242,7 @@ def test_odom_callback_preserves_frame_normalization_logic() -> None:
 
 
 def test_realistic_gps_adds_noise_and_covariance() -> None:
-    node = _FakeGpsNode()
+    node = _FakeGpsNode(profile_name="m8n")
     msg = NavSatFix()
     msg.header.stamp.sec = 10
     msg.header.frame_id = "model::gps_link"
@@ -228,14 +258,13 @@ def test_realistic_gps_adds_noise_and_covariance() -> None:
     assert published.latitude != msg.latitude
     assert published.longitude != msg.longitude
     assert published.position_covariance_type == NavSatFix.COVARIANCE_TYPE_DIAGONAL_KNOWN
-    assert published.position_covariance[0] == 0.35**2
-    assert published.position_covariance[8] == 0.75**2
+    assert published.position_covariance[0] == 1.5**2
+    assert published.position_covariance[8] == 2.5**2
+    assert node.gps_rtk_status_pub.messages[-1].data == "3D_FIX"
 
 
 def test_realistic_gps_throttles_publish_rate() -> None:
-    node = _FakeGpsNode()
-    node.gps_horizontal_noise_stddev_m = 0.0
-    node.gps_vertical_noise_stddev_m = 0.0
+    node = _FakeGpsNode(profile_name="m8n")
 
     msg1 = NavSatFix()
     msg1.header.stamp.sec = 10
@@ -259,3 +288,53 @@ def test_realistic_gps_throttles_publish_rate() -> None:
     GazeboUtilsNode._gps_cb(node, msg3)
 
     assert len(node.gps_pub.messages) == 2
+    assert node.gps_rtk_status_pub.messages[-1].data == "3D_FIX"
+
+
+def test_ideal_gps_profile_keeps_position_and_marks_sim_ideal() -> None:
+    node = _FakeGpsNode(profile_name="ideal")
+    msg = NavSatFix()
+    msg.header.stamp.sec = 10
+    msg.header.frame_id = "model::gps_link"
+    msg.latitude = -31.4858037
+    msg.longitude = -64.2410570
+    msg.altitude = 12.0
+
+    GazeboUtilsNode._gps_cb(node, msg)
+
+    assert len(node.gps_pub.messages) == 1
+    published = node.gps_pub.messages[-1]
+    assert published.latitude == msg.latitude
+    assert published.longitude == msg.longitude
+    assert published.altitude == msg.altitude
+    assert published.position_covariance[0] == 0.01**2
+    assert published.position_covariance[8] == 0.02**2
+    assert node.gps_rtk_status_pub.messages[-1].data == "SIM_IDEAL"
+
+
+def test_gazebo_utils_holds_f9p_rtk_when_stationary() -> None:
+    node = _FakeGpsNode(profile_name="f9p_rtk", hold_when_stationary=True)
+    msg1 = NavSatFix()
+    msg1.header.stamp.sec = 10
+    msg1.header.frame_id = "model::gps_link"
+    msg1.latitude = -31.4858037
+    msg1.longitude = -64.2410570
+    msg1.altitude = 0.0
+
+    msg2 = NavSatFix()
+    msg2.header.stamp.sec = 10
+    msg2.header.stamp.nanosec = 100_000_000
+    msg2.header.frame_id = "model::gps_link"
+    msg2.latitude = -31.4858037
+    msg2.longitude = -64.2410570
+    msg2.altitude = 0.0
+
+    GazeboUtilsNode._gps_cb(node, msg1)
+    GazeboUtilsNode._gps_cb(node, msg2)
+
+    first = node.gps_pub.messages[0]
+    second = node.gps_pub.messages[1]
+    assert second.latitude == first.latitude
+    assert second.longitude == first.longitude
+    assert second.altitude == first.altitude
+    assert second.header.stamp.nanosec == 100_000_000
