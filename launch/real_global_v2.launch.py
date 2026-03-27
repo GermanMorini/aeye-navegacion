@@ -154,7 +154,8 @@ def generate_launch_description():
                 ),
                 launch_arguments={
                     "launch_web": "false",
-                    "launch_legacy_compat": "false",
+                    # Keep the legacy GPS contract alive for the web stack and global bringup.
+                    "launch_legacy_compat": "true",
                     "fcu_url": fcu_url,
                 }.items(),
             ),
