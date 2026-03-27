@@ -21,6 +21,7 @@ def test_real_global_v2_launch_reuses_real_stack_with_global_navigation() -> Non
     assert '"fromll_frame": "map"' in launch_contents
     assert '"map_frame": "map"' in launch_contents
     assert '"approx_fromll_fallback_enabled": True' in launch_contents
+    assert '"odom_topic": "/odometry/global"' in launch_contents
     assert '"launch_nav_command_server": "false"' in launch_contents
     assert 'DeclareLaunchArgument("datum_lat"' in launch_contents
     assert 'DeclareLaunchArgument("datum_lon"' in launch_contents

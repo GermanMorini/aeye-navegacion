@@ -47,6 +47,7 @@ def test_sim_global_v2_launch_reuses_current_sim_stack_without_rviz() -> None:
     assert '"gps_course_heading_topic": "/gps/course_heading"' in launch_contents
     assert '"publish_hz": ParameterValue(' in launch_contents
     assert 'DeclareLaunchArgument("launch_web_app", default_value="True")' in launch_contents
+    assert '"odom_topic": "/odometry/global"' in launch_contents
     assert '"launch_nav_command_server": "false"' in launch_contents
     assert 'executable="rviz2"' not in launch_contents
 

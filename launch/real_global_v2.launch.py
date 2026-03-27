@@ -295,6 +295,7 @@ def generate_launch_description():
                     "ws_host": ws_host,
                     "ws_port": web_app_port,
                     "gps_topic": "/gps/fix",
+                    "odom_topic": "/odometry/global",
                     "map_frame": "map",
                     "launch_zones_manager": "false",
                     "launch_nav_command_server": "false",
