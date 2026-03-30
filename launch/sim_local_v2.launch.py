@@ -60,6 +60,21 @@ def generate_launch_description():
     gps_course_heading_yaw_variance_rad2 = LaunchConfiguration(
         "gps_course_heading_yaw_variance_rad2"
     )
+    gps_course_heading_sample_dt_min_s = LaunchConfiguration(
+        "gps_course_heading_sample_dt_min_s"
+    )
+    gps_course_heading_sample_dt_max_s = LaunchConfiguration(
+        "gps_course_heading_sample_dt_max_s"
+    )
+    gps_course_heading_max_pair_distance_base_m = LaunchConfiguration(
+        "gps_course_heading_max_pair_distance_base_m"
+    )
+    gps_course_heading_max_pair_distance_speed_gain = LaunchConfiguration(
+        "gps_course_heading_max_pair_distance_speed_gain"
+    )
+    gps_course_heading_max_pair_speed_error_mps = LaunchConfiguration(
+        "gps_course_heading_max_pair_speed_error_mps"
+    )
     effective_gps_profile = PythonExpression(
         [
             "'f9p_rtk' if ('",
@@ -144,6 +159,20 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "gps_course_heading_yaw_variance_rad2",
                 default_value="0.05",
+            ),
+            DeclareLaunchArgument("gps_course_heading_sample_dt_min_s", default_value="0.05"),
+            DeclareLaunchArgument("gps_course_heading_sample_dt_max_s", default_value="4.0"),
+            DeclareLaunchArgument(
+                "gps_course_heading_max_pair_distance_base_m",
+                default_value="0.10",
+            ),
+            DeclareLaunchArgument(
+                "gps_course_heading_max_pair_distance_speed_gain",
+                default_value="1.5",
+            ),
+            DeclareLaunchArgument(
+                "gps_course_heading_max_pair_speed_error_mps",
+                default_value="0.75",
             ),
             Node(
                 package="navegacion_gps",
@@ -333,6 +362,23 @@ def generate_launch_description():
                         ),
                         "yaw_variance_rad2": ParameterValue(
                             gps_course_heading_yaw_variance_rad2, value_type=float
+                        ),
+                        "sample_dt_min_s": ParameterValue(
+                            gps_course_heading_sample_dt_min_s, value_type=float
+                        ),
+                        "sample_dt_max_s": ParameterValue(
+                            gps_course_heading_sample_dt_max_s, value_type=float
+                        ),
+                        "max_pair_distance_base_m": ParameterValue(
+                            gps_course_heading_max_pair_distance_base_m, value_type=float
+                        ),
+                        "max_pair_distance_speed_gain": ParameterValue(
+                            gps_course_heading_max_pair_distance_speed_gain,
+                            value_type=float,
+                        ),
+                        "max_pair_speed_error_mps": ParameterValue(
+                            gps_course_heading_max_pair_speed_error_mps,
+                            value_type=float,
                         ),
                     }
                 ],

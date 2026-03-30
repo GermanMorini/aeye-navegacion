@@ -60,6 +60,21 @@ def generate_launch_description():
     gps_course_heading_yaw_variance_rad2 = LaunchConfiguration(
         "gps_course_heading_yaw_variance_rad2"
     )
+    gps_course_heading_sample_dt_min_s = LaunchConfiguration(
+        "gps_course_heading_sample_dt_min_s"
+    )
+    gps_course_heading_sample_dt_max_s = LaunchConfiguration(
+        "gps_course_heading_sample_dt_max_s"
+    )
+    gps_course_heading_max_pair_distance_base_m = LaunchConfiguration(
+        "gps_course_heading_max_pair_distance_base_m"
+    )
+    gps_course_heading_max_pair_distance_speed_gain = LaunchConfiguration(
+        "gps_course_heading_max_pair_distance_speed_gain"
+    )
+    gps_course_heading_max_pair_speed_error_mps = LaunchConfiguration(
+        "gps_course_heading_max_pair_speed_error_mps"
+    )
     launch_web_zone_server = LaunchConfiguration("launch_web_zone_server")
     web_ws_host = LaunchConfiguration("web_ws_host")
     web_ws_port = LaunchConfiguration("web_ws_port")
@@ -155,6 +170,20 @@ def generate_launch_description():
                 "gps_course_heading_yaw_variance_rad2",
                 default_value="0.05",
             ),
+            DeclareLaunchArgument("gps_course_heading_sample_dt_min_s", default_value="0.05"),
+            DeclareLaunchArgument("gps_course_heading_sample_dt_max_s", default_value="4.0"),
+            DeclareLaunchArgument(
+                "gps_course_heading_max_pair_distance_base_m",
+                default_value="0.10",
+            ),
+            DeclareLaunchArgument(
+                "gps_course_heading_max_pair_distance_speed_gain",
+                default_value="1.5",
+            ),
+            DeclareLaunchArgument(
+                "gps_course_heading_max_pair_speed_error_mps",
+                default_value="0.75",
+            ),
             DeclareLaunchArgument("launch_web_zone_server", default_value="True"),
             DeclareLaunchArgument("web_ws_host", default_value="0.0.0.0"),
             DeclareLaunchArgument("web_ws_port", default_value="8766"),
@@ -198,6 +227,11 @@ def generate_launch_description():
                     "gps_course_heading_max_abs_yaw_rate_rps": gps_course_heading_max_abs_yaw_rate_rps,
                     "gps_course_heading_publish_hz": gps_course_heading_publish_hz,
                     "gps_course_heading_yaw_variance_rad2": gps_course_heading_yaw_variance_rad2,
+                    "gps_course_heading_sample_dt_min_s": gps_course_heading_sample_dt_min_s,
+                    "gps_course_heading_sample_dt_max_s": gps_course_heading_sample_dt_max_s,
+                    "gps_course_heading_max_pair_distance_base_m": gps_course_heading_max_pair_distance_base_m,
+                    "gps_course_heading_max_pair_distance_speed_gain": gps_course_heading_max_pair_distance_speed_gain,
+                    "gps_course_heading_max_pair_speed_error_mps": gps_course_heading_max_pair_speed_error_mps,
                 }.items(),
             ),
             IncludeLaunchDescription(

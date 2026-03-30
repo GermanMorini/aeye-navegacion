@@ -55,6 +55,11 @@ class GpsCourseHeadingEstimator:
         max_abs_steer_deg: float = 6.0,
         max_abs_yaw_rate_rps: float = 0.12,
         max_fix_age_s: float = 0.5,
+        sample_dt_min_s: float = 0.05,
+        sample_dt_max_s: float = 4.0,
+        max_pair_distance_base_m: float = 0.10,
+        max_pair_distance_speed_gain: float = 1.5,
+        max_pair_speed_error_mps: float = 0.75,
         history_window_s: float = 12.0,
     ) -> None:
         self.min_distance_m = max(0.01, float(min_distance_m))
@@ -62,6 +67,11 @@ class GpsCourseHeadingEstimator:
         self.max_abs_steer_deg = max(0.0, float(max_abs_steer_deg))
         self.max_abs_yaw_rate_rps = max(0.0, float(max_abs_yaw_rate_rps))
         self.max_fix_age_s = max(0.01, float(max_fix_age_s))
+        self.sample_dt_min_s = max(1.0e-3, float(sample_dt_min_s))
+        self.sample_dt_max_s = max(self.sample_dt_min_s, float(sample_dt_max_s))
+        self.max_pair_distance_base_m = max(0.0, float(max_pair_distance_base_m))
+        self.max_pair_distance_speed_gain = max(0.0, float(max_pair_distance_speed_gain))
+        self.max_pair_speed_error_mps = max(0.0, float(max_pair_speed_error_mps))
         self.history_window_s = max(self.max_fix_age_s, float(history_window_s))
         self._fixes: Deque[GpsFixSample] = deque()
 
@@ -153,9 +163,25 @@ class GpsCourseHeadingEstimator:
 
         candidate: Optional[GpsFixSample] = None
         candidate_distance_m = 0.0
+        candidate_sample_dt_s: Optional[float] = None
+        candidate_speed_error_mps = math.inf
+        saw_sample_before_latest = False
+        saw_dt_in_range = False
+        saw_pair_distance_too_high = False
+        saw_pair_speed_inconsistent = False
+        expected_speed_mps = abs(float(speed_mps))
         for sample in self._fixes:
             if sample.stamp_s >= latest.stamp_s:
                 continue
+            saw_sample_before_latest = True
+            sample_dt_s = float(latest.stamp_s - sample.stamp_s)
+            if (
+                (not math.isfinite(sample_dt_s))
+                or sample_dt_s < self.sample_dt_min_s
+                or sample_dt_s > self.sample_dt_max_s
+            ):
+                continue
+            saw_dt_in_range = True
             north_m, east_m = ll_delta_to_north_east_m(
                 lat=latest.lat,
                 lon=latest.lon,
@@ -163,14 +189,44 @@ class GpsCourseHeadingEstimator:
                 ref_lon=sample.lon,
             )
             distance_m = math.hypot(north_m, east_m)
-            if distance_m >= self.min_distance_m:
+            if distance_m < self.min_distance_m:
+                continue
+            max_pair_distance_m = (
+                self.max_pair_distance_base_m
+                + self.max_pair_distance_speed_gain * expected_speed_mps * sample_dt_s
+            )
+            if distance_m > max_pair_distance_m:
+                saw_pair_distance_too_high = True
+                continue
+            gps_speed_pair_mps = distance_m / max(sample_dt_s, 1.0e-6)
+            speed_error_mps = abs(gps_speed_pair_mps - expected_speed_mps)
+            if speed_error_mps > self.max_pair_speed_error_mps:
+                saw_pair_speed_inconsistent = True
+                continue
+            if (
+                candidate is None
+                or speed_error_mps < candidate_speed_error_mps
+                or (
+                    math.isclose(speed_error_mps, candidate_speed_error_mps)
+                    and sample_dt_s < float(candidate_sample_dt_s or math.inf)
+                )
+            ):
                 candidate = sample
                 candidate_distance_m = distance_m
-                break
+                candidate_sample_dt_s = sample_dt_s
+                candidate_speed_error_mps = speed_error_mps
 
         if candidate is None:
+            if saw_sample_before_latest and not saw_dt_in_range:
+                reason = "sample_dt_out_of_range"
+            elif saw_pair_distance_too_high:
+                reason = "pair_distance_too_high"
+            elif saw_pair_speed_inconsistent:
+                reason = "pair_speed_inconsistent"
+            else:
+                reason = "distance_below_threshold"
             return self._invalid(
-                reason="distance_below_threshold",
+                reason=reason,
                 speed_mps=speed_mps,
                 steer_deg=steer_deg,
                 yaw_rate_rps=yaw_rate_rps,
@@ -193,7 +249,7 @@ class GpsCourseHeadingEstimator:
             steer_deg=float(steer_deg),
             yaw_rate_rps=float(yaw_rate_rps),
             latest_fix_age_s=float(latest_fix_age_s),
-            sample_dt_s=float(max(0.0, latest.stamp_s - candidate.stamp_s)),
+            sample_dt_s=float(candidate_sample_dt_s or max(0.0, latest.stamp_s - candidate.stamp_s)),
         )
 
     def _trim_history(self, *, now_s: float) -> None:

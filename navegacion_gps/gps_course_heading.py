@@ -43,6 +43,11 @@ class GpsCourseHeadingNode(Node):
         self.declare_parameter("max_abs_steer_deg", 6.0)
         self.declare_parameter("max_abs_yaw_rate_rps", 0.12)
         self.declare_parameter("max_fix_age_s", 0.5)
+        self.declare_parameter("sample_dt_min_s", 0.05)
+        self.declare_parameter("sample_dt_max_s", 4.0)
+        self.declare_parameter("max_pair_distance_base_m", 0.10)
+        self.declare_parameter("max_pair_distance_speed_gain", 1.5)
+        self.declare_parameter("max_pair_speed_error_mps", 0.75)
         self.declare_parameter("publish_hz", 5.0)
         self.declare_parameter("yaw_variance_rad2", 0.20)
 
@@ -65,6 +70,17 @@ class GpsCourseHeadingNode(Node):
                 self.get_parameter("max_abs_yaw_rate_rps").value
             ),
             max_fix_age_s=float(self.get_parameter("max_fix_age_s").value),
+            sample_dt_min_s=float(self.get_parameter("sample_dt_min_s").value),
+            sample_dt_max_s=float(self.get_parameter("sample_dt_max_s").value),
+            max_pair_distance_base_m=float(
+                self.get_parameter("max_pair_distance_base_m").value
+            ),
+            max_pair_distance_speed_gain=float(
+                self.get_parameter("max_pair_distance_speed_gain").value
+            ),
+            max_pair_speed_error_mps=float(
+                self.get_parameter("max_pair_speed_error_mps").value
+            ),
         )
 
         self._last_fix_stamp_s: Optional[float] = None
