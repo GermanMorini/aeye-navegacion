@@ -114,7 +114,7 @@ Visualization Manager:
               Value: true
             Value: true
           Enabled: true
-          Keep: 1200
+          Keep: 100
           Name: Odometry Raw
           Position Tolerance: 0.10000000149011612
           Shape:
@@ -153,7 +153,7 @@ Visualization Manager:
               Value: false
             Value: false
           Enabled: true
-          Keep: 1200
+          Keep: 100
           Name: Odometry EKF Local
           Position Tolerance: 0.10000000149011612
           Shape:
@@ -192,7 +192,7 @@ Visualization Manager:
               Value: false
             Value: false
           Enabled: true
-          Keep: 1200
+          Keep: 100
           Name: Wheel Odometry
           Position Tolerance: 0.10000000149011612
           Shape:
@@ -231,7 +231,7 @@ Visualization Manager:
               Value: true
             Value: true
           Enabled: false
-          Keep: 600
+          Keep: 100
           Name: Odometry Global Ref
           Position Tolerance: 0.10000000149011612
           Shape:
@@ -270,7 +270,7 @@ Visualization Manager:
               Value: false
             Value: false
           Enabled: true
-          Keep: 1200
+          Keep: 100
           Name: Odometry Pixhawk
           Position Tolerance: 0.10000000149011612
           Shape:

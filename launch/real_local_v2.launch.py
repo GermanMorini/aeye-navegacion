@@ -117,7 +117,7 @@ def generate_launch_description():
             DeclareLaunchArgument("invert_steer_from_cmd_vel", default_value="True"),
             DeclareLaunchArgument(
                 "nav2_params_file",
-                default_value=os.path.join(gps_wpf_dir, "config", "nav2_local_v2_params.yaml"),
+                default_value=os.path.join(gps_wpf_dir, "config", "nav2_no_map_params.yaml"),
             ),
             DeclareLaunchArgument(
                 "collision_monitor_params_file",

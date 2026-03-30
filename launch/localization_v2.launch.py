@@ -44,8 +44,6 @@ def generate_launch_description():
     ekf_global = LaunchConfiguration("ekf_global")
     ukf = LaunchConfiguration("ukf")
     navsat_use_odometry_yaw = LaunchConfiguration("navsat_use_odometry_yaw")
-    enable_gps_course_heading = LaunchConfiguration("enable_gps_course_heading")
-    gps_course_heading_topic = LaunchConfiguration("gps_course_heading_topic")
     localization_filter_executable = PythonExpression(
         ["'ukf_node' if '", ukf, "'.lower() == 'true' else 'ekf_node'"]
     )
@@ -53,46 +51,6 @@ def generate_launch_description():
         PythonExpression(["'", ekf_local, "' == 'False'"]),
         value_type=bool,
     )
-    local_odom_topic = PythonExpression(
-        ["'/odometry/local' if '", ekf_local, "'.lower() == 'true' else '/wheel/odometry'"]
-    )
-    map_heading_topic = PythonExpression(
-        [
-            "'",
-            gps_course_heading_topic,
-            "' if '",
-            enable_gps_course_heading,
-            "'.lower() == 'true' else '/gps/course_heading/disabled'",
-        ]
-    )
-    map_ekf_parameters = [
-        default_params_file,
-        {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
-        {
-            "imu1": ParameterValue(map_heading_topic, value_type=str),
-            "imu1_config": [
-                False,
-                False,
-                False,
-                False,
-                False,
-                True,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-            ],
-            "imu1_queue_size": 10,
-            "imu1_differential": False,
-            "imu1_relative": False,
-            "imu1_remove_gravitational_acceleration": False,
-        },
-    ]
 
     return LaunchDescription(
         [
@@ -121,11 +79,6 @@ def generate_launch_description():
             DeclareLaunchArgument("ekf_global", default_value="False"),
             DeclareLaunchArgument("ukf", default_value="False"),
             DeclareLaunchArgument("navsat_use_odometry_yaw", default_value="false"),
-            DeclareLaunchArgument("enable_gps_course_heading", default_value="false"),
-            DeclareLaunchArgument(
-                "gps_course_heading_topic",
-                default_value="/gps/course_heading",
-            ),
             Node(
                 package="navegacion_gps",
                 executable="ackermann_odometry",
@@ -208,7 +161,10 @@ def generate_launch_description():
                 name="ekf_filter_node_map",
                 output="screen",
                 condition=IfCondition(ekf_global),
-                parameters=map_ekf_parameters,
+                parameters=[
+                    default_params_file,
+                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+                ],
                 remappings=[
                     ("imu/data", imu_topic),
                     ("odometry/filtered", "/odometry/global"),
@@ -228,10 +184,9 @@ def generate_launch_description():
                             navsat_use_odometry_yaw, value_type=bool
                         )
                     },
-                    {"odom_topic": ParameterValue(local_odom_topic, value_type=str)},
                 ],
                 remappings=[
-                    ("odometry/filtered", local_odom_topic),
+                    ("odometry/filtered", "/odometry/global"),
                 ],
             ),
         ]

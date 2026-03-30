@@ -103,7 +103,7 @@ def generate_launch_description():
             DeclareLaunchArgument("use_cmd_vel_ackermann_bridge", default_value="False"),
             DeclareLaunchArgument(
                 "nav2_params_file",
-                default_value=os.path.join(gps_wpf_dir, "config", "nav2_local_v2_params.yaml"),
+                default_value=os.path.join(gps_wpf_dir, "config", "nav2_no_map_params.yaml"),
             ),
             DeclareLaunchArgument(
                 "collision_monitor_params_file",

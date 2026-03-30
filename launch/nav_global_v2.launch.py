@@ -27,7 +27,7 @@ def _resolve_config_file_path(package_share_dir: str, filename: str) -> str:
 
 def generate_launch_description():
     gps_wpf_dir = get_package_share_directory("navegacion_gps")
-    default_nav2_params = _resolve_config_file_path(gps_wpf_dir, "nav2_global_v2_params.yaml")
+    default_nav2_params = _resolve_config_file_path(gps_wpf_dir, "nav2_no_map_params.yaml")
     default_collision_monitor_params = _resolve_config_file_path(
         gps_wpf_dir, "collision_monitor_v2.yaml"
     )
@@ -39,28 +39,11 @@ def generate_launch_description():
     )
     keepout_launch = str(Path(gps_wpf_dir) / "launch" / "keepout_filters_v2.launch.py")
     default_keepout_mask = _resolve_config_file_path(gps_wpf_dir, "keepout_mask.yaml")
-    default_keepout_overrides = _resolve_config_file_path(
-        gps_wpf_dir, "nav2_local_v2_keepout_overrides.yaml"
-    )
-    default_no_keepout_overrides = _resolve_config_file_path(
-        gps_wpf_dir, "nav2_local_v2_no_keepout_overrides.yaml"
-    )
     use_sim_time = LaunchConfiguration("use_sim_time")
     use_keepout = LaunchConfiguration("use_keepout")
     nav2_params_file = LaunchConfiguration("nav2_params_file")
     collision_monitor_params_file = LaunchConfiguration("collision_monitor_params_file")
     keepout_mask_yaml = LaunchConfiguration("keepout_mask_yaml")
-    selected_nav2_overrides_file = PythonExpression(
-        [
-            "'",
-            default_keepout_overrides,
-            "' if '",
-            use_keepout,
-            "' == 'True' else '",
-            default_no_keepout_overrides,
-            "'",
-        ]
-    )
     configured_nav2_params = ParameterFile(
         RewrittenYaml(
             source_file=nav2_params_file,
@@ -71,10 +54,6 @@ def generate_launch_description():
             },
             convert_types=True,
         ),
-        allow_substs=True,
-    )
-    configured_nav2_overrides = ParameterFile(
-        selected_nav2_overrides_file,
         allow_substs=True,
     )
     remappings = [("/tf", "tf"), ("/tf_static", "tf_static")]
@@ -117,7 +96,6 @@ def generate_launch_description():
                 output="screen",
                 parameters=[
                     configured_nav2_params,
-                    configured_nav2_overrides,
                     {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
                 ],
                 remappings=remappings,
@@ -129,7 +107,6 @@ def generate_launch_description():
                 output="screen",
                 parameters=[
                     configured_nav2_params,
-                    configured_nav2_overrides,
                     {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
                 ],
                 remappings=remappings,
@@ -141,7 +118,6 @@ def generate_launch_description():
                 output="screen",
                 parameters=[
                     configured_nav2_params,
-                    configured_nav2_overrides,
                     {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
                 ],
                 remappings=remappings,
@@ -153,7 +129,6 @@ def generate_launch_description():
                 output="screen",
                 parameters=[
                     configured_nav2_params,
-                    configured_nav2_overrides,
                     {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
                 ],
                 remappings=remappings,
@@ -165,7 +140,6 @@ def generate_launch_description():
                 output="screen",
                 parameters=[
                     configured_nav2_params,
-                    configured_nav2_overrides,
                     {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
                 ],
                 remappings=remappings,
@@ -177,7 +151,6 @@ def generate_launch_description():
                 output="screen",
                 parameters=[
                     configured_nav2_params,
-                    configured_nav2_overrides,
                     {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
                 ],
                 remappings=remappings,
