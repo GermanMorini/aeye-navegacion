@@ -48,6 +48,10 @@ class GpsCourseHeadingNode(Node):
         self.declare_parameter("max_pair_distance_base_m", 0.10)
         self.declare_parameter("max_pair_distance_speed_gain", 1.5)
         self.declare_parameter("max_pair_speed_error_mps", 0.75)
+        self.declare_parameter("heading_change_base_deg", 3.0)
+        self.declare_parameter("heading_change_yaw_rate_gain", 1.0)
+        self.declare_parameter("candidates", 5)
+        self.declare_parameter("max_heading_dispersion_deg", 4.0)
         self.declare_parameter("publish_hz", 5.0)
         self.declare_parameter("yaw_variance_rad2", 0.20)
 
@@ -80,6 +84,16 @@ class GpsCourseHeadingNode(Node):
             ),
             max_pair_speed_error_mps=float(
                 self.get_parameter("max_pair_speed_error_mps").value
+            ),
+            heading_change_base_deg=float(
+                self.get_parameter("heading_change_base_deg").value
+            ),
+            heading_change_yaw_rate_gain=float(
+                self.get_parameter("heading_change_yaw_rate_gain").value
+            ),
+            candidates=int(self.get_parameter("candidates").value),
+            max_heading_dispersion_deg=float(
+                self.get_parameter("max_heading_dispersion_deg").value
             ),
         )
 
@@ -195,6 +209,9 @@ class GpsCourseHeadingNode(Node):
             "yaw_rate_rps": estimate.yaw_rate_rps,
             "latest_fix_age_s": estimate.latest_fix_age_s,
             "sample_dt_s": estimate.sample_dt_s,
+            "candidate_count": estimate.candidate_count,
+            "heading_dispersion_deg": estimate.heading_dispersion_deg,
+            "mean_yaw_deg": estimate.mean_yaw_deg,
             "base_frame": self._base_frame,
         }
         msg = String()

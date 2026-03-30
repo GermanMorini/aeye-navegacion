@@ -78,6 +78,18 @@ def generate_launch_description():
     gps_course_heading_max_pair_speed_error_mps = LaunchConfiguration(
         "gps_course_heading_max_pair_speed_error_mps"
     )
+    gps_course_heading_heading_change_base_deg = LaunchConfiguration(
+        "gps_course_heading_heading_change_base_deg"
+    )
+    gps_course_heading_heading_change_yaw_rate_gain = LaunchConfiguration(
+        "gps_course_heading_heading_change_yaw_rate_gain"
+    )
+    gps_course_heading_candidates = LaunchConfiguration(
+        "gps_course_heading_candidates"
+    )
+    gps_course_heading_max_heading_dispersion_deg = LaunchConfiguration(
+        "gps_course_heading_max_heading_dispersion_deg"
+    )
     gps_profile = LaunchConfiguration("gps_profile")
     launch_web_app = LaunchConfiguration("launch_web_app")
     ws_host = LaunchConfiguration("ws_host")
@@ -163,6 +175,22 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "gps_course_heading_max_pair_speed_error_mps",
                 default_value="0.75",
+            ),
+            DeclareLaunchArgument(
+                "gps_course_heading_heading_change_base_deg",
+                default_value="3.0",
+            ),
+            DeclareLaunchArgument(
+                "gps_course_heading_heading_change_yaw_rate_gain",
+                default_value="1.0",
+            ),
+            DeclareLaunchArgument(
+                "gps_course_heading_candidates",
+                default_value="5",
+            ),
+            DeclareLaunchArgument(
+                "gps_course_heading_max_heading_dispersion_deg",
+                default_value="4.0",
             ),
             # Sim global defaults to the ideal profile so LL/map debugging is not
             # polluted by GNSS noise unless the operator opts into RTK/M8N.
@@ -325,6 +353,21 @@ def generate_launch_description():
                         ),
                         "max_pair_speed_error_mps": ParameterValue(
                             gps_course_heading_max_pair_speed_error_mps,
+                            value_type=float,
+                        ),
+                        "heading_change_base_deg": ParameterValue(
+                            gps_course_heading_heading_change_base_deg,
+                            value_type=float,
+                        ),
+                        "heading_change_yaw_rate_gain": ParameterValue(
+                            gps_course_heading_heading_change_yaw_rate_gain,
+                            value_type=float,
+                        ),
+                        "candidates": ParameterValue(
+                            gps_course_heading_candidates, value_type=int
+                        ),
+                        "max_heading_dispersion_deg": ParameterValue(
+                            gps_course_heading_max_heading_dispersion_deg,
                             value_type=float,
                         ),
                     }

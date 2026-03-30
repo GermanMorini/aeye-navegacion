@@ -75,6 +75,18 @@ def generate_launch_description():
     gps_course_heading_max_pair_speed_error_mps = LaunchConfiguration(
         "gps_course_heading_max_pair_speed_error_mps"
     )
+    gps_course_heading_heading_change_base_deg = LaunchConfiguration(
+        "gps_course_heading_heading_change_base_deg"
+    )
+    gps_course_heading_heading_change_yaw_rate_gain = LaunchConfiguration(
+        "gps_course_heading_heading_change_yaw_rate_gain"
+    )
+    gps_course_heading_candidates = LaunchConfiguration(
+        "gps_course_heading_candidates"
+    )
+    gps_course_heading_max_heading_dispersion_deg = LaunchConfiguration(
+        "gps_course_heading_max_heading_dispersion_deg"
+    )
     launch_web_zone_server = LaunchConfiguration("launch_web_zone_server")
     web_ws_host = LaunchConfiguration("web_ws_host")
     web_ws_port = LaunchConfiguration("web_ws_port")
@@ -184,6 +196,22 @@ def generate_launch_description():
                 "gps_course_heading_max_pair_speed_error_mps",
                 default_value="0.75",
             ),
+            DeclareLaunchArgument(
+                "gps_course_heading_heading_change_base_deg",
+                default_value="3.0",
+            ),
+            DeclareLaunchArgument(
+                "gps_course_heading_heading_change_yaw_rate_gain",
+                default_value="1.0",
+            ),
+            DeclareLaunchArgument(
+                "gps_course_heading_candidates",
+                default_value="5",
+            ),
+            DeclareLaunchArgument(
+                "gps_course_heading_max_heading_dispersion_deg",
+                default_value="4.0",
+            ),
             DeclareLaunchArgument("launch_web_zone_server", default_value="True"),
             DeclareLaunchArgument("web_ws_host", default_value="0.0.0.0"),
             DeclareLaunchArgument("web_ws_port", default_value="8766"),
@@ -232,6 +260,10 @@ def generate_launch_description():
                     "gps_course_heading_max_pair_distance_base_m": gps_course_heading_max_pair_distance_base_m,
                     "gps_course_heading_max_pair_distance_speed_gain": gps_course_heading_max_pair_distance_speed_gain,
                     "gps_course_heading_max_pair_speed_error_mps": gps_course_heading_max_pair_speed_error_mps,
+                    "gps_course_heading_heading_change_base_deg": gps_course_heading_heading_change_base_deg,
+                    "gps_course_heading_heading_change_yaw_rate_gain": gps_course_heading_heading_change_yaw_rate_gain,
+                    "gps_course_heading_candidates": gps_course_heading_candidates,
+                    "gps_course_heading_max_heading_dispersion_deg": gps_course_heading_max_heading_dispersion_deg,
                 }.items(),
             ),
             IncludeLaunchDescription(
