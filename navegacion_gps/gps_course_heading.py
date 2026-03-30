@@ -42,6 +42,7 @@ class GpsCourseHeadingNode(Node):
         self.declare_parameter("output_topic", "/gps/course_heading")
         self.declare_parameter("debug_topic", "/gps/course_heading/debug")
         self.declare_parameter("base_frame", "base_footprint")
+        self.declare_parameter("enable_offset_compensation", True)
         self.declare_parameter("gps_frame", "gps_link")
         self.declare_parameter("transform_timeout_s", 0.2)
         self.declare_parameter("min_distance_m", 2.5)
@@ -49,6 +50,7 @@ class GpsCourseHeadingNode(Node):
         self.declare_parameter("max_abs_steer_deg", 6.0)
         self.declare_parameter("max_abs_yaw_rate_rps", 0.12)
         self.declare_parameter("max_fix_age_s", 0.5)
+        self.declare_parameter("enable_consistency_filters", True)
         self.declare_parameter("sample_dt_min_s", 0.05)
         self.declare_parameter("sample_dt_max_s", 4.0)
         self.declare_parameter("max_pair_distance_base_m", 0.10)
@@ -68,16 +70,25 @@ class GpsCourseHeadingNode(Node):
         debug_topic = str(self.get_parameter("debug_topic").value)
 
         self._base_frame = str(self.get_parameter("base_frame").value)
+        self._enable_offset_compensation = bool(
+            self.get_parameter("enable_offset_compensation").value
+        )
         self._gps_frame = str(self.get_parameter("gps_frame").value)
         self._transform_timeout_s = max(
             0.0, float(self.get_parameter("transform_timeout_s").value)
+        )
+        self._enable_consistency_filters = bool(
+            self.get_parameter("enable_consistency_filters").value
         )
         self._publish_hz = max(1.0, float(self.get_parameter("publish_hz").value))
         self._yaw_variance_rad2 = max(
             1.0e-6, float(self.get_parameter("yaw_variance_rad2").value)
         )
-        self._tf_buffer = Buffer()
-        self._tf_listener = TransformListener(self._tf_buffer, self, spin_thread=True)
+        self._tf_buffer: Optional[Buffer] = None
+        self._tf_listener: Optional[TransformListener] = None
+        if self._enable_offset_compensation:
+            self._tf_buffer = Buffer()
+            self._tf_listener = TransformListener(self._tf_buffer, self, spin_thread=True)
         self._estimator = GpsCourseHeadingEstimator(
             min_distance_m=float(self.get_parameter("min_distance_m").value),
             min_speed_mps=float(self.get_parameter("min_speed_mps").value),
@@ -107,6 +118,7 @@ class GpsCourseHeadingNode(Node):
             max_heading_dispersion_deg=float(
                 self.get_parameter("max_heading_dispersion_deg").value
             ),
+            enable_consistency_filters=self._enable_consistency_filters,
         )
 
         self._last_fix_stamp_s: Optional[float] = None
@@ -134,12 +146,20 @@ class GpsCourseHeadingNode(Node):
         self.get_logger().info(
             "gps_course_heading ready "
             f"(gps={gps_topic}, odom={odom_topic}, drive={drive_telemetry_topic}, "
-            f"output={output_topic}, debug={debug_topic})"
+            f"output={output_topic}, debug={debug_topic}, "
+            f"consistency_filters={int(self._enable_consistency_filters)}, "
+            f"offset_compensation={int(self._enable_offset_compensation)})"
         )
 
     def _refresh_gps_offset(self) -> bool:
+        if not self._enable_offset_compensation:
+            self._last_transform_error = None
+            return False
         if self._gps_offset_x_m is not None and self._gps_offset_y_m is not None:
             return True
+        if self._tf_buffer is None:
+            self._last_transform_error = "gps_offset_compensation_disabled"
+            return False
         try:
             transform = self._tf_buffer.lookup_transform(
                 self._base_frame,
@@ -216,13 +236,6 @@ class GpsCourseHeadingNode(Node):
                 heading_correction_deg = float(compensation.correction_deg)
                 estimate = replace(estimate, yaw_deg=corrected_base_yaw_deg)
                 offset_compensated = True
-            else:
-                estimate = replace(
-                    estimate,
-                    valid=False,
-                    reason="gps_offset_tf_unavailable",
-                    yaw_deg=None,
-                )
 
         self._publish_debug(
             estimate=estimate,
@@ -291,6 +304,8 @@ class GpsCourseHeadingNode(Node):
             "heading_dispersion_deg": estimate.heading_dispersion_deg,
             "mean_yaw_deg": estimate.mean_yaw_deg,
             "base_frame": self._base_frame,
+            "consistency_filters_enabled": bool(self._enable_consistency_filters),
+            "offset_compensation_enabled": bool(self._enable_offset_compensation),
             "gps_frame": self._gps_frame,
             "offset_compensated": bool(offset_compensated),
             "gps_offset_x_m": self._gps_offset_x_m,

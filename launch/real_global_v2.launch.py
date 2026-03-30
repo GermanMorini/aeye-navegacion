@@ -147,6 +147,12 @@ def generate_launch_description():
     gps_course_heading_max_heading_dispersion_deg = LaunchConfiguration(
         "gps_course_heading_max_heading_dispersion_deg"
     )
+    gps_course_heading_enable_consistency_filters = LaunchConfiguration(
+        "gps_course_heading_enable_consistency_filters"
+    )
+    gps_course_heading_enable_offset_compensation = LaunchConfiguration(
+        "gps_course_heading_enable_offset_compensation"
+    )
 
     return LaunchDescription(
         [
@@ -239,6 +245,14 @@ def generate_launch_description():
                 "gps_course_heading_max_heading_dispersion_deg",
                 default_value="4.0",
             ),
+            DeclareLaunchArgument(
+                "gps_course_heading_enable_consistency_filters",
+                default_value="true",
+            ),
+            DeclareLaunchArgument(
+                "gps_course_heading_enable_offset_compensation",
+                default_value="true",
+            ),
             OpaqueFunction(function=_build_robot_state_publisher),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
@@ -313,6 +327,14 @@ def generate_launch_description():
                         ),
                         "debug_topic": "/gps/course_heading/debug",
                         "base_frame": "base_footprint",
+                        "enable_consistency_filters": ParameterValue(
+                            gps_course_heading_enable_consistency_filters,
+                            value_type=bool,
+                        ),
+                        "enable_offset_compensation": ParameterValue(
+                            gps_course_heading_enable_offset_compensation,
+                            value_type=bool,
+                        ),
                         "gps_frame": ParameterValue(
                             gps_course_heading_gps_frame, value_type=str
                         ),

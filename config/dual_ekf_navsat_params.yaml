@@ -38,6 +38,8 @@ ekf_filter_node_odom:
     # odom1_differential: false
     # odom1_relative: false
 
+    # Global fusion: yaw-rate from IMU, translational velocity from local odom,
+    # and absolute position from GPS-derived odometry.
     imu0: /imu/data
     imu0_config: [false, false, false,
                   false, false, false,
@@ -85,7 +87,6 @@ ekf_filter_node_map:
     imu1_remove_gravitational_acceleration: false
 
     odom0: /odometry/local
-    # odom0: /wheel/odometry
     odom0_config: [false, false, false,
                    false, false, false,
                    true,  false, false,
@@ -117,6 +118,5 @@ navsat_transform:
     # datum: [-31.4858037, -64.2410570, 0.0] # Ejemplo: hub de la UCC, Córdoba, Argentina
 
     gps_topic: /gps/fix
-    # odom_topic: /wheel/odometry
     odom_topic: /odometry/local
     output_topic: /odometry/gps

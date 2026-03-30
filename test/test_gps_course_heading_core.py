@@ -60,6 +60,30 @@ def test_estimator_accepts_rtk_like_candidates_with_consistent_angles() -> None:
     assert estimate.heading_dispersion_deg <= 1.0e-3
 
 
+def test_estimator_simple_mode_ignores_consistency_filters() -> None:
+    estimator = _build_estimator(enable_consistency_filters=False)
+    estimator.add_fix(*_lat_lon_from_distance_heading(0.6, 30.0), stamp_s=1.0)
+    estimator.add_fix(*_lat_lon_from_distance_heading(0.4, 0.0), stamp_s=1.1)
+    estimator.add_fix(*_lat_lon_from_distance_heading(0.2, 0.0), stamp_s=1.2)
+    estimator.add_fix(lat=0.0, lon=0.0, stamp_s=1.3)
+
+    estimate = estimator.estimate(
+        now_s=1.32,
+        speed_mps=2.0,
+        steer_deg=0.0,
+        steer_valid=True,
+        yaw_rate_rps=0.0,
+    )
+
+    assert estimate.valid is True
+    assert estimate.reason == "ok"
+    assert estimate.yaw_deg is not None
+    assert math.isclose(estimate.yaw_deg, 30.0, abs_tol=1.0e-3)
+    assert estimate.candidate_count == 1
+    assert math.isclose(float(estimate.heading_dispersion_deg), 0.0, abs_tol=1.0e-9)
+    assert math.isclose(float(estimate.mean_yaw_deg), 30.0, abs_tol=1.0e-3)
+
+
 def test_estimator_rejects_pairs_outside_sample_dt_window() -> None:
     estimator = _build_estimator(sample_dt_max_s=0.09)
     estimator.add_fix(lat=0.0, lon=-_east_offset_deg(0.6), stamp_s=1.0)
@@ -186,6 +210,13 @@ def test_estimator_rejects_when_heading_dispersion_is_too_high() -> None:
 def test_estimator_clamps_candidates_to_minimum_three() -> None:
     estimator = _build_estimator(candidates=1)
 
+    assert estimator.candidates == 3
+
+
+def test_estimator_can_disable_consistency_filters_without_clamping_candidates() -> None:
+    estimator = _build_estimator(candidates=1, enable_consistency_filters=False)
+
+    assert estimator.enable_consistency_filters is False
     assert estimator.candidates == 3
 
 

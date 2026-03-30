@@ -90,3 +90,25 @@ def test_sim_local_v2_launch_sets_imu_yaw_auto_calibration_defaults() -> None:
     assert '"imu_yaw_calib_odom_topic": "/odom_raw"' in launch_contents
     assert '"imu_yaw_calib_speed_threshold_mps": 0.05' in launch_contents
     assert '"imu_yaw_calib_timeout_s": 3.0' in launch_contents
+
+
+def test_sim_local_v2_launch_disables_aggressive_gps_heading_features_by_default() -> None:
+    launch_path = (
+        Path(__file__).resolve().parents[1] / "launch" / "sim_local_v2.launch.py"
+    )
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert (
+        'DeclareLaunchArgument(\n'
+        '                "gps_course_heading_enable_consistency_filters",\n'
+        '                default_value="false",\n'
+        "            )"
+    ) in launch_contents
+    assert (
+        'DeclareLaunchArgument(\n'
+        '                "gps_course_heading_enable_offset_compensation",\n'
+        '                default_value="false",\n'
+        "            )"
+    ) in launch_contents
+    assert '"enable_consistency_filters": ParameterValue(' in launch_contents
+    assert '"enable_offset_compensation": ParameterValue(' in launch_contents

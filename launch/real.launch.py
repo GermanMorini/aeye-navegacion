@@ -137,6 +137,12 @@ def generate_launch_description():
     ekf_global = LaunchConfiguration("ekf_global")
     ukf = LaunchConfiguration("ukf")
     enable_gps_course_heading = LaunchConfiguration("enable_gps_course_heading")
+    gps_course_heading_enable_consistency_filters = LaunchConfiguration(
+        "gps_course_heading_enable_consistency_filters"
+    )
+    gps_course_heading_enable_offset_compensation = LaunchConfiguration(
+        "gps_course_heading_enable_offset_compensation"
+    )
     gps_course_heading_gps_frame = LaunchConfiguration("gps_course_heading_gps_frame")
     gps_course_heading_transform_timeout_s = LaunchConfiguration(
         "gps_course_heading_transform_timeout_s"
@@ -281,6 +287,16 @@ def generate_launch_description():
         default_value="true",
         description="Enable gps_course_heading when ekf_global is active",
     )
+    declare_gps_course_heading_enable_consistency_filters_cmd = DeclareLaunchArgument(
+        "gps_course_heading_enable_consistency_filters",
+        default_value="true",
+        description="Enable advanced gps_course_heading consistency filters",
+    )
+    declare_gps_course_heading_enable_offset_compensation_cmd = DeclareLaunchArgument(
+        "gps_course_heading_enable_offset_compensation",
+        default_value="true",
+        description="Enable gps_course_heading antenna offset compensation via TF",
+    )
     declare_gps_course_heading_gps_frame_cmd = DeclareLaunchArgument(
         "gps_course_heading_gps_frame",
         default_value="gps_link",
@@ -415,6 +431,18 @@ def generate_launch_description():
             {"output_topic": "/gps/course_heading"},
             {"debug_topic": "/gps/course_heading/debug"},
             {"base_frame": "base_footprint"},
+            {
+                "enable_consistency_filters": ParameterValue(
+                    gps_course_heading_enable_consistency_filters,
+                    value_type=bool,
+                )
+            },
+            {
+                "enable_offset_compensation": ParameterValue(
+                    gps_course_heading_enable_offset_compensation,
+                    value_type=bool,
+                )
+            },
             {
                 "gps_frame": ParameterValue(
                     gps_course_heading_gps_frame,
@@ -665,6 +693,8 @@ def generate_launch_description():
     ld.add_action(declare_ekf_global_cmd)
     ld.add_action(declare_ukf_cmd)
     ld.add_action(declare_enable_gps_course_heading_cmd)
+    ld.add_action(declare_gps_course_heading_enable_consistency_filters_cmd)
+    ld.add_action(declare_gps_course_heading_enable_offset_compensation_cmd)
     ld.add_action(declare_gps_course_heading_gps_frame_cmd)
     ld.add_action(declare_gps_course_heading_transform_timeout_s_cmd)
     ld.add_action(OpaqueFunction(function=_validate_telemetry_backend))

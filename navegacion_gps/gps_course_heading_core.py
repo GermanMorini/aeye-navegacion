@@ -106,6 +106,7 @@ class GpsCourseHeadingEstimator:
         heading_change_yaw_rate_gain: float = 1.0,
         candidates: int = 5,
         max_heading_dispersion_deg: float = 4.0,
+        enable_consistency_filters: bool = True,
         history_window_s: float = 12.0,
     ) -> None:
         self.min_distance_m = max(0.01, float(min_distance_m))
@@ -122,6 +123,7 @@ class GpsCourseHeadingEstimator:
         self.heading_change_yaw_rate_gain = max(0.0, float(heading_change_yaw_rate_gain))
         self.candidates = max(3, int(candidates))
         self.max_heading_dispersion_deg = max(0.0, float(max_heading_dispersion_deg))
+        self.enable_consistency_filters = bool(enable_consistency_filters)
         self.history_window_s = max(self.max_fix_age_s, float(history_window_s))
         self._fixes: Deque[GpsFixSample] = deque()
 
@@ -209,6 +211,15 @@ class GpsCourseHeadingEstimator:
                 steer_deg=steer_deg,
                 yaw_rate_rps=yaw_rate_rps,
                 latest_fix_age_s=latest_fix_age_s,
+            )
+
+        if not self.enable_consistency_filters:
+            return self._estimate_simple(
+                latest=latest,
+                latest_fix_age_s=latest_fix_age_s,
+                speed_mps=speed_mps,
+                steer_deg=steer_deg,
+                yaw_rate_rps=yaw_rate_rps,
             )
 
         raw_candidates: list[HeadingCandidate] = []
@@ -353,6 +364,64 @@ class GpsCourseHeadingEstimator:
             candidate_count=candidate_count,
             heading_dispersion_deg=float(heading_dispersion_deg),
             mean_yaw_deg=float(mean_yaw_deg),
+        )
+
+    def _estimate_simple(
+        self,
+        *,
+        latest: GpsFixSample,
+        latest_fix_age_s: float,
+        speed_mps: float,
+        steer_deg: Optional[float],
+        yaw_rate_rps: float,
+    ) -> CourseHeadingEstimate:
+        candidate: Optional[GpsFixSample] = None
+        candidate_distance_m = 0.0
+        for sample in self._fixes:
+            if sample.stamp_s >= latest.stamp_s:
+                continue
+            north_m, east_m = ll_delta_to_north_east_m(
+                lat=latest.lat,
+                lon=latest.lon,
+                ref_lat=sample.lat,
+                ref_lon=sample.lon,
+            )
+            distance_m = math.hypot(north_m, east_m)
+            if distance_m >= self.min_distance_m:
+                candidate = sample
+                candidate_distance_m = distance_m
+                break
+
+        if candidate is None:
+            return self._invalid(
+                reason="distance_below_threshold",
+                speed_mps=speed_mps,
+                steer_deg=steer_deg,
+                yaw_rate_rps=yaw_rate_rps,
+                latest_fix_age_s=latest_fix_age_s,
+            )
+
+        north_m, east_m = ll_delta_to_north_east_m(
+            lat=latest.lat,
+            lon=latest.lon,
+            ref_lat=candidate.lat,
+            ref_lon=candidate.lon,
+        )
+        yaw_deg = ros_yaw_deg_from_north_east(north_m=north_m, east_m=east_m)
+        sample_dt_s = float(max(0.0, latest.stamp_s - candidate.stamp_s))
+        return CourseHeadingEstimate(
+            valid=True,
+            reason="ok",
+            yaw_deg=float(yaw_deg),
+            distance_m=float(candidate_distance_m),
+            speed_mps=float(speed_mps),
+            steer_deg=float(steer_deg),
+            yaw_rate_rps=float(yaw_rate_rps),
+            latest_fix_age_s=float(latest_fix_age_s),
+            sample_dt_s=sample_dt_s,
+            candidate_count=1,
+            heading_dispersion_deg=0.0,
+            mean_yaw_deg=float(yaw_deg),
         )
 
     def _trim_history(self, *, now_s: float) -> None:

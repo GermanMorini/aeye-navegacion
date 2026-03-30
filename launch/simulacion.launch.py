@@ -87,6 +87,12 @@ def generate_launch_description():
     gps_course_heading_max_heading_dispersion_deg = LaunchConfiguration(
         "gps_course_heading_max_heading_dispersion_deg"
     )
+    gps_course_heading_enable_consistency_filters = LaunchConfiguration(
+        "gps_course_heading_enable_consistency_filters"
+    )
+    gps_course_heading_enable_offset_compensation = LaunchConfiguration(
+        "gps_course_heading_enable_offset_compensation"
+    )
     gps_course_heading_gps_frame = LaunchConfiguration("gps_course_heading_gps_frame")
     gps_course_heading_transform_timeout_s = LaunchConfiguration(
         "gps_course_heading_transform_timeout_s"
@@ -216,6 +222,14 @@ def generate_launch_description():
                 "gps_course_heading_max_heading_dispersion_deg",
                 default_value="4.0",
             ),
+            DeclareLaunchArgument(
+                "gps_course_heading_enable_consistency_filters",
+                default_value="false",
+            ),
+            DeclareLaunchArgument(
+                "gps_course_heading_enable_offset_compensation",
+                default_value="false",
+            ),
             DeclareLaunchArgument("gps_course_heading_gps_frame", default_value="gps_link"),
             DeclareLaunchArgument(
                 "gps_course_heading_transform_timeout_s",
@@ -273,6 +287,8 @@ def generate_launch_description():
                     "gps_course_heading_heading_change_yaw_rate_gain": gps_course_heading_heading_change_yaw_rate_gain,
                     "gps_course_heading_candidates": gps_course_heading_candidates,
                     "gps_course_heading_max_heading_dispersion_deg": gps_course_heading_max_heading_dispersion_deg,
+                    "gps_course_heading_enable_consistency_filters": gps_course_heading_enable_consistency_filters,
+                    "gps_course_heading_enable_offset_compensation": gps_course_heading_enable_offset_compensation,
                     "gps_course_heading_gps_frame": gps_course_heading_gps_frame,
                     "gps_course_heading_transform_timeout_s": gps_course_heading_transform_timeout_s,
                 }.items(),

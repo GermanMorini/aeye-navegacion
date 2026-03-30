@@ -88,3 +88,29 @@ def test_simulacion_launch_forwards_datum_setter_toggle() -> None:
 
     assert 'DeclareLaunchArgument("datum_setter", default_value="false")' in launch_contents
     assert '"datum_setter": datum_setter' in launch_contents
+
+
+def test_simulacion_launch_defaults_gps_heading_simplifications_for_sim() -> None:
+    launch_path = Path(__file__).resolve().parents[1] / "launch" / "simulacion.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert (
+        'DeclareLaunchArgument(\n'
+        '                "gps_course_heading_enable_consistency_filters",\n'
+        '                default_value="false",\n'
+        "            )"
+    ) in launch_contents
+    assert (
+        'DeclareLaunchArgument(\n'
+        '                "gps_course_heading_enable_offset_compensation",\n'
+        '                default_value="false",\n'
+        "            )"
+    ) in launch_contents
+    assert (
+        '"gps_course_heading_enable_consistency_filters": '
+        "gps_course_heading_enable_consistency_filters"
+    ) in launch_contents
+    assert (
+        '"gps_course_heading_enable_offset_compensation": '
+        "gps_course_heading_enable_offset_compensation"
+    ) in launch_contents
