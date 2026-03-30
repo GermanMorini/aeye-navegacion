@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 import math
 from typing import Optional
@@ -9,11 +10,14 @@ from interfaces.msg import DriveTelemetry
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
+from rclpy.time import Time
 from sensor_msgs.msg import Imu, NavSatFix
 from std_msgs.msg import String
+from tf2_ros import Buffer, TransformException, TransformListener
 
 from navegacion_gps.gps_course_heading_core import CourseHeadingEstimate
 from navegacion_gps.gps_course_heading_core import GpsCourseHeadingEstimator
+from navegacion_gps.gps_course_heading_core import compensate_heading_for_sensor_offset
 
 
 def _stamp_to_seconds(stamp) -> float:
@@ -38,6 +42,8 @@ class GpsCourseHeadingNode(Node):
         self.declare_parameter("output_topic", "/gps/course_heading")
         self.declare_parameter("debug_topic", "/gps/course_heading/debug")
         self.declare_parameter("base_frame", "base_footprint")
+        self.declare_parameter("gps_frame", "gps_link")
+        self.declare_parameter("transform_timeout_s", 0.2)
         self.declare_parameter("min_distance_m", 2.5)
         self.declare_parameter("min_speed_mps", 0.8)
         self.declare_parameter("max_abs_steer_deg", 6.0)
@@ -62,10 +68,16 @@ class GpsCourseHeadingNode(Node):
         debug_topic = str(self.get_parameter("debug_topic").value)
 
         self._base_frame = str(self.get_parameter("base_frame").value)
+        self._gps_frame = str(self.get_parameter("gps_frame").value)
+        self._transform_timeout_s = max(
+            0.0, float(self.get_parameter("transform_timeout_s").value)
+        )
         self._publish_hz = max(1.0, float(self.get_parameter("publish_hz").value))
         self._yaw_variance_rad2 = max(
             1.0e-6, float(self.get_parameter("yaw_variance_rad2").value)
         )
+        self._tf_buffer = Buffer()
+        self._tf_listener = TransformListener(self._tf_buffer, self, spin_thread=True)
         self._estimator = GpsCourseHeadingEstimator(
             min_distance_m=float(self.get_parameter("min_distance_m").value),
             min_speed_mps=float(self.get_parameter("min_speed_mps").value),
@@ -104,6 +116,9 @@ class GpsCourseHeadingNode(Node):
         self._last_steer_valid = False
         self._last_drive_fresh = False
         self._last_drive_speed_mps = 0.0
+        self._gps_offset_x_m: Optional[float] = None
+        self._gps_offset_y_m: Optional[float] = None
+        self._last_transform_error: Optional[str] = None
 
         self._imu_pub = self.create_publisher(Imu, output_topic, 10)
         self._debug_pub = self.create_publisher(String, debug_topic, 10)
@@ -121,6 +136,29 @@ class GpsCourseHeadingNode(Node):
             f"(gps={gps_topic}, odom={odom_topic}, drive={drive_telemetry_topic}, "
             f"output={output_topic}, debug={debug_topic})"
         )
+
+    def _refresh_gps_offset(self) -> bool:
+        if self._gps_offset_x_m is not None and self._gps_offset_y_m is not None:
+            return True
+        try:
+            transform = self._tf_buffer.lookup_transform(
+                self._base_frame,
+                self._gps_frame,
+                Time(),
+                timeout=rclpy.duration.Duration(seconds=self._transform_timeout_s),
+            )
+        except TransformException as exc:
+            self._last_transform_error = str(exc)
+            return False
+        self._gps_offset_x_m = float(transform.transform.translation.x)
+        self._gps_offset_y_m = float(transform.transform.translation.y)
+        self._last_transform_error = None
+        self.get_logger().info(
+            "gps_course_heading using GPS offset "
+            f"{self._gps_frame}->{self._base_frame}: "
+            f"x={self._gps_offset_x_m:.3f} m, y={self._gps_offset_y_m:.3f} m"
+        )
+        return True
 
     def _on_gps_fix(self, msg: NavSatFix) -> None:
         if not math.isfinite(float(msg.latitude)) or not math.isfinite(float(msg.longitude)):
@@ -160,7 +198,39 @@ class GpsCourseHeadingNode(Node):
             steer_valid=bool(self._last_steer_valid and self._last_drive_fresh),
             yaw_rate_rps=float(self._last_local_yaw_rate_rps),
         )
-        self._publish_debug(estimate)
+        raw_gps_course_yaw_deg = estimate.yaw_deg
+        corrected_base_yaw_deg: Optional[float] = None
+        heading_correction_deg: Optional[float] = None
+        offset_compensated = False
+
+        if estimate.valid and estimate.yaw_deg is not None:
+            if self._refresh_gps_offset():
+                compensation = compensate_heading_for_sensor_offset(
+                    antenna_yaw_deg=float(estimate.yaw_deg),
+                    speed_mps=float(speed_mps),
+                    yaw_rate_rps=float(self._last_local_yaw_rate_rps),
+                    offset_x_m=float(self._gps_offset_x_m),
+                    offset_y_m=float(self._gps_offset_y_m),
+                )
+                corrected_base_yaw_deg = float(compensation.yaw_deg)
+                heading_correction_deg = float(compensation.correction_deg)
+                estimate = replace(estimate, yaw_deg=corrected_base_yaw_deg)
+                offset_compensated = True
+            else:
+                estimate = replace(
+                    estimate,
+                    valid=False,
+                    reason="gps_offset_tf_unavailable",
+                    yaw_deg=None,
+                )
+
+        self._publish_debug(
+            estimate=estimate,
+            raw_gps_course_yaw_deg=raw_gps_course_yaw_deg,
+            corrected_base_yaw_deg=corrected_base_yaw_deg,
+            heading_correction_deg=heading_correction_deg,
+            offset_compensated=offset_compensated,
+        )
         if estimate.valid and estimate.yaw_deg is not None:
             self._publish_imu(estimate)
 
@@ -198,7 +268,15 @@ class GpsCourseHeadingNode(Node):
         ]
         self._imu_pub.publish(msg)
 
-    def _publish_debug(self, estimate: CourseHeadingEstimate) -> None:
+    def _publish_debug(
+        self,
+        *,
+        estimate: CourseHeadingEstimate,
+        raw_gps_course_yaw_deg: Optional[float],
+        corrected_base_yaw_deg: Optional[float],
+        heading_correction_deg: Optional[float],
+        offset_compensated: bool,
+    ) -> None:
         payload = {
             "valid": bool(estimate.valid),
             "reason": estimate.reason,
@@ -213,6 +291,14 @@ class GpsCourseHeadingNode(Node):
             "heading_dispersion_deg": estimate.heading_dispersion_deg,
             "mean_yaw_deg": estimate.mean_yaw_deg,
             "base_frame": self._base_frame,
+            "gps_frame": self._gps_frame,
+            "offset_compensated": bool(offset_compensated),
+            "gps_offset_x_m": self._gps_offset_x_m,
+            "gps_offset_y_m": self._gps_offset_y_m,
+            "heading_correction_deg": heading_correction_deg,
+            "raw_gps_course_yaw_deg": raw_gps_course_yaw_deg,
+            "corrected_base_yaw_deg": corrected_base_yaw_deg,
+            "transform_error": self._last_transform_error,
         }
         msg = String()
         msg.data = json.dumps(payload, sort_keys=True)

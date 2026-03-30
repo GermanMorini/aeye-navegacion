@@ -1,5 +1,6 @@
 import math
 
+from navegacion_gps.gps_course_heading_core import compensate_heading_for_sensor_offset
 from navegacion_gps.gps_course_heading_core import GpsCourseHeadingEstimator
 
 
@@ -186,3 +187,64 @@ def test_estimator_clamps_candidates_to_minimum_three() -> None:
     estimator = _build_estimator(candidates=1)
 
     assert estimator.candidates == 3
+
+
+def test_sensor_offset_compensation_keeps_heading_when_offset_is_zero() -> None:
+    compensation = compensate_heading_for_sensor_offset(
+        antenna_yaw_deg=15.0,
+        speed_mps=1.2,
+        yaw_rate_rps=0.08,
+        offset_x_m=0.0,
+        offset_y_m=0.0,
+    )
+
+    assert math.isclose(compensation.yaw_deg, 15.0, abs_tol=1.0e-9)
+    assert math.isclose(compensation.correction_deg, 0.0, abs_tol=1.0e-9)
+
+
+def test_sensor_offset_compensation_keeps_heading_when_yaw_rate_is_zero() -> None:
+    compensation = compensate_heading_for_sensor_offset(
+        antenna_yaw_deg=25.0,
+        speed_mps=1.2,
+        yaw_rate_rps=0.0,
+        offset_x_m=0.76,
+        offset_y_m=0.04,
+    )
+
+    assert math.isclose(compensation.yaw_deg, 25.0, abs_tol=1.0e-9)
+    assert math.isclose(compensation.correction_deg, 0.0, abs_tol=1.0e-9)
+
+
+def test_sensor_offset_compensation_uses_forward_offset_in_turns() -> None:
+    compensation = compensate_heading_for_sensor_offset(
+        antenna_yaw_deg=10.0,
+        speed_mps=1.0,
+        yaw_rate_rps=0.1,
+        offset_x_m=0.76,
+        offset_y_m=0.0,
+    )
+
+    expected_correction_deg = math.degrees(math.atan2(0.076, 1.0))
+    assert math.isclose(compensation.correction_deg, expected_correction_deg, rel_tol=1.0e-9)
+    assert math.isclose(
+        compensation.yaw_deg,
+        10.0 - expected_correction_deg,
+        rel_tol=1.0e-9,
+    )
+
+
+def test_sensor_offset_compensation_uses_lateral_offset_in_turns() -> None:
+    compensation = compensate_heading_for_sensor_offset(
+        antenna_yaw_deg=10.0,
+        speed_mps=1.0,
+        yaw_rate_rps=0.1,
+        offset_x_m=0.76,
+        offset_y_m=0.2,
+    )
+
+    expected_vx = 1.0 - (0.1 * 0.2)
+    expected_vy = 0.1 * 0.76
+    expected_correction_deg = math.degrees(math.atan2(expected_vy, expected_vx))
+    assert math.isclose(compensation.vx_antenna_mps, expected_vx, rel_tol=1.0e-9)
+    assert math.isclose(compensation.vy_antenna_mps, expected_vy, rel_tol=1.0e-9)
+    assert math.isclose(compensation.correction_deg, expected_correction_deg, rel_tol=1.0e-9)

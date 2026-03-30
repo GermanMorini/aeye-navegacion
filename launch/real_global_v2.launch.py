@@ -100,6 +100,53 @@ def generate_launch_description():
     datum_lat = LaunchConfiguration("datum_lat")
     datum_lon = LaunchConfiguration("datum_lon")
     datum_yaw_deg = LaunchConfiguration("datum_yaw_deg")
+    enable_gps_course_heading = LaunchConfiguration("enable_gps_course_heading")
+    gps_course_heading_topic = LaunchConfiguration("gps_course_heading_topic")
+    gps_course_heading_gps_frame = LaunchConfiguration("gps_course_heading_gps_frame")
+    gps_course_heading_transform_timeout_s = LaunchConfiguration(
+        "gps_course_heading_transform_timeout_s"
+    )
+    gps_course_heading_publish_hz = LaunchConfiguration("gps_course_heading_publish_hz")
+    gps_course_heading_yaw_variance_rad2 = LaunchConfiguration(
+        "gps_course_heading_yaw_variance_rad2"
+    )
+    gps_course_heading_min_distance_m = LaunchConfiguration(
+        "gps_course_heading_min_distance_m"
+    )
+    gps_course_heading_min_speed_mps = LaunchConfiguration(
+        "gps_course_heading_min_speed_mps"
+    )
+    gps_course_heading_max_abs_steer_deg = LaunchConfiguration(
+        "gps_course_heading_max_abs_steer_deg"
+    )
+    gps_course_heading_max_abs_yaw_rate_rps = LaunchConfiguration(
+        "gps_course_heading_max_abs_yaw_rate_rps"
+    )
+    gps_course_heading_sample_dt_min_s = LaunchConfiguration(
+        "gps_course_heading_sample_dt_min_s"
+    )
+    gps_course_heading_sample_dt_max_s = LaunchConfiguration(
+        "gps_course_heading_sample_dt_max_s"
+    )
+    gps_course_heading_max_pair_distance_base_m = LaunchConfiguration(
+        "gps_course_heading_max_pair_distance_base_m"
+    )
+    gps_course_heading_max_pair_distance_speed_gain = LaunchConfiguration(
+        "gps_course_heading_max_pair_distance_speed_gain"
+    )
+    gps_course_heading_max_pair_speed_error_mps = LaunchConfiguration(
+        "gps_course_heading_max_pair_speed_error_mps"
+    )
+    gps_course_heading_heading_change_base_deg = LaunchConfiguration(
+        "gps_course_heading_heading_change_base_deg"
+    )
+    gps_course_heading_heading_change_yaw_rate_gain = LaunchConfiguration(
+        "gps_course_heading_heading_change_yaw_rate_gain"
+    )
+    gps_course_heading_candidates = LaunchConfiguration("gps_course_heading_candidates")
+    gps_course_heading_max_heading_dispersion_deg = LaunchConfiguration(
+        "gps_course_heading_max_heading_dispersion_deg"
+    )
 
     return LaunchDescription(
         [
@@ -149,6 +196,49 @@ def generate_launch_description():
             # Convencion fija operativa para `global v2`: por default el robot
             # arranca mirando al Este (`datum_yaw_deg = 0.0` en ROS ENU).
             DeclareLaunchArgument("datum_yaw_deg", default_value="0.0"),
+            DeclareLaunchArgument("enable_gps_course_heading", default_value="true"),
+            DeclareLaunchArgument(
+                "gps_course_heading_topic",
+                default_value="/gps/course_heading",
+            ),
+            DeclareLaunchArgument("gps_course_heading_gps_frame", default_value="gps_link"),
+            DeclareLaunchArgument(
+                "gps_course_heading_transform_timeout_s",
+                default_value="0.2",
+            ),
+            DeclareLaunchArgument("gps_course_heading_publish_hz", default_value="10.0"),
+            DeclareLaunchArgument("gps_course_heading_yaw_variance_rad2", default_value="0.05"),
+            DeclareLaunchArgument("gps_course_heading_min_distance_m", default_value="1.0"),
+            DeclareLaunchArgument("gps_course_heading_min_speed_mps", default_value="0.4"),
+            DeclareLaunchArgument("gps_course_heading_max_abs_steer_deg", default_value="3.0"),
+            DeclareLaunchArgument("gps_course_heading_max_abs_yaw_rate_rps", default_value="0.06"),
+            DeclareLaunchArgument("gps_course_heading_sample_dt_min_s", default_value="0.05"),
+            DeclareLaunchArgument("gps_course_heading_sample_dt_max_s", default_value="4.0"),
+            DeclareLaunchArgument(
+                "gps_course_heading_max_pair_distance_base_m",
+                default_value="0.10",
+            ),
+            DeclareLaunchArgument(
+                "gps_course_heading_max_pair_distance_speed_gain",
+                default_value="1.5",
+            ),
+            DeclareLaunchArgument(
+                "gps_course_heading_max_pair_speed_error_mps",
+                default_value="0.75",
+            ),
+            DeclareLaunchArgument(
+                "gps_course_heading_heading_change_base_deg",
+                default_value="3.0",
+            ),
+            DeclareLaunchArgument(
+                "gps_course_heading_heading_change_yaw_rate_gain",
+                default_value="1.0",
+            ),
+            DeclareLaunchArgument("gps_course_heading_candidates", default_value="5"),
+            DeclareLaunchArgument(
+                "gps_course_heading_max_heading_dispersion_deg",
+                default_value="4.0",
+            ),
             OpaqueFunction(function=_build_robot_state_publisher),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
@@ -201,6 +291,94 @@ def generate_launch_description():
                         ),
                         "invert_steer_from_cmd_vel": ParameterValue(
                             invert_steer_from_cmd_vel, value_type=bool
+                        ),
+                    }
+                ],
+            ),
+            Node(
+                package="navegacion_gps",
+                executable="gps_course_heading",
+                name="gps_course_heading",
+                output="screen",
+                condition=IfCondition(enable_gps_course_heading),
+                parameters=[
+                    {
+                        "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
+                        "gps_topic": "/gps/fix",
+                        "odom_topic": "/odometry/local",
+                        "drive_telemetry_topic": "/controller/drive_telemetry",
+                        "output_topic": ParameterValue(
+                            gps_course_heading_topic,
+                            value_type=str,
+                        ),
+                        "debug_topic": "/gps/course_heading/debug",
+                        "base_frame": "base_footprint",
+                        "gps_frame": ParameterValue(
+                            gps_course_heading_gps_frame, value_type=str
+                        ),
+                        "transform_timeout_s": ParameterValue(
+                            gps_course_heading_transform_timeout_s,
+                            value_type=float,
+                        ),
+                        "publish_hz": ParameterValue(
+                            gps_course_heading_publish_hz,
+                            value_type=float,
+                        ),
+                        "yaw_variance_rad2": ParameterValue(
+                            gps_course_heading_yaw_variance_rad2,
+                            value_type=float,
+                        ),
+                        "min_distance_m": ParameterValue(
+                            gps_course_heading_min_distance_m,
+                            value_type=float,
+                        ),
+                        "min_speed_mps": ParameterValue(
+                            gps_course_heading_min_speed_mps,
+                            value_type=float,
+                        ),
+                        "max_abs_steer_deg": ParameterValue(
+                            gps_course_heading_max_abs_steer_deg,
+                            value_type=float,
+                        ),
+                        "max_abs_yaw_rate_rps": ParameterValue(
+                            gps_course_heading_max_abs_yaw_rate_rps,
+                            value_type=float,
+                        ),
+                        "sample_dt_min_s": ParameterValue(
+                            gps_course_heading_sample_dt_min_s,
+                            value_type=float,
+                        ),
+                        "sample_dt_max_s": ParameterValue(
+                            gps_course_heading_sample_dt_max_s,
+                            value_type=float,
+                        ),
+                        "max_pair_distance_base_m": ParameterValue(
+                            gps_course_heading_max_pair_distance_base_m,
+                            value_type=float,
+                        ),
+                        "max_pair_distance_speed_gain": ParameterValue(
+                            gps_course_heading_max_pair_distance_speed_gain,
+                            value_type=float,
+                        ),
+                        "max_pair_speed_error_mps": ParameterValue(
+                            gps_course_heading_max_pair_speed_error_mps,
+                            value_type=float,
+                        ),
+                        "heading_change_base_deg": ParameterValue(
+                            gps_course_heading_heading_change_base_deg,
+                            value_type=float,
+                        ),
+                        "heading_change_yaw_rate_gain": ParameterValue(
+                            gps_course_heading_heading_change_yaw_rate_gain,
+                            value_type=float,
+                        ),
+                        "candidates": ParameterValue(
+                            gps_course_heading_candidates,
+                            value_type=int,
+                        ),
+                        "max_heading_dispersion_deg": ParameterValue(
+                            gps_course_heading_max_heading_dispersion_deg,
+                            value_type=float,
                         ),
                     }
                 ],
@@ -264,6 +442,8 @@ def generate_launch_description():
                     "twist_covariance_vy": twist_covariance_vy,
                     "twist_covariance_yaw_rate": twist_covariance_yaw_rate,
                     "global_localization_params_file": global_localization_params_file,
+                    "enable_gps_course_heading": enable_gps_course_heading,
+                    "gps_course_heading_topic": gps_course_heading_topic,
                     "datum_setter": "false",
                     "datum_lat": datum_lat,
                     "datum_lon": datum_lon,

@@ -43,6 +43,33 @@ class HeadingCandidate:
     speed_error_mps: float
 
 
+@dataclass(frozen=True)
+class HeadingOffsetCompensation:
+    yaw_deg: float
+    correction_deg: float
+    vx_antenna_mps: float
+    vy_antenna_mps: float
+
+
+def compensate_heading_for_sensor_offset(
+    *,
+    antenna_yaw_deg: float,
+    speed_mps: float,
+    yaw_rate_rps: float,
+    offset_x_m: float,
+    offset_y_m: float,
+) -> HeadingOffsetCompensation:
+    vx_antenna_mps = float(speed_mps) - (float(yaw_rate_rps) * float(offset_y_m))
+    vy_antenna_mps = float(yaw_rate_rps) * float(offset_x_m)
+    correction_deg = math.degrees(math.atan2(vy_antenna_mps, vx_antenna_mps))
+    return HeadingOffsetCompensation(
+        yaw_deg=normalize_yaw_deg(float(antenna_yaw_deg) - correction_deg),
+        correction_deg=float(correction_deg),
+        vx_antenna_mps=float(vx_antenna_mps),
+        vy_antenna_mps=float(vy_antenna_mps),
+    )
+
+
 def ll_delta_to_north_east_m(
     lat: float,
     lon: float,

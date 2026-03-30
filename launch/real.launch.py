@@ -136,6 +136,11 @@ def generate_launch_description():
     ekf_local = LaunchConfiguration("ekf_local")
     ekf_global = LaunchConfiguration("ekf_global")
     ukf = LaunchConfiguration("ukf")
+    enable_gps_course_heading = LaunchConfiguration("enable_gps_course_heading")
+    gps_course_heading_gps_frame = LaunchConfiguration("gps_course_heading_gps_frame")
+    gps_course_heading_transform_timeout_s = LaunchConfiguration(
+        "gps_course_heading_transform_timeout_s"
+    )
     localization_filter_executable = PythonExpression(
         ["'ukf_node' if '", ukf, "'.lower() == 'true' else 'ekf_node'"]
     )
@@ -271,6 +276,21 @@ def generate_launch_description():
         default_value="False",
         description="Use UKF for local/global robot_localization filters; if false, use EKF",
     )
+    declare_enable_gps_course_heading_cmd = DeclareLaunchArgument(
+        "enable_gps_course_heading",
+        default_value="true",
+        description="Enable gps_course_heading when ekf_global is active",
+    )
+    declare_gps_course_heading_gps_frame_cmd = DeclareLaunchArgument(
+        "gps_course_heading_gps_frame",
+        default_value="gps_link",
+        description="GPS frame resolved against base_footprint to compensate antenna offset",
+    )
+    declare_gps_course_heading_transform_timeout_s_cmd = DeclareLaunchArgument(
+        "gps_course_heading_transform_timeout_s",
+        default_value="0.2",
+        description="TF lookup timeout for gps_course_heading antenna offset compensation",
+    )
 
     nav2_only_cmd = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(gps_wpf_dir, "launch", "nav2_only.launch.py")),
@@ -370,6 +390,44 @@ def generate_launch_description():
         condition=IfCondition(
             PythonExpression(["'", datum_setter, "'.lower() == 'true'"])
         ),
+    )
+    gps_course_heading_cmd = Node(
+        package="navegacion_gps",
+        executable="gps_course_heading",
+        name="gps_course_heading",
+        output="screen",
+        condition=IfCondition(
+            PythonExpression(
+                [
+                    "'",
+                    ekf_global,
+                    "'.lower() == 'true' and '",
+                    enable_gps_course_heading,
+                    "'.lower() == 'true'",
+                ]
+            )
+        ),
+        parameters=[
+            {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+            {"gps_topic": gps_topic},
+            {"odom_topic": "/odometry/local"},
+            {"drive_telemetry_topic": "/controller/drive_telemetry"},
+            {"output_topic": "/gps/course_heading"},
+            {"debug_topic": "/gps/course_heading/debug"},
+            {"base_frame": "base_footprint"},
+            {
+                "gps_frame": ParameterValue(
+                    gps_course_heading_gps_frame,
+                    value_type=str,
+                )
+            },
+            {
+                "transform_timeout_s": ParameterValue(
+                    gps_course_heading_transform_timeout_s,
+                    value_type=float,
+                )
+            },
+        ],
     )
 
     zones_manager_cmd = Node(
@@ -606,6 +664,9 @@ def generate_launch_description():
     ld.add_action(declare_ekf_local_cmd)
     ld.add_action(declare_ekf_global_cmd)
     ld.add_action(declare_ukf_cmd)
+    ld.add_action(declare_enable_gps_course_heading_cmd)
+    ld.add_action(declare_gps_course_heading_gps_frame_cmd)
+    ld.add_action(declare_gps_course_heading_transform_timeout_s_cmd)
     ld.add_action(OpaqueFunction(function=_validate_telemetry_backend))
     ld.add_action(
         OpaqueFunction(
@@ -621,6 +682,7 @@ def generate_launch_description():
     ld.add_action(ekf_odom_cmd)
     ld.add_action(ekf_map_cmd)
     ld.add_action(navsat_transform_cmd)
+    ld.add_action(gps_course_heading_cmd)
     ld.add_action(nav2_only_cmd)
     ld.add_action(datum_setter_cmd)
     ld.add_action(zones_manager_cmd)

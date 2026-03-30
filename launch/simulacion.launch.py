@@ -87,6 +87,10 @@ def generate_launch_description():
     gps_course_heading_max_heading_dispersion_deg = LaunchConfiguration(
         "gps_course_heading_max_heading_dispersion_deg"
     )
+    gps_course_heading_gps_frame = LaunchConfiguration("gps_course_heading_gps_frame")
+    gps_course_heading_transform_timeout_s = LaunchConfiguration(
+        "gps_course_heading_transform_timeout_s"
+    )
     launch_web_zone_server = LaunchConfiguration("launch_web_zone_server")
     web_ws_host = LaunchConfiguration("web_ws_host")
     web_ws_port = LaunchConfiguration("web_ws_port")
@@ -212,6 +216,11 @@ def generate_launch_description():
                 "gps_course_heading_max_heading_dispersion_deg",
                 default_value="4.0",
             ),
+            DeclareLaunchArgument("gps_course_heading_gps_frame", default_value="gps_link"),
+            DeclareLaunchArgument(
+                "gps_course_heading_transform_timeout_s",
+                default_value="0.2",
+            ),
             DeclareLaunchArgument("launch_web_zone_server", default_value="True"),
             DeclareLaunchArgument("web_ws_host", default_value="0.0.0.0"),
             DeclareLaunchArgument("web_ws_port", default_value="8766"),
@@ -264,6 +273,8 @@ def generate_launch_description():
                     "gps_course_heading_heading_change_yaw_rate_gain": gps_course_heading_heading_change_yaw_rate_gain,
                     "gps_course_heading_candidates": gps_course_heading_candidates,
                     "gps_course_heading_max_heading_dispersion_deg": gps_course_heading_max_heading_dispersion_deg,
+                    "gps_course_heading_gps_frame": gps_course_heading_gps_frame,
+                    "gps_course_heading_transform_timeout_s": gps_course_heading_transform_timeout_s,
                 }.items(),
             ),
             IncludeLaunchDescription(

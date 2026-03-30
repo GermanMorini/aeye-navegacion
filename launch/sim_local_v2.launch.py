@@ -87,6 +87,10 @@ def generate_launch_description():
     gps_course_heading_max_heading_dispersion_deg = LaunchConfiguration(
         "gps_course_heading_max_heading_dispersion_deg"
     )
+    gps_course_heading_gps_frame = LaunchConfiguration("gps_course_heading_gps_frame")
+    gps_course_heading_transform_timeout_s = LaunchConfiguration(
+        "gps_course_heading_transform_timeout_s"
+    )
     effective_gps_profile = PythonExpression(
         [
             "'f9p_rtk' if ('",
@@ -201,6 +205,11 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "gps_course_heading_max_heading_dispersion_deg",
                 default_value="4.0",
+            ),
+            DeclareLaunchArgument("gps_course_heading_gps_frame", default_value="gps_link"),
+            DeclareLaunchArgument(
+                "gps_course_heading_transform_timeout_s",
+                default_value="0.2",
             ),
             Node(
                 package="navegacion_gps",
@@ -373,6 +382,13 @@ def generate_launch_description():
                         "output_topic": "/gps/course_heading",
                         "debug_topic": "/gps/course_heading/debug",
                         "base_frame": "base_footprint",
+                        "gps_frame": ParameterValue(
+                            gps_course_heading_gps_frame, value_type=str
+                        ),
+                        "transform_timeout_s": ParameterValue(
+                            gps_course_heading_transform_timeout_s,
+                            value_type=float,
+                        ),
                         "min_distance_m": ParameterValue(
                             gps_course_heading_min_distance_m, value_type=float
                         ),
