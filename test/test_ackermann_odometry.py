@@ -173,7 +173,7 @@ def test_ackermann_odometry_source_exposes_publish_odom_tf_toggle() -> None:
     source_contents = source_path.read_text(encoding="utf-8")
 
     assert 'self.declare_parameter("publish_odom_tf", False)' in source_contents
-    assert 'self.declare_parameter("periodic_log_enabled", True)' in source_contents
+    assert 'self.declare_parameter("periodic_log_enabled", False)' in source_contents
     assert 'self.declare_parameter("periodic_log_period_s", 0.5)' in source_contents
     assert "if self._publish_odom_tf and self._tf_broadcaster is not None:" in source_contents
     assert "self._tf_broadcaster.sendTransform(transform)" in source_contents

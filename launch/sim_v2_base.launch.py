@@ -72,11 +72,9 @@ def _materialize_bridge_config(
 def _spawn_robot(context):
     custom_urdf = LaunchConfiguration("custom_urdf").perform(context)
     model_name = LaunchConfiguration("model_name").perform(context)
-    world_path = LaunchConfiguration("world").perform(context)
     use_sim_time = LaunchConfiguration("use_sim_time").perform(context) == "True"
     robot_description = _read_file(custom_urdf)
-    world_name = _extract_world_name_from_sdf(world_path)
-    spawn_yaw_rad = "2.35619449019" if world_name == "vacio" else "0.0"
+    spawn_yaw_rad = "0.0"
 
     return [
         Node(

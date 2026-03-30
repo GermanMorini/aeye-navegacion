@@ -1,4 +1,3 @@
-import copy
 import math
 import threading
 import time
@@ -8,20 +7,24 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import rclpy
 from action_msgs.msg import GoalStatus
-from builtin_interfaces.msg import Time as BuiltinTime
+from diagnostic_msgs.msg import DiagnosticStatus, KeyValue
 from geographic_msgs.msg import GeoPoint
 from geometry_msgs.msg import PoseStamped, Quaternion, Twist
 from nav2_msgs.action import FollowWaypoints, NavigateThroughPoses
 from nav2_msgs.msg import CollisionMonitorState
 from rclpy.action import ActionClient
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
+from rclpy.duration import Duration
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
+from rclpy.time import Time
 from robot_localization.srv import FromLL
 from sensor_msgs.msg import NavSatFix
+import tf2_geometry_msgs  # noqa: F401
+from tf2_ros import Buffer, TransformException, TransformListener
 
-from interfaces.msg import CmdVelFinal, NavTelemetry
+from interfaces.msg import CmdVelFinal, NavEvent, NavTelemetry
 from interfaces.srv import (
     BrakeNav,
     CancelNavGoal,
@@ -32,6 +35,12 @@ from interfaces.srv import (
 
 
 class NavCommandServerNode(Node):
+    @staticmethod
+    def _diag_level_value(value: Any) -> int:
+        if isinstance(value, (bytes, bytearray)):
+            return int.from_bytes(value, byteorder="little", signed=False)
+        return int(value)
+
     def __init__(self) -> None:
         super().__init__("nav_command_server")
 
@@ -40,7 +49,15 @@ class NavCommandServerNode(Node):
         self.declare_parameter("fromll_wait_timeout_s", 2.0)
         self.declare_parameter("fromll_call_retries", 4)
         self.declare_parameter("fromll_retry_delay_s", 0.15)
+        self.declare_parameter("approx_fromll_fallback_enabled", False)
+        self.declare_parameter("approx_fromll_datum_lat", float("nan"))
+        self.declare_parameter("approx_fromll_datum_lon", float("nan"))
+        self.declare_parameter("approx_fromll_datum_yaw_deg", 0.0)
+        self.declare_parameter("approx_fromll_zero_threshold_m", 1.0e-3)
+        self.declare_parameter("approx_fromll_min_distance_for_fallback_m", 0.5)
+        self.declare_parameter("fromll_frame", "odom")
         self.declare_parameter("map_frame", "map")
+        self.declare_parameter("tf_lookup_timeout_s", 0.5)
         self.declare_parameter("gps_topic", "/gps/fix")
         self.declare_parameter("cmd_vel_safe_topic", "/cmd_vel_safe")
         self.declare_parameter("cmd_vel_final_topic", "/cmd_vel_final")
@@ -55,6 +72,7 @@ class NavCommandServerNode(Node):
         self.declare_parameter("manual_watchdog_hz", 10.0)
         self.declare_parameter("nav_telemetry_hz", 5.0)
         self.declare_parameter("telemetry_topic", "/nav_command_server/telemetry")
+        self.declare_parameter("event_topic", "/nav_command_server/events")
         self.declare_parameter("set_goal_service", "/nav_command_server/set_goal_ll")
         self.declare_parameter("cancel_goal_service", "/nav_command_server/cancel_goal")
         self.declare_parameter("brake_service", "/nav_command_server/brake")
@@ -76,7 +94,31 @@ class NavCommandServerNode(Node):
         self.fromll_retry_delay_s = max(
             0.0, float(self.get_parameter("fromll_retry_delay_s").value)
         )
+        self.approx_fromll_fallback_enabled = bool(
+            self.get_parameter("approx_fromll_fallback_enabled").value
+        )
+        self.approx_fromll_datum_lat = float(
+            self.get_parameter("approx_fromll_datum_lat").value
+        )
+        self.approx_fromll_datum_lon = float(
+            self.get_parameter("approx_fromll_datum_lon").value
+        )
+        self.approx_fromll_datum_yaw_deg = float(
+            self.get_parameter("approx_fromll_datum_yaw_deg").value
+        )
+        self.approx_fromll_zero_threshold_m = max(
+            1.0e-6,
+            float(self.get_parameter("approx_fromll_zero_threshold_m").value),
+        )
+        self.approx_fromll_min_distance_for_fallback_m = max(
+            0.0,
+            float(self.get_parameter("approx_fromll_min_distance_for_fallback_m").value),
+        )
+        self.fromll_frame = str(self.get_parameter("fromll_frame").value).strip() or "odom"
         self.map_frame = str(self.get_parameter("map_frame").value)
+        self.tf_lookup_timeout_s = max(
+            0.05, float(self.get_parameter("tf_lookup_timeout_s").value)
+        )
         self.gps_topic = str(self.get_parameter("gps_topic").value)
         self.cmd_vel_safe_topic = str(self.get_parameter("cmd_vel_safe_topic").value)
         self.cmd_vel_final_topic = str(self.get_parameter("cmd_vel_final_topic").value)
@@ -101,6 +143,7 @@ class NavCommandServerNode(Node):
         )
         self.nav_telemetry_hz = max(1.0, float(self.get_parameter("nav_telemetry_hz").value))
         self.telemetry_topic = str(self.get_parameter("telemetry_topic").value)
+        self.event_topic = str(self.get_parameter("event_topic").value)
         self.set_goal_service = str(self.get_parameter("set_goal_service").value)
         self.cancel_goal_service = str(self.get_parameter("cancel_goal_service").value)
         self.brake_service = str(self.get_parameter("brake_service").value)
@@ -126,7 +169,9 @@ class NavCommandServerNode(Node):
         self._auto_mode = "idle"
         self._collision_stop_active = False
         self._last_robot_pose: Optional[Dict[str, float]] = None
+        self._last_gps_fix_monotonic: Optional[float] = None
         self._last_telemetry_sent: Optional[float] = None
+        self._last_cmd_vel_safe_monotonic: Optional[float] = None
         self._loop_waypoint_poses: List[PoseStamped] = []
         self._loop_original_poses: List[PoseStamped] = []
         self._loop_restart_poses: List[PoseStamped] = []
@@ -134,6 +179,11 @@ class NavCommandServerNode(Node):
         self._last_nav_result_status = int(GoalStatus.STATUS_UNKNOWN)
         self._last_nav_result_text = "idle"
         self._nav_result_event_id = 0
+        self._active_action = "idle"
+        self._failure_code = ""
+        self._failure_component = ""
+        self._event_seq = 0
+        self._last_collision_stop_active = False
 
         # Service callbacks are mutually exclusive; clients/actions are reentrant to avoid
         # deadlocks when a service callback waits for a client future.
@@ -155,6 +205,8 @@ class NavCommandServerNode(Node):
         self._active_fromll_name: Optional[str] = None
         self._active_fromll_client: Optional[Any] = None
         self._last_fromll_error: Optional[str] = None
+        self._tf_buffer = Buffer()
+        self._tf_listener = TransformListener(self._tf_buffer, self, spin_thread=False)
         self._follow_waypoints_client = ActionClient(
             self,
             FollowWaypoints,
@@ -169,6 +221,7 @@ class NavCommandServerNode(Node):
         )
 
         self._telemetry_pub = self.create_publisher(NavTelemetry, self.telemetry_topic, 10)
+        self._event_pub = self.create_publisher(NavEvent, self.event_topic, 10)
 
         self._set_goal_srv = self.create_service(
             SetNavGoalLL,
@@ -227,6 +280,7 @@ class NavCommandServerNode(Node):
             "Nav command server ready "
             f"(set_goal={self.set_goal_service}, cancel={self.cancel_goal_service}, "
             f"brake={self.brake_service}, telemetry={self.telemetry_topic}, "
+            f"events={self.event_topic}, "
             f"teleop_topic={self.teleop_cmd_topic}, "
             f"forward_without_goal={self.forward_cmd_vel_safe_without_goal}, "
             f"cmd_vel_final_topic={self.cmd_vel_final_topic}, "
@@ -247,10 +301,94 @@ class NavCommandServerNode(Node):
             time.sleep(0.01)
         return None
 
+    @staticmethod
+    def _ll_delta_to_north_east_m(
+        lat: float,
+        lon: float,
+        ref_lat: float,
+        ref_lon: float,
+    ) -> Tuple[float, float]:
+        meters_per_deg_lat = 111_320.0
+        cos_lat = max(1.0e-6, abs(math.cos(math.radians(float(ref_lat)))))
+        meters_per_deg_lon = meters_per_deg_lat * cos_lat
+        north_m = (float(lat) - float(ref_lat)) * meters_per_deg_lat
+        east_m = (float(lon) - float(ref_lon)) * meters_per_deg_lon
+        return north_m, east_m
+
+    @staticmethod
+    def _rotate_enu_to_map(
+        east_m: float,
+        north_m: float,
+        yaw_deg: float,
+    ) -> Tuple[float, float]:
+        yaw_rad = math.radians(float(yaw_deg))
+        cos_yaw = math.cos(yaw_rad)
+        sin_yaw = math.sin(yaw_rad)
+        map_x = east_m * cos_yaw - north_m * sin_yaw
+        map_y = east_m * sin_yaw + north_m * cos_yaw
+        return map_x, map_y
+
+    def _approx_from_ll(self, lat: float, lon: float) -> Optional[Tuple[float, float, float]]:
+        if not self.approx_fromll_fallback_enabled:
+            return None
+        if not (
+            math.isfinite(self.approx_fromll_datum_lat)
+            and math.isfinite(self.approx_fromll_datum_lon)
+            and math.isfinite(self.approx_fromll_datum_yaw_deg)
+        ):
+            return None
+
+        north_m, east_m = self._ll_delta_to_north_east_m(
+            lat=lat,
+            lon=lon,
+            ref_lat=self.approx_fromll_datum_lat,
+            ref_lon=self.approx_fromll_datum_lon,
+        )
+        map_x, map_y = self._rotate_enu_to_map(
+            east_m=east_m,
+            north_m=north_m,
+            yaw_deg=self.approx_fromll_datum_yaw_deg,
+        )
+        return float(map_x), float(map_y), 0.0
+
+    def _should_use_approx_from_ll(
+        self,
+        lat: float,
+        lon: float,
+        converted: Tuple[float, float, float],
+    ) -> bool:
+        if not self.approx_fromll_fallback_enabled:
+            return False
+        if not (
+            math.isfinite(self.approx_fromll_datum_lat)
+            and math.isfinite(self.approx_fromll_datum_lon)
+        ):
+            return False
+
+        x, y, z = converted
+        if max(abs(float(x)), abs(float(y)), abs(float(z))) > self.approx_fromll_zero_threshold_m:
+            return False
+
+        north_m, east_m = self._ll_delta_to_north_east_m(
+            lat=lat,
+            lon=lon,
+            ref_lat=self.approx_fromll_datum_lat,
+            ref_lon=self.approx_fromll_datum_lon,
+        )
+        return math.hypot(north_m, east_m) >= self.approx_fromll_min_distance_for_fallback_m
+
     def _call_from_ll(self, lat: float, lon: float) -> Optional[Tuple[float, float, float]]:
         for attempt in range(self.fromll_call_retries):
             fromll_client = self._resolve_fromll_client()
             if fromll_client is None:
+                approx = self._approx_from_ll(lat, lon)
+                if approx is not None:
+                    self.get_logger().warning(
+                        "Using approximate fromLL fallback because the service is unavailable "
+                        f"(lat={lat:.8f}, lon={lon:.8f})"
+                    )
+                    self._last_fromll_error = None
+                    return approx
                 if attempt + 1 < self.fromll_call_retries and self.fromll_retry_delay_s > 0.0:
                     time.sleep(self.fromll_retry_delay_s)
                 continue
@@ -271,12 +409,41 @@ class NavCommandServerNode(Node):
                     time.sleep(self.fromll_retry_delay_s)
                 continue
 
+            converted = (
+                float(res.map_point.x),
+                float(res.map_point.y),
+                float(res.map_point.z),
+            )
+            if self._should_use_approx_from_ll(lat, lon, converted):
+                approx = self._approx_from_ll(lat, lon)
+                if approx is not None:
+                    self.get_logger().warning(
+                        "Using approximate fromLL fallback because the service returned a "
+                        "degenerate origin result "
+                        f"(lat={lat:.8f}, lon={lon:.8f})"
+                    )
+                    self._last_fromll_error = None
+                    return approx
+
             self._last_fromll_error = None
-            return (float(res.map_point.x), float(res.map_point.y), float(res.map_point.z))
+            return converted
 
         self.get_logger().warning(
             "fromLL conversion failed "
             f"(lat={lat:.8f}, lon={lon:.8f}, reason={self._last_fromll_error or 'unknown'})"
+        )
+        with self._lock:
+            self._set_failure_locked("FROMLL_FAILED", "nav_command_server")
+        self._publish_event(
+            DiagnosticStatus.ERROR,
+            "nav_command_server",
+            "FROMLL_FAILED",
+            "fromLL conversion failed",
+            details={
+                "lat": f"{lat:.8f}",
+                "lon": f"{lon:.8f}",
+                "reason": self._last_fromll_error or "unknown",
+            },
         )
         return None
 
@@ -312,6 +479,18 @@ class NavCommandServerNode(Node):
             + ")"
         )
         self._last_fromll_error = "fromLL service unavailable"
+        with self._lock:
+            self._set_failure_locked("FROMLL_FAILED", "nav_command_server")
+        self._publish_event(
+            DiagnosticStatus.ERROR,
+            "nav_command_server",
+            "FROMLL_FAILED",
+            "fromLL service unavailable",
+            details={
+                "primary_service": self.fromll_service,
+                "fallback_service": self.fromll_service_fallback,
+            },
+        )
         return None
 
     def _maybe_log_active_fromll(self, service_name: str) -> None:
@@ -326,6 +505,77 @@ class NavCommandServerNode(Node):
         qz = math.sin(half_yaw)
         qw = math.cos(half_yaw)
         return Quaternion(x=0.0, y=0.0, z=qz, w=qw)
+
+    @staticmethod
+    def _normalize_yaw_deg(yaw_deg: float) -> float:
+        yaw = float(yaw_deg)
+        while yaw <= -180.0:
+            yaw += 360.0
+        while yaw > 180.0:
+            yaw -= 360.0
+        return yaw
+
+    @staticmethod
+    def _north_east_m_to_ll(
+        lat: float,
+        lon: float,
+        north_m: float,
+        east_m: float,
+    ) -> Tuple[float, float]:
+        meters_per_deg_lat = 111_320.0
+        cos_lat = max(1.0e-6, abs(math.cos(math.radians(float(lat)))))
+        meters_per_deg_lon = meters_per_deg_lat * cos_lat
+        out_lat = float(lat) + float(north_m) / meters_per_deg_lat
+        out_lon = float(lon) + float(east_m) / meters_per_deg_lon
+        return out_lat, out_lon
+
+    def _fallback_fromll_yaw(self, yaw_deg: float) -> float:
+        if self.approx_fromll_fallback_enabled and math.isfinite(self.approx_fromll_datum_yaw_deg):
+            return self._normalize_yaw_deg(float(yaw_deg) + float(self.approx_fromll_datum_yaw_deg))
+        return self._normalize_yaw_deg(yaw_deg)
+
+    def _project_geographic_yaw_to_fromll(
+        self,
+        lat: float,
+        lon: float,
+        yaw_deg: float,
+        origin_xy: Tuple[float, float, float],
+        projection_distance_m: float = 1.0,
+    ) -> float:
+        heading_rad = math.radians(float(yaw_deg))
+        north_m = float(projection_distance_m) * math.sin(heading_rad)
+        east_m = float(projection_distance_m) * math.cos(heading_rad)
+        tip_lat, tip_lon = self._north_east_m_to_ll(lat, lon, north_m, east_m)
+        tip_converted = self._call_from_ll(tip_lat, tip_lon)
+        if tip_converted is None:
+            return self._fallback_fromll_yaw(yaw_deg)
+
+        dx = float(tip_converted[0]) - float(origin_xy[0])
+        dy = float(tip_converted[1]) - float(origin_xy[1])
+        if math.hypot(dx, dy) <= 1.0e-6:
+            return self._fallback_fromll_yaw(yaw_deg)
+
+        return self._normalize_yaw_deg(math.degrees(math.atan2(dy, dx)))
+
+    def _transform_pose_to_map(self, pose: PoseStamped) -> Optional[PoseStamped]:
+        if pose.header.frame_id == self.map_frame:
+            pose.header.stamp = self.get_clock().now().to_msg()
+            return pose
+
+        try:
+            transformed = self._tf_buffer.transform(
+                pose,
+                self.map_frame,
+                timeout=Duration(seconds=self.tf_lookup_timeout_s),
+            )
+        except TransformException as exc:
+            self._last_fromll_error = (
+                f"tf transform failed ({pose.header.frame_id}->{self.map_frame}): {exc}"
+            )
+            return None
+
+        transformed.header.stamp = self.get_clock().now().to_msg()
+        return transformed
 
     def _cmd_vel_safe_payload_locked(self) -> Dict[str, Any]:
         if self._last_cmd_vel_safe is None:
@@ -343,6 +593,70 @@ class NavCommandServerNode(Node):
             "linear_x_cmd": float(self._last_manual_cmd.twist.linear.x),
             "angular_z_cmd": float(self._last_manual_cmd.twist.angular.z),
         }
+
+    @staticmethod
+    def _details_to_key_values(details: Optional[Dict[str, Any]]) -> List[KeyValue]:
+        if not details:
+            return []
+        values: List[KeyValue] = []
+        for key, value in details.items():
+            item = KeyValue()
+            item.key = str(key)
+            item.value = str(value)
+            values.append(item)
+        return values
+
+    def _set_failure_locked(self, code: str = "", component: str = "") -> None:
+        self._failure_code = str(code)
+        self._failure_component = str(component)
+
+    def _publish_event(
+        self,
+        severity: int,
+        component: str,
+        code: str,
+        message: str,
+        *,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        with self._lock:
+            self._event_seq += 1
+            event_id = int(self._event_seq)
+            auto_mode = str(self._auto_mode)
+            goal_active = bool(self._is_navigating)
+            manual_enabled = bool(self._manual_enabled)
+
+        payload = {
+            "code": str(code),
+            "component": str(component),
+            "event_id": event_id,
+            "mode": auto_mode,
+            "goal_active": int(goal_active),
+            "manual_enabled": int(manual_enabled),
+        }
+        if details:
+            payload.update({str(key): value for key, value in details.items()})
+        log_line = " ".join(f"{key}={value}" for key, value in payload.items())
+        severity_value = self._diag_level_value(severity)
+        error_level = self._diag_level_value(DiagnosticStatus.ERROR)
+        warn_level = self._diag_level_value(DiagnosticStatus.WARN)
+        if severity_value >= error_level:
+            self.get_logger().error(f"{message} {log_line}")
+        elif severity_value >= warn_level:
+            self.get_logger().warning(f"{message} {log_line}")
+        else:
+            self.get_logger().info(f"{message} {log_line}")
+
+        event = NavEvent()
+        event.stamp = self.get_clock().now().to_msg()
+        event.severity = severity_value
+        event.component = str(component)
+        event.code = str(code)
+        event.message = str(message)
+        event.event_id = event_id
+        event.details = self._details_to_key_values(details)
+        self._event_pub.publish(event)
+        return event_id
 
     @staticmethod
     def _goal_status_label(status: Optional[int]) -> str:
@@ -434,6 +748,7 @@ class NavCommandServerNode(Node):
             self._clear_loop_config_locked()
         self._is_navigating = False
         self._auto_mode = "idle"
+        self._active_action = "idle"
         return handle
 
     def _cancel_goal_handle_blocking(self, handle: Any) -> Tuple[bool, str]:
@@ -453,18 +768,34 @@ class NavCommandServerNode(Node):
             self._publish_telemetry(force=True)
             return
         with self._lock:
+            self._active_action = "cancel_goal"
             NavCommandServerNode._set_nav_result_locked(
                 self,
                 int(GoalStatus.STATUS_CANCELING),
                 f"{reason}: cancel requested",
                 increment_event=True,
             )
+        self._publish_event(
+            DiagnosticStatus.WARN,
+            "nav_command_server",
+            "GOAL_CANCELLED",
+            "Goal cancel requested",
+            details={"reason": reason},
+        )
         self._publish_telemetry(force=True)
 
         def _run_cancel() -> None:
             ok, msg = self._cancel_goal_handle_blocking(handle)
             if not ok and msg != "no active goal":
-                self.get_logger().warning(f"{reason}: failed to cancel goal ({msg})")
+                with self._lock:
+                    self._set_failure_locked("GOAL_CANCELLED", "nav_command_server")
+                self._publish_event(
+                    DiagnosticStatus.WARN,
+                    "nav_command_server",
+                    "GOAL_CANCELLED",
+                    "Goal cancel failed",
+                    details={"reason": reason, "error": msg},
+                )
             self._publish_telemetry(force=True)
 
         cancel_thread = threading.Thread(
@@ -526,15 +857,43 @@ class NavCommandServerNode(Node):
             cmd_vel_safe = self._cmd_vel_safe_payload_locked()
             robot_pose = self._last_robot_pose
             nav_result = self._nav_result_payload_locked()
+            auto_mode = str(self._auto_mode)
+            active_action = str(self._active_action)
+            collision_stop_active = bool(self._collision_stop_active)
+            gps_fix_available = self._last_gps_fix_monotonic is not None
+            gps_age_s = (
+                max(0.0, now - float(self._last_gps_fix_monotonic))
+                if self._last_gps_fix_monotonic is not None
+                else float("nan")
+            )
+            cmd_vel_safe_age_s = (
+                max(0.0, now - float(self._last_cmd_vel_safe_monotonic))
+                if self._last_cmd_vel_safe_monotonic is not None
+                else float("nan")
+            )
+            failure_code = str(self._failure_code)
+            failure_component = str(self._failure_component)
 
         msg = NavTelemetry()
         msg.goal_active = bool(goal_active)
         msg.manual_enabled = bool(manual_control["enabled"])
+        msg.auto_mode = auto_mode
+        msg.active_action = active_action
         msg.manual_linear_x_cmd = float(manual_control["linear_x_cmd"])
         msg.manual_angular_z_cmd = float(manual_control["angular_z_cmd"])
         msg.cmd_vel_available = bool(cmd_vel_safe["available"])
+        msg.cmd_vel_safe_fresh = bool(
+            cmd_vel_safe["available"]
+            and np.isfinite(cmd_vel_safe_age_s)
+            and (cmd_vel_safe_age_s <= 1.0)
+        )
         msg.cmd_vel_linear_x = float(cmd_vel_safe["linear_x"])
         msg.cmd_vel_angular_z = float(cmd_vel_safe["angular_z"])
+        msg.cmd_vel_safe_age_s = float(cmd_vel_safe_age_s)
+        msg.collision_stop_active = collision_stop_active
+        msg.robot_pose_available = bool(robot_pose is not None)
+        msg.gps_fix_available = bool(gps_fix_available)
+        msg.gps_age_s = float(gps_age_s)
         if robot_pose is None:
             msg.robot_lat = float("nan")
             msg.robot_lon = float("nan")
@@ -544,6 +903,8 @@ class NavCommandServerNode(Node):
         msg.nav_result_status = int(nav_result["status"])
         msg.nav_result_text = str(nav_result["text"])
         msg.nav_result_event_id = int(nav_result["event_id"])
+        msg.failure_code = failure_code
+        msg.failure_component = failure_component
         self._telemetry_pub.publish(msg)
 
     def _on_gps_fix(self, msg: NavSatFix) -> None:
@@ -552,11 +913,13 @@ class NavCommandServerNode(Node):
         pose = {"lat": float(msg.latitude), "lon": float(msg.longitude)}
         with self._lock:
             self._last_robot_pose = pose
+            self._last_gps_fix_monotonic = time.monotonic()
         self._publish_telemetry(force=False)
 
     def _on_cmd_vel_safe(self, msg: Twist) -> None:
         with self._lock:
             self._last_cmd_vel_safe = msg
+            self._last_cmd_vel_safe_monotonic = time.monotonic()
             manual_enabled = bool(self._manual_enabled)
             is_navigating = bool(self._is_navigating)
             collision_stop_active = bool(self._collision_stop_active)
@@ -583,11 +946,23 @@ class NavCommandServerNode(Node):
     def _on_collision_monitor_state(self, msg: CollisionMonitorState) -> None:
         stop_active = int(msg.action_type) == int(CollisionMonitorState.STOP)
         with self._lock:
+            was_stop_active = bool(self._last_collision_stop_active)
             self._collision_stop_active = stop_active
+            self._last_collision_stop_active = stop_active
             manual_enabled = bool(self._manual_enabled)
             is_navigating = bool(self._is_navigating)
         if (not manual_enabled) and is_navigating and stop_active:
             self._publish_brake_sequence(brake_pct=100)
+        if stop_active and not was_stop_active:
+            with self._lock:
+                self._set_failure_locked("COLLISION_STOP_ACTIVE", "collision_monitor")
+            self._publish_event(
+                DiagnosticStatus.WARN,
+                "collision_monitor",
+                "COLLISION_STOP_ACTIVE",
+                "Collision monitor requested STOP",
+                details={"action_type": int(msg.action_type)},
+            )
         self._publish_telemetry(force=False)
 
     def _on_teleop_cmd(self, msg: CmdVelFinal) -> None:
@@ -629,15 +1004,16 @@ class NavCommandServerNode(Node):
         if converted is None:
             return None
         x, y, _ = converted
+        fromll_yaw_deg = self._project_geographic_yaw_to_fromll(lat, lon, yaw_deg, converted)
 
         pose = PoseStamped()
-        pose.header.frame_id = self.map_frame
-        pose.header.stamp = self.get_clock().now().to_msg()
+        pose.header.frame_id = self.fromll_frame
+        pose.header.stamp = Time().to_msg()
         pose.pose.position.x = float(x)
         pose.pose.position.y = float(y)
         pose.pose.position.z = 0.0
-        pose.pose.orientation = self._yaw_to_quaternion(yaw_deg)
-        return pose
+        pose.pose.orientation = self._yaw_to_quaternion(fromll_yaw_deg)
+        return self._transform_pose_to_map(pose)
 
     def _convert_waypoints_to_poses(
         self, waypoints: Sequence[Tuple[float, float, float]]
@@ -659,40 +1035,48 @@ class NavCommandServerNode(Node):
             return poses_list
         return poses_list[1:] + [poses_list[0]]
 
-    def _prepare_poses_for_nav2(self, poses: Sequence[PoseStamped]) -> List[PoseStamped]:
-        prepared: List[PoseStamped] = []
-        for pose in poses:
-            cloned_pose = copy.deepcopy(pose)
-            if not str(cloned_pose.header.frame_id).strip():
-                cloned_pose.header.frame_id = self.map_frame
-            cloned_pose.header.stamp = BuiltinTime(sec=0, nanosec=0)
-            prepared.append(cloned_pose)
-        return prepared
-
     def _send_follow_waypoints_goal(
         self, poses: Sequence[PoseStamped], loop_enabled: bool, reason: str
     ) -> Tuple[bool, str]:
         poses_list = list(poses)
         if not poses_list:
             return False, "no waypoint poses to send"
-        prepared_poses = self._prepare_poses_for_nav2(poses_list)
 
         if not self._follow_waypoints_client.wait_for_server(timeout_sec=2.0):
-            self.get_logger().error(
-                "SetNavGoalLL failed: FollowWaypoints action server not available"
+            with self._lock:
+                self._set_failure_locked("ACTION_SERVER_UNAVAILABLE", "nav2")
+            self._publish_event(
+                DiagnosticStatus.ERROR,
+                "nav2",
+                "ACTION_SERVER_UNAVAILABLE",
+                "FollowWaypoints action server not available",
             )
             return False, "FollowWaypoints action server not available"
 
         goal = FollowWaypoints.Goal()
-        goal.poses = prepared_poses
+        goal.poses = poses_list
 
         future = self._follow_waypoints_client.send_goal_async(goal)
         goal_handle = self._wait_for_future(future, timeout_sec=5.0)
         if goal_handle is None:
-            self.get_logger().error("SetNavGoalLL failed: timeout sending FollowWaypoints goal")
+            with self._lock:
+                self._set_failure_locked("GOAL_REJECTED", "nav2")
+            self._publish_event(
+                DiagnosticStatus.ERROR,
+                "nav2",
+                "GOAL_REJECTED",
+                "Timeout sending FollowWaypoints goal",
+            )
             return False, "failed to send FollowWaypoints goal"
         if not goal_handle.accepted:
-            self.get_logger().warning("SetNavGoalLL rejected by FollowWaypoints")
+            with self._lock:
+                self._set_failure_locked("GOAL_REJECTED", "nav2")
+            self._publish_event(
+                DiagnosticStatus.WARN,
+                "nav2",
+                "GOAL_REJECTED",
+                "FollowWaypoints goal rejected",
+            )
             return False, "goal rejected by FollowWaypoints"
 
         with self._lock:
@@ -701,6 +1085,8 @@ class NavCommandServerNode(Node):
             self._loop_enabled = bool(loop_enabled and (len(poses_list) > 1))
             self._is_navigating = True
             self._auto_mode = "loop" if self._loop_enabled else "point_to_point"
+            self._active_action = "follow_waypoints"
+            self._set_failure_locked("", "")
             NavCommandServerNode._set_nav_result_locked(
                 self,
                 int(GoalStatus.STATUS_EXECUTING),
@@ -712,16 +1098,17 @@ class NavCommandServerNode(Node):
         result_future.add_done_callback(
             partial(self._on_nav_action_result_done, "FollowWaypoints")
         )
-        self.get_logger().info(
-            "Prepared FollowWaypoints goal "
-            f"(poses={len(prepared_poses)}, stamp_mode=zero/latest, "
-            f"default_frame={self.map_frame})"
-        )
 
-        self.get_logger().info(
-            "FollowWaypoints goal accepted "
-            f"(waypoints={len(poses_list)}, loop={bool(loop_enabled and (len(poses_list) > 1))}, "
-            f"reason={reason})"
+        self._publish_event(
+            DiagnosticStatus.OK,
+            "nav_command_server",
+            "GOAL_ACCEPTED",
+            "FollowWaypoints goal accepted",
+            details={
+                "waypoints": len(poses_list),
+                "loop": bool(loop_enabled and (len(poses_list) > 1)),
+                "reason": reason,
+            },
         )
         self._publish_telemetry(force=True)
         return True, "goal accepted"
@@ -732,26 +1119,42 @@ class NavCommandServerNode(Node):
         poses_list = list(poses)
         if not poses_list:
             return False, "no waypoint poses to send"
-        prepared_poses = self._prepare_poses_for_nav2(poses_list)
 
         if not self._navigate_through_poses_client.wait_for_server(timeout_sec=2.0):
-            self.get_logger().error(
-                "SetNavGoalLL failed: NavigateThroughPoses action server not available"
+            with self._lock:
+                self._set_failure_locked("ACTION_SERVER_UNAVAILABLE", "nav2")
+            self._publish_event(
+                DiagnosticStatus.ERROR,
+                "nav2",
+                "ACTION_SERVER_UNAVAILABLE",
+                "NavigateThroughPoses action server not available",
             )
             return False, "NavigateThroughPoses action server not available"
 
         goal = NavigateThroughPoses.Goal()
-        goal.poses = prepared_poses
+        goal.poses = poses_list
 
         future = self._navigate_through_poses_client.send_goal_async(goal)
         goal_handle = self._wait_for_future(future, timeout_sec=5.0)
         if goal_handle is None:
-            self.get_logger().error(
-                "SetNavGoalLL failed: timeout sending NavigateThroughPoses goal"
+            with self._lock:
+                self._set_failure_locked("GOAL_REJECTED", "nav2")
+            self._publish_event(
+                DiagnosticStatus.ERROR,
+                "nav2",
+                "GOAL_REJECTED",
+                "Timeout sending NavigateThroughPoses goal",
             )
             return False, "failed to send NavigateThroughPoses goal"
         if not goal_handle.accepted:
-            self.get_logger().warning("SetNavGoalLL rejected by NavigateThroughPoses")
+            with self._lock:
+                self._set_failure_locked("GOAL_REJECTED", "nav2")
+            self._publish_event(
+                DiagnosticStatus.WARN,
+                "nav2",
+                "GOAL_REJECTED",
+                "NavigateThroughPoses goal rejected",
+            )
             return False, "goal rejected by NavigateThroughPoses"
 
         with self._lock:
@@ -760,6 +1163,8 @@ class NavCommandServerNode(Node):
             self._loop_enabled = bool(loop_enabled and (len(poses_list) > 1))
             self._is_navigating = True
             self._auto_mode = "loop" if self._loop_enabled else "point_to_point"
+            self._active_action = "navigate_through_poses"
+            self._set_failure_locked("", "")
             NavCommandServerNode._set_nav_result_locked(
                 self,
                 int(GoalStatus.STATUS_EXECUTING),
@@ -771,16 +1176,17 @@ class NavCommandServerNode(Node):
         result_future.add_done_callback(
             partial(self._on_nav_action_result_done, "NavigateThroughPoses")
         )
-        self.get_logger().info(
-            "Prepared NavigateThroughPoses goal "
-            f"(poses={len(prepared_poses)}, stamp_mode=zero/latest, "
-            f"default_frame={self.map_frame})"
-        )
 
-        self.get_logger().info(
-            "NavigateThroughPoses goal accepted "
-            f"(waypoints={len(poses_list)}, loop={bool(loop_enabled and (len(poses_list) > 1))}, "
-            f"reason={reason})"
+        self._publish_event(
+            DiagnosticStatus.OK,
+            "nav_command_server",
+            "GOAL_ACCEPTED",
+            "NavigateThroughPoses goal accepted",
+            details={
+                "waypoints": len(poses_list),
+                "loop": bool(loop_enabled and (len(poses_list) > 1)),
+                "reason": reason,
+            },
         )
         self._publish_telemetry(force=True)
         return True, "goal accepted"
@@ -818,9 +1224,14 @@ class NavCommandServerNode(Node):
             self._clear_loop_config_locked()
             self._is_navigating = False
             self._auto_mode = "idle"
+            self._active_action = "idle"
 
-        self.get_logger().info(
-            f"SetNavGoalLL request (waypoints={len(waypoints)}, loop={bool(loop_enabled)})"
+        self._publish_event(
+            DiagnosticStatus.OK,
+            "nav_command_server",
+            "GOAL_REQUESTED",
+            "Navigation goal requested",
+            details={"waypoints": len(waypoints), "loop": bool(loop_enabled)},
         )
         poses, err = self._convert_waypoints_to_poses(waypoints)
         if poses is None:
@@ -835,6 +1246,8 @@ class NavCommandServerNode(Node):
                 with self._lock:
                     self._is_navigating = False
                     self._auto_mode = "idle"
+                    self._active_action = "idle"
+                    self._set_failure_locked("GOAL_REJECTED", "nav_command_server")
                     NavCommandServerNode._set_nav_result_locked(
                         self,
                         int(GoalStatus.STATUS_ABORTED),
@@ -923,7 +1336,9 @@ class NavCommandServerNode(Node):
                     self._clear_loop_config_locked()
                     self._is_navigating = False
                     self._auto_mode = "idle"
+                    self._active_action = "idle"
                     force_brake = not self._manual_enabled
+                    self._set_failure_locked("LOOP_RESTART_FAILED", "nav_command_server")
                     NavCommandServerNode._set_nav_result_locked(
                         self,
                         int(GoalStatus.STATUS_ABORTED),
@@ -931,24 +1346,53 @@ class NavCommandServerNode(Node):
                         increment_event=True,
                     )
             if not ok:
-                self.get_logger().warning(f"Loop restart failed: {err}")
+                self._publish_event(
+                    DiagnosticStatus.WARN,
+                    "nav_command_server",
+                    "LOOP_RESTART_FAILED",
+                    "Loop restart failed",
+                    details={"error": err},
+                )
         else:
             with self._lock:
+                if status_code == int(GoalStatus.STATUS_SUCCEEDED):
+                    self._set_failure_locked("", "")
+                elif status_code == int(GoalStatus.STATUS_ABORTED):
+                    self._set_failure_locked("GOAL_RESULT_ABORTED", action_name.lower())
+                elif status_code == int(GoalStatus.STATUS_CANCELED):
+                    self._set_failure_locked("", "")
                 NavCommandServerNode._set_nav_result_locked(
                     self,
                     status_code,
                     result_text,
                     increment_event=True,
                 )
+            if status_code == int(GoalStatus.STATUS_SUCCEEDED):
+                event_code = "GOAL_RESULT_SUCCEEDED"
+                severity = DiagnosticStatus.OK
+            elif status_code == int(GoalStatus.STATUS_CANCELED):
+                event_code = "GOAL_CANCELLED"
+                severity = DiagnosticStatus.WARN
+            else:
+                event_code = "GOAL_RESULT_ABORTED"
+                severity = DiagnosticStatus.ERROR
+            self._publish_event(
+                severity,
+                action_name.lower(),
+                event_code,
+                result_text,
+                details={"missed_waypoints": missed_waypoints},
+            )
 
         if force_brake:
             self._publish_brake_sequence(brake_pct=100)
-
-        self.get_logger().info(
-            f"{action_name} result received "
-            f"(status={status}, missed_waypoints={missed_waypoints}, "
-            f"loop_restart={should_restart})"
-        )
+            self._publish_event(
+                DiagnosticStatus.WARN,
+                "nav_command_server",
+                "BRAKE_APPLIED",
+                "Brake sequence applied after navigation result",
+                details={"action_name": action_name, "status": status_code},
+            )
         self._publish_telemetry(force=True)
 
     def cancel_current_goal(self, clear_loop_config: bool = True) -> Tuple[bool, str]:
@@ -973,6 +1417,13 @@ class NavCommandServerNode(Node):
             cancel_ok, cancel_msg = self.cancel_current_goal()
 
         self._publish_brake_sequence(brake_pct=100)
+        self._publish_event(
+            DiagnosticStatus.WARN,
+            "nav_command_server",
+            "BRAKE_APPLIED",
+            "Brake service applied stop sequence",
+            details={"had_goal": has_goal},
+        )
 
         self._publish_telemetry(force=True)
         if cancel_ok:
@@ -1001,6 +1452,13 @@ class NavCommandServerNode(Node):
                 self._cancel_goal_for_manual_takeover_async()
 
             self._publish_manual_stop()
+            self._publish_event(
+                DiagnosticStatus.WARN,
+                "nav_command_server",
+                "MANUAL_TAKEOVER",
+                "Manual mode enabled",
+                details={"had_goal": has_goal},
+            )
             self._publish_telemetry(force=True)
             return True, "manual control enabled", True
 
@@ -1009,6 +1467,7 @@ class NavCommandServerNode(Node):
             self._last_manual_cmd = CmdVelFinal()
             self._last_manual_cmd_time = None
             self._manual_watchdog_stop_sent = False
+            self._set_failure_locked("", "")
         self._publish_manual_stop()
         self._publish_telemetry(force=True)
         return True, "manual control disabled", False
@@ -1051,6 +1510,13 @@ class NavCommandServerNode(Node):
             with self._lock:
                 self._last_manual_cmd = CmdVelFinal()
                 self._manual_watchdog_stop_sent = True
+                self._set_failure_locked("MANUAL_WATCHDOG_STOP", "nav_command_server")
+            self._publish_event(
+                DiagnosticStatus.WARN,
+                "nav_command_server",
+                "MANUAL_WATCHDOG_STOP",
+                "Manual watchdog forced stop",
+            )
             self._publish_telemetry(force=True)
 
     def _parse_set_goal_request(

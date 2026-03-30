@@ -3,16 +3,16 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
-from launch.conditions import IfCondition, UnlessCondition
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
     gps_wpf_dir = get_package_share_directory("navegacion_gps")
-    default_rviz = os.path.join(gps_wpf_dir, "config", "rviz_local_v2.rviz")
+    map_tools_dir = get_package_share_directory("map_tools")
     keepout_mask_yaml = os.path.join(gps_wpf_dir, "config", "keepout_mask.yaml")
 
     use_sim_time = LaunchConfiguration("use_sim_time")
@@ -20,15 +20,13 @@ def generate_launch_description():
     invert_measured_steer_sign = LaunchConfiguration("invert_measured_steer_sign")
     nav_start_delay_s = LaunchConfiguration("nav_start_delay_s")
     use_keepout = LaunchConfiguration("use_keepout")
-    use_rviz = LaunchConfiguration("use_rviz")
-    rviz_config = LaunchConfiguration("rviz_config")
     vx_deadband_mps = LaunchConfiguration("vx_deadband_mps")
     vx_min_effective_mps = LaunchConfiguration("vx_min_effective_mps")
     invert_steer_from_cmd_vel = LaunchConfiguration("invert_steer_from_cmd_vel")
-    use_cmd_vel_ackermann_bridge = LaunchConfiguration("use_cmd_vel_ackermann_bridge")
     nav2_params_file = LaunchConfiguration("nav2_params_file")
     collision_monitor_params_file = LaunchConfiguration("collision_monitor_params_file")
     keepout_mask_yaml_arg = LaunchConfiguration("keepout_mask_yaml")
+    global_localization_params_file = LaunchConfiguration("global_localization_params_file")
     custom_urdf = LaunchConfiguration("custom_urdf")
     world = LaunchConfiguration("world")
     world_name = LaunchConfiguration("world_name")
@@ -38,18 +36,23 @@ def generate_launch_description():
     twist_covariance_vx = LaunchConfiguration("twist_covariance_vx")
     twist_covariance_vy = LaunchConfiguration("twist_covariance_vy")
     twist_covariance_yaw_rate = LaunchConfiguration("twist_covariance_yaw_rate")
-    ekf_local = LaunchConfiguration("ekf_local")
-    ekf_global = LaunchConfiguration("ekf_global")
-    ukf = LaunchConfiguration("ukf")
+    datum_lat = LaunchConfiguration("datum_lat")
+    datum_lon = LaunchConfiguration("datum_lon")
+    datum_yaw_deg = LaunchConfiguration("datum_yaw_deg")
     datum_setter = LaunchConfiguration("datum_setter")
-    gps_profile = LaunchConfiguration("gps_profile")
+    enable_map_gps_absolute_measurement = LaunchConfiguration(
+        "enable_map_gps_absolute_measurement"
+    )
+    map_gps_absolute_topic = LaunchConfiguration("map_gps_absolute_topic")
+    map_gps_pose_covariance_xy = LaunchConfiguration("map_gps_pose_covariance_xy")
+    map_gps_fromll_service = LaunchConfiguration("map_gps_fromll_service")
+    map_gps_fromll_service_fallback = LaunchConfiguration("map_gps_fromll_service_fallback")
+    map_gps_fromll_wait_timeout_s = LaunchConfiguration("map_gps_fromll_wait_timeout_s")
     enable_gps_course_heading = LaunchConfiguration("enable_gps_course_heading")
     gps_course_heading_min_distance_m = LaunchConfiguration(
         "gps_course_heading_min_distance_m"
     )
-    gps_course_heading_min_speed_mps = LaunchConfiguration(
-        "gps_course_heading_min_speed_mps"
-    )
+    gps_course_heading_min_speed_mps = LaunchConfiguration("gps_course_heading_min_speed_mps")
     gps_course_heading_max_abs_steer_deg = LaunchConfiguration(
         "gps_course_heading_max_abs_steer_deg"
     )
@@ -60,33 +63,10 @@ def generate_launch_description():
     gps_course_heading_yaw_variance_rad2 = LaunchConfiguration(
         "gps_course_heading_yaw_variance_rad2"
     )
-    effective_gps_profile = PythonExpression(
-        [
-            "'f9p_rtk' if ('",
-            gps_profile,
-            "' == '' and '",
-            ekf_global,
-            "'.lower() == 'true' and '",
-            enable_gps_course_heading,
-            "'.lower() == 'true') else ('m8n' if '",
-            gps_profile,
-            "' == '' else '",
-            gps_profile,
-            "')",
-        ]
-    )
-    gps_course_heading_condition = PythonExpression(
-        [
-            "'",
-            ekf_global,
-            "'.lower() == 'true' and '",
-            enable_gps_course_heading,
-            "'.lower() == 'true'",
-        ]
-    )
-    gps_course_heading_odom_topic = PythonExpression(
-        ["'/odometry/local' if '", ekf_local, "'.lower() == 'true' else '/wheel/odometry'"]
-    )
+    gps_profile = LaunchConfiguration("gps_profile")
+    launch_web_app = LaunchConfiguration("launch_web_app")
+    ws_host = LaunchConfiguration("ws_host")
+    web_app_port = LaunchConfiguration("web_app_port")
 
     return LaunchDescription(
         [
@@ -95,21 +75,24 @@ def generate_launch_description():
             DeclareLaunchArgument("invert_measured_steer_sign", default_value="True"),
             DeclareLaunchArgument("nav_start_delay_s", default_value="4.0"),
             DeclareLaunchArgument("use_keepout", default_value="True"),
-            DeclareLaunchArgument("use_rviz", default_value="True"),
-            DeclareLaunchArgument("rviz_config", default_value=default_rviz),
             DeclareLaunchArgument("vx_deadband_mps", default_value="0.01"),
             DeclareLaunchArgument("vx_min_effective_mps", default_value="0.5"),
             DeclareLaunchArgument("invert_steer_from_cmd_vel", default_value="True"),
-            DeclareLaunchArgument("use_cmd_vel_ackermann_bridge", default_value="False"),
             DeclareLaunchArgument(
                 "nav2_params_file",
-                default_value=os.path.join(gps_wpf_dir, "config", "nav2_local_v2_params.yaml"),
+                default_value=os.path.join(gps_wpf_dir, "config", "nav2_global_v2_params.yaml"),
             ),
             DeclareLaunchArgument(
                 "collision_monitor_params_file",
                 default_value=os.path.join(gps_wpf_dir, "config", "collision_monitor_v2.yaml"),
             ),
             DeclareLaunchArgument("keepout_mask_yaml", default_value=keepout_mask_yaml),
+            DeclareLaunchArgument(
+                "global_localization_params_file",
+                default_value=os.path.join(
+                    gps_wpf_dir, "config", "dual_ekf_navsat_params.yaml"
+                ),
+            ),
             DeclareLaunchArgument(
                 "custom_urdf",
                 default_value=os.path.join(gps_wpf_dir, "models", "cuatri_real.urdf"),
@@ -119,47 +102,60 @@ def generate_launch_description():
                 default_value=os.path.join(gps_wpf_dir, "worlds", "vacio.world"),
             ),
             DeclareLaunchArgument("world_name", default_value="vacio"),
-            DeclareLaunchArgument(
-                "model_name", default_value="quad_ackermann_viewer_safe"
-            ),
-            DeclareLaunchArgument("pose_covariance_xy", default_value="0.01"),
-            DeclareLaunchArgument("pose_covariance_yaw", default_value="0.05"),
-            DeclareLaunchArgument("twist_covariance_vx", default_value="0.02"),
-            DeclareLaunchArgument("twist_covariance_vy", default_value="0.02"),
-            DeclareLaunchArgument("twist_covariance_yaw_rate", default_value="0.05"),
-            DeclareLaunchArgument("ekf_local", default_value="True"),
-            DeclareLaunchArgument("ekf_global", default_value="False"),
-            DeclareLaunchArgument("ukf", default_value="False"),
+            DeclareLaunchArgument("model_name", default_value="quad_ackermann_viewer_safe"),
+            DeclareLaunchArgument("pose_covariance_xy", default_value="0.05"),
+            DeclareLaunchArgument("pose_covariance_yaw", default_value="0.1"),
+            DeclareLaunchArgument("twist_covariance_vx", default_value="0.05"),
+            DeclareLaunchArgument("twist_covariance_vy", default_value="0.01"),
+            DeclareLaunchArgument("twist_covariance_yaw_rate", default_value="0.1"),
+            DeclareLaunchArgument("datum_lat", default_value="-31.4858037"),
+            DeclareLaunchArgument("datum_lon", default_value="-64.2410570"),
+            # Convencion fija operativa para `global v2`: por default el robot
+            # arranca mirando al Este (`datum_yaw_deg = 0.0` en ROS ENU).
+            DeclareLaunchArgument("datum_yaw_deg", default_value="0.0"),
             DeclareLaunchArgument("datum_setter", default_value="false"),
-            DeclareLaunchArgument("gps_profile", default_value=""),
+            DeclareLaunchArgument("enable_map_gps_absolute_measurement", default_value="true"),
+            DeclareLaunchArgument("map_gps_absolute_topic", default_value="/gps/odometry_map"),
+            DeclareLaunchArgument("map_gps_pose_covariance_xy", default_value="0.05"),
+            DeclareLaunchArgument("map_gps_fromll_service", default_value="/fromLL"),
+            DeclareLaunchArgument(
+                "map_gps_fromll_service_fallback",
+                default_value="/navsat_transform/fromLL",
+            ),
+            DeclareLaunchArgument("map_gps_fromll_wait_timeout_s", default_value="0.2"),
             DeclareLaunchArgument("enable_gps_course_heading", default_value="true"),
+            # Con GPS RTK simulado podemos cerrar el heading por avance antes y
+            # con más confianza que con el perfil ideal/m8n anterior.
             DeclareLaunchArgument("gps_course_heading_min_distance_m", default_value="1.0"),
             DeclareLaunchArgument("gps_course_heading_min_speed_mps", default_value="0.4"),
+            # En curvas el heading inferido por desplazamiento GPS deja de ser
+            # una buena referencia del cuerpo Ackermann. Endurecemos el gating
+            # en simulacion para aceptarlo solo en tramos claramente rectos.
             DeclareLaunchArgument("gps_course_heading_max_abs_steer_deg", default_value="3.0"),
-            DeclareLaunchArgument(
-                "gps_course_heading_max_abs_yaw_rate_rps",
-                default_value="0.06",
-            ),
+            DeclareLaunchArgument("gps_course_heading_max_abs_yaw_rate_rps", default_value="0.06"),
             DeclareLaunchArgument("gps_course_heading_publish_hz", default_value="10.0"),
-            DeclareLaunchArgument(
-                "gps_course_heading_yaw_variance_rad2",
-                default_value="0.05",
-            ),
+            DeclareLaunchArgument("gps_course_heading_yaw_variance_rad2", default_value="0.05"),
+            # Sim global defaults to the ideal profile so LL/map debugging is not
+            # polluted by GNSS noise unless the operator opts into RTK/M8N.
+            DeclareLaunchArgument("gps_profile", default_value="ideal"),
+            DeclareLaunchArgument("launch_web_app", default_value="True"),
+            DeclareLaunchArgument("ws_host", default_value="0.0.0.0"),
+            DeclareLaunchArgument("web_app_port", default_value="8766"),
             Node(
                 package="navegacion_gps",
                 executable="sim_sensor_normalizer_v2",
                 name="sim_sensor_normalizer_v2",
                 output="screen",
                 parameters=[
-                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
-                    {"gps_profile": ParameterValue(effective_gps_profile, value_type=str)},
-                    {"gps_rtk_status_topic": "/gps/rtk_status"},
-                    {"gps_hold_when_stationary": True},
-                    {"imu_auto_calibrate_yaw_from_odom": True},
-                    {"imu_yaw_offset_rad": 0.0},
-                    {"imu_yaw_calib_odom_topic": "/odom_raw"},
-                    {"imu_yaw_calib_speed_threshold_mps": 0.05},
-                    {"imu_yaw_calib_timeout_s": 3.0},
+                    {
+                        "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
+                        "gps_profile": gps_profile,
+                        "gps_rtk_status_topic": "/gps/rtk_status",
+                        # En simulacion global mantenemos el fix RTK congelado
+                        # cuando el vehiculo esta quieto para que el EKF global
+                        # no amplifique el jitter estacionario del GPS.
+                        "gps_hold_when_stationary": True,
+                    }
                 ],
             ),
             IncludeLaunchDescription(
@@ -179,7 +175,6 @@ def generate_launch_description():
                 executable="controller_server_node",
                 name="vehicle_controller_server",
                 output="screen",
-                condition=UnlessCondition(use_cmd_vel_ackermann_bridge),
                 parameters=[
                     {
                         "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
@@ -212,60 +207,6 @@ def generate_launch_description():
             ),
             Node(
                 package="navegacion_gps",
-                executable="cmd_vel_ackermann_bridge_v2",
-                name="cmd_vel_ackermann_bridge_v2",
-                output="screen",
-                condition=IfCondition(use_cmd_vel_ackermann_bridge),
-                parameters=[
-                    {
-                        "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
-                        "input_topic": "/cmd_vel_safe",
-                        "output_topic": "/cmd_vel_gazebo",
-                        "max_speed_mps": 4.0,
-                        "max_reverse_mps": 1.30,
-                        "vx_deadband_mps": ParameterValue(
-                            vx_deadband_mps, value_type=float
-                        ),
-                        "vx_min_effective_mps": ParameterValue(
-                            vx_min_effective_mps, value_type=float
-                        ),
-                        "max_abs_angular_z": 0.4,
-                        "invert_steer_from_cmd_vel": ParameterValue(
-                            invert_steer_from_cmd_vel, value_type=bool
-                        ),
-                        "auto_drive_enabled": True,
-                        "reverse_brake_pct": 20,
-                        "sim_max_forward_mps": 4.0,
-                        "sim_max_reverse_mps": 1.30,
-                        "sim_max_steering_angle_rad": 0.5235987756,
-                        "input_timeout_s": 0.5,
-                        "watchdog_hz": 20.0,
-                        "stop_hold_topic": "/local_nav_v2/stop_hold",
-                        "stop_hold_duration_s": 1.5,
-                    }
-                ],
-            ),
-            Node(
-                package="navegacion_gps",
-                executable="sim_drive_telemetry",
-                name="sim_drive_telemetry",
-                output="screen",
-                condition=IfCondition(use_cmd_vel_ackermann_bridge),
-                parameters=[
-                    {
-                        "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
-                        "odom_topic": "/odom_raw",
-                        "joint_states_topic": "/joint_states",
-                        "drive_telemetry_topic": "/controller/drive_telemetry",
-                        "front_left_steer_joint": "front_left_steer_joint",
-                        "front_right_steer_joint": "front_right_steer_joint",
-                        "wheelbase_m": ParameterValue(wheelbase_m, value_type=float),
-                        "steer_from_odom_min_speed_mps": 0.05,
-                    }
-                ],
-            ),
-            Node(
-                package="navegacion_gps",
                 executable="nav_command_server",
                 name="nav_command_server",
                 output="screen",
@@ -275,8 +216,16 @@ def generate_launch_description():
                         "fromll_service": "/fromLL",
                         "fromll_service_fallback": "/navsat_transform/fromLL",
                         "fromll_wait_timeout_s": 2.0,
-                        "fromll_frame": "odom",
-                        "map_frame": "odom",
+                        "approx_fromll_fallback_enabled": True,
+                        "approx_fromll_datum_lat": ParameterValue(datum_lat, value_type=float),
+                        "approx_fromll_datum_lon": ParameterValue(datum_lon, value_type=float),
+                        "approx_fromll_datum_yaw_deg": ParameterValue(
+                            datum_yaw_deg, value_type=float
+                        ),
+                        "approx_fromll_zero_threshold_m": 1.0e-3,
+                        "approx_fromll_min_distance_for_fallback_m": 0.5,
+                        "fromll_frame": "map",
+                        "map_frame": "map",
                         "gps_topic": "/gps/fix",
                         "cmd_vel_safe_topic": "/cmd_vel_safe",
                         "cmd_vel_final_topic": "/cmd_vel_final",
@@ -304,14 +253,12 @@ def generate_launch_description():
                 executable="gps_course_heading",
                 name="gps_course_heading",
                 output="screen",
-                condition=IfCondition(gps_course_heading_condition),
+                condition=IfCondition(enable_gps_course_heading),
                 parameters=[
                     {
                         "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
                         "gps_topic": "/gps/fix",
-                        "odom_topic": ParameterValue(
-                            gps_course_heading_odom_topic, value_type=str
-                        ),
+                        "odom_topic": "/odometry/local",
                         "drive_telemetry_topic": "/controller/drive_telemetry",
                         "output_topic": "/gps/course_heading",
                         "debug_topic": "/gps/course_heading/debug",
@@ -339,10 +286,13 @@ def generate_launch_description():
             ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
-                    os.path.join(gps_wpf_dir, "launch", "localization_v2.launch.py")
+                    os.path.join(gps_wpf_dir, "launch", "localization_global_v2.launch.py")
                 ),
                 launch_arguments={
                     "use_sim_time": use_sim_time,
+                    "drive_telemetry_topic": "/controller/drive_telemetry",
+                    "imu_topic": "/imu/data",
+                    "gps_topic": "/gps/fix",
                     "wheelbase_m": wheelbase_m,
                     "invert_measured_steer_sign": invert_measured_steer_sign,
                     "pose_covariance_xy": pose_covariance_xy,
@@ -350,58 +300,31 @@ def generate_launch_description():
                     "twist_covariance_vx": twist_covariance_vx,
                     "twist_covariance_vy": twist_covariance_vy,
                     "twist_covariance_yaw_rate": twist_covariance_yaw_rate,
-                    "ekf_local": ekf_local,
-                    "ekf_global": ekf_global,
-                    "ukf": ukf,
+                    "global_localization_params_file": global_localization_params_file,
+                    "enable_map_gps_absolute_measurement": enable_map_gps_absolute_measurement,
+                    "map_gps_absolute_topic": map_gps_absolute_topic,
+                    "map_gps_pose_covariance_xy": map_gps_pose_covariance_xy,
+                    "map_gps_fromll_service": map_gps_fromll_service,
+                    "map_gps_fromll_service_fallback": map_gps_fromll_service_fallback,
+                    "map_gps_fromll_wait_timeout_s": map_gps_fromll_wait_timeout_s,
+                    # Simulacion global: con `gps_course_heading` activo dejamos
+                    # `navsat_transform` desacoplado del yaw local para no mezclar
+                    # dos fuentes distintas de heading global.
                     "navsat_use_odometry_yaw": "false",
                     "enable_gps_course_heading": enable_gps_course_heading,
                     "gps_course_heading_topic": "/gps/course_heading",
+                    "datum_lat": datum_lat,
+                    "datum_lon": datum_lon,
+                    "datum_yaw_deg": datum_yaw_deg,
+                    "datum_setter": datum_setter,
                 }.items(),
-            ),
-            Node(
-                package="navegacion_gps",
-                executable="nav_observability",
-                name="nav_observability",
-                output="screen",
-                parameters=[
-                    {
-                        "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
-                        "publish_hz": 2.0,
-                    }
-                ],
-            ),
-            Node(
-                package="navegacion_gps",
-                executable="datum_setter",
-                name="datum_setter",
-                output="screen",
-                condition=IfCondition(
-                    PythonExpression(["'", datum_setter, "'.lower() == 'true'"])
-                ),
-                parameters=[
-                    {
-                        "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
-                        "gps_topic": "/gps/fix",
-                        "imu_topic": "/imu/data",
-                        "rtk_status_topic": "/gps/rtk_status",
-                        "set_datum_service": "/datum_setter/set_datum",
-                        "get_datum_service": "/datum_setter/get_datum",
-                        "datum_service": "/datum",
-                        "datum_service_fallback": "/navsat_transform/datum",
-                        "imu_yaw_max_age_s": 1.0,
-                        "datum_wait_timeout_s": 2.0,
-                        "datum_call_timeout_s": 2.5,
-                        "datum_call_retries": 3,
-                        "datum_retry_delay_s": 0.15,
-                    }
-                ],
             ),
             TimerAction(
                 period=nav_start_delay_s,
                 actions=[
                     IncludeLaunchDescription(
                         PythonLaunchDescriptionSource(
-                            os.path.join(gps_wpf_dir, "launch", "nav_local_v2.launch.py")
+                            os.path.join(gps_wpf_dir, "launch", "nav_global_v2.launch.py")
                         ),
                         launch_arguments={
                             "use_sim_time": use_sim_time,
@@ -409,19 +332,23 @@ def generate_launch_description():
                             "nav2_params_file": nav2_params_file,
                             "collision_monitor_params_file": collision_monitor_params_file,
                             "keepout_mask_yaml": keepout_mask_yaml_arg,
-                            "keepout_mask_frame": "map",
                         }.items(),
                     )
                 ],
             ),
-            Node(
-                package="rviz2",
-                executable="rviz2",
-                name="rviz2",
-                output="screen",
-                arguments=["-d", rviz_config],
-                parameters=[{"use_sim_time": ParameterValue(use_sim_time, value_type=bool)}],
-                condition=IfCondition(use_rviz),
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    os.path.join(map_tools_dir, "launch", "no_go_editor.launch.py")
+                ),
+                launch_arguments={
+                    "ws_host": ws_host,
+                    "ws_port": web_app_port,
+                    "gps_topic": "/gps/fix",
+                    "odom_topic": "/odometry/global",
+                    "map_frame": "map",
+                    "launch_nav_command_server": "false",
+                }.items(),
+                condition=IfCondition(launch_web_app),
             ),
         ]
     )

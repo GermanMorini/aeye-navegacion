@@ -42,9 +42,42 @@ def generate_launch_description():
     ekf_global = LaunchConfiguration("ekf_global")
     ukf = LaunchConfiguration("ukf")
     datum_setter = LaunchConfiguration("datum_setter")
+    gps_profile = LaunchConfiguration("gps_profile")
+    enable_gps_course_heading = LaunchConfiguration("enable_gps_course_heading")
+    gps_course_heading_min_distance_m = LaunchConfiguration(
+        "gps_course_heading_min_distance_m"
+    )
+    gps_course_heading_min_speed_mps = LaunchConfiguration(
+        "gps_course_heading_min_speed_mps"
+    )
+    gps_course_heading_max_abs_steer_deg = LaunchConfiguration(
+        "gps_course_heading_max_abs_steer_deg"
+    )
+    gps_course_heading_max_abs_yaw_rate_rps = LaunchConfiguration(
+        "gps_course_heading_max_abs_yaw_rate_rps"
+    )
+    gps_course_heading_publish_hz = LaunchConfiguration("gps_course_heading_publish_hz")
+    gps_course_heading_yaw_variance_rad2 = LaunchConfiguration(
+        "gps_course_heading_yaw_variance_rad2"
+    )
     launch_web_zone_server = LaunchConfiguration("launch_web_zone_server")
     web_ws_host = LaunchConfiguration("web_ws_host")
     web_ws_port = LaunchConfiguration("web_ws_port")
+    effective_gps_profile = PythonExpression(
+        [
+            "'f9p_rtk' if ('",
+            gps_profile,
+            "' == '' and '",
+            ekf_global,
+            "'.lower() == 'true' and '",
+            enable_gps_course_heading,
+            "'.lower() == 'true') else ('m8n' if '",
+            gps_profile,
+            "' == '' else '",
+            gps_profile,
+            "')",
+        ]
+    )
     selected_rviz_config = PythonExpression(
         [
             "'",
@@ -108,6 +141,20 @@ def generate_launch_description():
             DeclareLaunchArgument("ekf_global", default_value="False"),
             DeclareLaunchArgument("ukf", default_value="False"),
             DeclareLaunchArgument("datum_setter", default_value="false"),
+            DeclareLaunchArgument("gps_profile", default_value=""),
+            DeclareLaunchArgument("enable_gps_course_heading", default_value="true"),
+            DeclareLaunchArgument("gps_course_heading_min_distance_m", default_value="1.0"),
+            DeclareLaunchArgument("gps_course_heading_min_speed_mps", default_value="0.4"),
+            DeclareLaunchArgument("gps_course_heading_max_abs_steer_deg", default_value="3.0"),
+            DeclareLaunchArgument(
+                "gps_course_heading_max_abs_yaw_rate_rps",
+                default_value="0.06",
+            ),
+            DeclareLaunchArgument("gps_course_heading_publish_hz", default_value="10.0"),
+            DeclareLaunchArgument(
+                "gps_course_heading_yaw_variance_rad2",
+                default_value="0.05",
+            ),
             DeclareLaunchArgument("launch_web_zone_server", default_value="True"),
             DeclareLaunchArgument("web_ws_host", default_value="0.0.0.0"),
             DeclareLaunchArgument("web_ws_port", default_value="8766"),
@@ -143,6 +190,14 @@ def generate_launch_description():
                     "ekf_global": ekf_global,
                     "ukf": ukf,
                     "datum_setter": datum_setter,
+                    "gps_profile": effective_gps_profile,
+                    "enable_gps_course_heading": enable_gps_course_heading,
+                    "gps_course_heading_min_distance_m": gps_course_heading_min_distance_m,
+                    "gps_course_heading_min_speed_mps": gps_course_heading_min_speed_mps,
+                    "gps_course_heading_max_abs_steer_deg": gps_course_heading_max_abs_steer_deg,
+                    "gps_course_heading_max_abs_yaw_rate_rps": gps_course_heading_max_abs_yaw_rate_rps,
+                    "gps_course_heading_publish_hz": gps_course_heading_publish_hz,
+                    "gps_course_heading_yaw_variance_rad2": gps_course_heading_yaw_variance_rad2,
                 }.items(),
             ),
             IncludeLaunchDescription(

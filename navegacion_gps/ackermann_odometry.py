@@ -169,7 +169,7 @@ class AckermannOdometryNode(Node):
         self.declare_parameter("twist_covariance_vy", 0.02)
         self.declare_parameter("twist_covariance_yaw_rate", 0.05)
         self.declare_parameter("publish_odom_tf", False)
-        self.declare_parameter("periodic_log_enabled", True)
+        self.declare_parameter("periodic_log_enabled", False)
         self.declare_parameter("periodic_log_period_s", 0.5)
 
         telemetry_topic = str(self.get_parameter("telemetry_topic").value)

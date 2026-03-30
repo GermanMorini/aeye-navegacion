@@ -419,6 +419,7 @@ def generate_launch_description():
                 "fromll_service": "/fromLL",
                 "fromll_service_fallback": "/navsat_transform/fromLL",
                 "fromll_wait_timeout_s": 2.0,
+                "fromll_frame": resolved_map_frame,
                 "map_frame": resolved_map_frame,
                 "gps_topic": gps_topic,
                 "cmd_vel_safe_topic": "/cmd_vel_safe",
@@ -431,6 +432,7 @@ def generate_launch_description():
                 "manual_watchdog_hz": 10.0,
                 "nav_telemetry_hz": 5.0,
                 "telemetry_topic": "/nav_command_server/telemetry",
+                "event_topic": "/nav_command_server/events",
                 "set_goal_service": "/nav_command_server/set_goal_ll",
                 "cancel_goal_service": "/nav_command_server/cancel_goal",
                 "brake_service": "/nav_command_server/brake",
@@ -460,6 +462,18 @@ def generate_launch_description():
                 "snapshot_size_px": 512,
                 "snapshot_global_inset_px": 160,
                 "snapshot_timeout_ms": 500,
+            }
+        ],
+    )
+    nav_observability_cmd = Node(
+        package="navegacion_gps",
+        executable="nav_observability",
+        name="nav_observability",
+        output="screen",
+        parameters=[
+            {
+                "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
+                "publish_hz": 2.0,
             }
         ],
     )
@@ -612,6 +626,7 @@ def generate_launch_description():
     ld.add_action(zones_manager_cmd)
     ld.add_action(nav_command_server_cmd)
     ld.add_action(nav_snapshot_server_cmd)
+    ld.add_action(nav_observability_cmd)
     ld.add_action(no_go_editor_cmd)
     ld.add_action(mapviz_cmd)
     ld.add_action(gazebo_utils_cmd)
