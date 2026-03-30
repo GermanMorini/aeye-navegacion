@@ -156,6 +156,8 @@ def test_real_launch_exposes_dual_ekf_toggles_and_no_controller_server() -> None
     assert "\"'.lower() == 'true' else 'ekf_node'\"" in launch_contents
     assert "condition=IfCondition(use_navsat)" not in launch_contents
     assert 'controller_server' not in launch_contents
+    assert '"cmd_vel_final_topic": "/cmd_vel_final"' in launch_contents
+    assert '"forward_cmd_vel_safe_without_goal": True' in launch_contents
 
 
 def test_real_launch_auto_resolves_map_frame_from_ekf_global_toggle() -> None:

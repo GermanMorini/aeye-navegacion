@@ -98,6 +98,21 @@ def test_on_cmd_vel_safe_publishes_auto_when_navigating() -> None:
     assert node.published == [(0.8, -0.2, 0)]
 
 
+def test_on_cmd_vel_safe_publishes_auto_when_forward_without_goal_enabled() -> None:
+    node = _FakeArbNode()
+    node._manual_enabled = False
+    node._is_navigating = False
+    node._collision_stop_active = False
+    node.forward_cmd_vel_safe_without_goal = True
+
+    msg = Twist()
+    msg.linear.x = 0.5
+    msg.angular.z = 0.1
+    NavCommandServerNode._on_cmd_vel_safe(node, msg)
+
+    assert node.published == [(0.5, 0.1, 0)]
+
+
 def test_on_collision_monitor_state_stop_ignored_in_manual() -> None:
     node = _FakeArbNode()
     node._manual_enabled = True
