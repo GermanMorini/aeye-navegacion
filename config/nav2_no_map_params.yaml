@@ -7,7 +7,7 @@ bt_navigator:
     global_frame: map
     local_frame: odom
     robot_base_frame: base_footprint
-    odom_topic: /odometry/local
+    odom_topic: /odometry/filtered
     navigators: ["navigate_to_pose", "navigate_through_poses"]
     navigate_to_pose:
       plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
@@ -116,7 +116,7 @@ controller_server:
     use_sim_time: true
     controller_frequency: 30.0
     transform_tolerance: 0.3 # segundos
-    odom_topic: /odometry/local
+    odom_topic: /odometry/filtered
     robot_base_frame: base_footprint
     progress_checker_plugins: ["progress_checker"]
     goal_checker_plugins: ["general_goal_checker"]
@@ -177,7 +177,7 @@ velocity_smoother:
     use_sim_time: true
     smoothing_frequency: 15.0
     feedback: "CLOSED_LOOP"
-    odom_topic: /odometry/local
+    odom_topic: /odometry/filtered
     robot_base_frame: base_footprint
 
     # max_velocity: [4.16, 0.0, 2.5]
