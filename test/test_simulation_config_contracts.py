@@ -144,8 +144,23 @@ def test_real_launch_exposes_dual_ekf_toggles_and_no_controller_server() -> None
 
     assert 'DeclareLaunchArgument(\n        "ekf_local",' in launch_contents
     assert 'default_value="true"' in launch_contents
-    assert 'DeclareLaunchArgument(\n        "ekf_global",' in launch_contents
-    assert 'DeclareLaunchArgument(\n        "ukf",' in launch_contents
+    assert 'DeclareLaunchArgument(\n        "ekf_global",\n        default_value="true"' in launch_contents
+    assert 'DeclareLaunchArgument(\n        "ukf",\n        default_value="True"' in launch_contents
+    assert 'DeclareLaunchArgument(\n        "datum_setter",\n        default_value="true"' in launch_contents
+    assert (
+        'DeclareLaunchArgument(\n        "enable_gps_course_heading",\n        default_value="true"'
+        in launch_contents
+    )
+    assert (
+        'DeclareLaunchArgument(\n        "gps_course_heading_enable_consistency_filters",\n'
+        '        default_value="true"'
+        in launch_contents
+    )
+    assert (
+        'DeclareLaunchArgument(\n        "gps_course_heading_enable_offset_compensation",\n'
+        '        default_value="true"'
+        in launch_contents
+    )
     assert "condition=IfCondition(ekf_local)" in launch_contents
     assert "condition=IfCondition(ekf_global)" in launch_contents
     assert 'name="ekf_filter_node_odom"' in launch_contents
@@ -158,6 +173,46 @@ def test_real_launch_exposes_dual_ekf_toggles_and_no_controller_server() -> None
     assert 'controller_server' not in launch_contents
     assert '"cmd_vel_final_topic": "/cmd_vel_final"' in launch_contents
     assert '"forward_cmd_vel_safe_without_goal": True' in launch_contents
+
+
+def test_real_launch_removes_mapviz_support() -> None:
+    launch_path = PACKAGE_ROOT / "launch" / "real.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert "use_mapviz = LaunchConfiguration(" not in launch_contents
+    assert 'DeclareLaunchArgument(\n        "use_mapviz",' not in launch_contents
+    assert "mapviz_cmd = Node(" not in launch_contents
+    assert "package=\"mapviz\"" not in launch_contents
+    assert "ld.add_action(mapviz_cmd)" not in launch_contents
+
+
+def test_real_launch_exposes_rtk_toggles_for_telemetry_backends() -> None:
+    launch_path = PACKAGE_ROOT / "launch" / "real.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert 'DeclareLaunchArgument(\n        "enable_rtk",\n        default_value="false"' in launch_contents
+    assert (
+        'DeclareLaunchArgument(\n        "enable_gps_rtk",\n        default_value="true"'
+        in launch_contents
+    )
+    assert (
+        'DeclareLaunchArgument(\n        "enable_rtcm_tcp",\n        default_value="true"'
+        in launch_contents
+    )
+    assert (
+        'DeclareLaunchArgument(\n        "enable_rtk_source_manager",\n        default_value="false"'
+        in launch_contents
+    )
+    assert 'DeclareLaunchArgument(\n        "rtcm_tcp_host",\n        default_value="127.0.0.1"' in launch_contents
+    assert 'DeclareLaunchArgument(\n        "rtcm_tcp_port",\n        default_value="2102"' in launch_contents
+    assert 'DeclareLaunchArgument(\n        "rtcm_topic",\n        default_value="/rtcm"' in launch_contents
+    assert '"enable_rtk": enable_rtk' in launch_contents
+    assert '"enable_rtcm_tcp": enable_rtcm_tcp' in launch_contents
+    assert '"enable_rtk_source_manager": enable_rtk_source_manager' in launch_contents
+    assert '"rtcm_tcp_host": rtcm_tcp_host' in launch_contents
+    assert '"rtcm_tcp_port": rtcm_tcp_port' in launch_contents
+    assert '"rtcm_topic": rtcm_topic' in launch_contents
+    assert '"enable_gps_rtk": enable_gps_rtk' in launch_contents
 
 
 def test_real_launch_auto_resolves_map_frame_from_ekf_global_toggle() -> None:
@@ -190,14 +245,35 @@ def test_real_launch_starts_nav2_after_tf_providers_in_global_only_mode() -> Non
     launch_path = PACKAGE_ROOT / "launch" / "real.launch.py"
     launch_contents = launch_path.read_text(encoding="utf-8")
 
-    nav2_index = launch_contents.index("ld.add_action(nav2_only_cmd)")
-    ackermann_index = launch_contents.index("ld.add_action(ackermann_odometry_cmd)")
-    ekf_map_index = launch_contents.index("ld.add_action(ekf_map_cmd)")
-    navsat_index = launch_contents.index("ld.add_action(navsat_transform_cmd)")
+    nav2_index = launch_contents.index("        nav2_only_cmd,")
+    ackermann_index = launch_contents.index("        ackermann_odometry_cmd,")
+    ekf_map_index = launch_contents.index("        ekf_map_cmd,")
+    navsat_index = launch_contents.index("        navsat_transform_cmd,")
 
     assert nav2_index > ackermann_index
     assert nav2_index > ekf_map_index
     assert nav2_index > navsat_index
+
+
+def test_real_launch_groups_sensors_before_delayed_localization() -> None:
+    launch_path = PACKAGE_ROOT / "launch" / "real.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert "delayed_start_cmd = TimerAction(period=5.0, actions=delayed_start_actions)" in launch_contents
+    assert "# Block 3 - Sensors" in launch_contents
+    assert "# Block 4 - Localization" in launch_contents
+    assert "# Block 5 - Navigation" in launch_contents
+    assert "# Block 6 - Navigation Support And Web" in launch_contents
+    assert "# Block 7 - Optional Runtime Utilities" in launch_contents
+
+    gps_course_index = launch_contents.index("ld.add_action(gps_course_heading_cmd)")
+    datum_index = launch_contents.index("ld.add_action(datum_setter_cmd)")
+    lidar_to_scan_index = launch_contents.index("ld.add_action(lidar_to_scan_cmd)")
+    delayed_start_index = launch_contents.index("ld.add_action(delayed_start_cmd)")
+
+    assert gps_course_index < delayed_start_index
+    assert datum_index < delayed_start_index
+    assert lidar_to_scan_index < delayed_start_index
 
 
 def test_dual_ekf_navsat_waits_for_runtime_datum() -> None:
