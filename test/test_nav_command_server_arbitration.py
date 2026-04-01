@@ -13,6 +13,10 @@ class _FakeArbNode:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
+        self._control_locked = False
+        self._control_lock_reason = ""
+        self.control_lock_heartbeat_required = False
+        self._last_control_heartbeat_monotonic = time.monotonic()
         self._manual_enabled = False
         self._is_navigating = False
         self._auto_mode = "idle"
@@ -30,6 +34,9 @@ class _FakeArbNode:
         self.published = []
         self.telemetry_forced = []
         self.cancel_calls = 0
+        self.brake_async_calls = []
+        self.failure_updates = []
+        self.events = []
 
     def _publish_cmd_vel_final(self, msg: CmdVelFinal) -> None:
         self.published.append(
@@ -53,8 +60,17 @@ class _FakeArbNode:
     def _publish_manual_stop(self) -> None:
         self._publish_manual_cmd(0.0, 0.0, 0)
 
+    def _publish_brake_sequence_async(self, brake_pct: int, skip_first: bool = False) -> None:
+        self.brake_async_calls.append((int(brake_pct), bool(skip_first)))
+
     def _publish_telemetry(self, force: bool = False) -> None:
         self.telemetry_forced.append(bool(force))
+
+    def _set_failure_locked(self, code: str = "", component: str = "") -> None:
+        self.failure_updates.append((str(code), str(component)))
+
+    def _publish_event(self, severity, component: str, code: str, message: str, *, details=None):
+        self.events.append((int(severity), str(component), str(code), str(message), details))
 
     def cancel_current_goal(self):
         self.cancel_calls += 1
@@ -62,6 +78,12 @@ class _FakeArbNode:
 
     def _cancel_goal_for_manual_takeover_async(self) -> None:
         self.cancel_current_goal()
+
+    def set_manual_mode(self, enabled: bool):
+        return NavCommandServerNode.set_manual_mode(self, enabled)
+
+    def set_manual_cmd(self, linear_x: float, angular_z: float, brake_pct: int):
+        return NavCommandServerNode.set_manual_cmd(self, linear_x, angular_z, brake_pct)
 
     def get_logger(self):
         class _Logger:
@@ -134,7 +156,8 @@ def test_manual_watchdog_sends_single_stop() -> None:
     NavCommandServerNode._manual_watchdog_tick(node)
     NavCommandServerNode._manual_watchdog_tick(node)
 
-    assert node.published == [(0.0, 0.0, 0)]
+    assert node.published == [(0.0, 0.0, 100)]
+    assert node.brake_async_calls == [(100, True)]
 
 
 def test_set_manual_mode_enables_even_if_cancel_fails() -> None:
@@ -147,3 +170,36 @@ def test_set_manual_mode_enables_even_if_cancel_fails() -> None:
     assert node._manual_enabled is True
     assert node._is_navigating is False
     assert node.cancel_calls == 1
+
+
+def test_set_manual_mode_rejects_enable_when_control_locked() -> None:
+    node = _FakeArbNode()
+    node._control_locked = True
+    node._control_lock_reason = "STARTUP_LOCKED"
+
+    ok, err, enabled_after = NavCommandServerNode.set_manual_mode(node, True)
+
+    assert ok is False
+    assert enabled_after is False
+    assert err == "control locked: STARTUP_LOCKED"
+
+
+def test_on_teleop_cmd_does_not_activate_manual_for_zero_command() -> None:
+    node = _FakeArbNode()
+    msg = CmdVelFinal()
+
+    NavCommandServerNode._on_teleop_cmd(node, msg)
+
+    assert node._manual_enabled is False
+    assert node.published == []
+
+
+def test_on_teleop_cmd_activates_manual_for_nonzero_command() -> None:
+    node = _FakeArbNode()
+    msg = CmdVelFinal()
+    msg.twist.linear.x = 1.2
+
+    NavCommandServerNode._on_teleop_cmd(node, msg)
+
+    assert node._manual_enabled is True
+    assert node.published == [(0.0, 0.0, 0), (1.2, 0.0, 0)]

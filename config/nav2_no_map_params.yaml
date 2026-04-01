@@ -7,7 +7,7 @@ bt_navigator:
     global_frame: map
     local_frame: odom
     robot_base_frame: base_footprint
-    odom_topic: /odometry/filtered
+    odom_topic: /odometry/local
     navigators: ["navigate_to_pose", "navigate_through_poses"]
     navigate_to_pose:
       plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
@@ -116,7 +116,7 @@ controller_server:
     use_sim_time: true
     controller_frequency: 30.0
     transform_tolerance: 0.3 # segundos
-    odom_topic: /odometry/filtered
+    odom_topic: /odometry/local
     robot_base_frame: base_footprint
     progress_checker_plugins: ["progress_checker"]
     goal_checker_plugins: ["general_goal_checker"]
@@ -168,29 +168,6 @@ controller_server:
       cost_scaling_dist: 1.0
       cost_scaling_gain: 1.0
       inflation_cost_scaling_factor: 3.0
-
-# ================================
-# VELOCITY SMOOTHER
-# ================================
-velocity_smoother:
-  ros__parameters:
-    use_sim_time: true
-    smoothing_frequency: 15.0
-    feedback: "CLOSED_LOOP"
-    odom_topic: /odometry/filtered
-    robot_base_frame: base_footprint
-
-    # max_velocity: [4.16, 0.0, 2.5]
-    max_velocity: [1.2, 0.0, 0.6]
-    # Solo permite reversa para recoveries (BackUp), no en seguimiento nominal.
-    min_velocity: [-1.2, 0.0, -0.6]
-
-    max_accel: [0.8, 0.0, 0.8]
-    max_decel: [-1.5, 0.0, -0.8]
-
-    # si la velocidad calculada es menor a esto se envía 0 a los motores
-    deadband_velocity: [0.05, 0.0, 0.05]
-    velocity_timeout: 0.5
 
 # ================================
 # LOCAL COSTMAP (rolling)

@@ -1,3 +1,4 @@
+import copy
 import math
 import threading
 import time
@@ -29,8 +30,10 @@ from interfaces.srv import (
     BrakeNav,
     CancelNavGoal,
     GetNavState,
+    SetControlLock,
     SetManualMode,
     SetNavGoalLL,
+    TouchControlHeartbeat,
 )
 
 
@@ -71,6 +74,8 @@ class NavCommandServerNode(Node):
         self.declare_parameter("brake_publish_interval_s", 0.1)
         self.declare_parameter("manual_cmd_timeout_s", 0.4)
         self.declare_parameter("manual_watchdog_hz", 10.0)
+        self.declare_parameter("control_lock_heartbeat_timeout_s", 10.0)
+        self.declare_parameter("control_lock_heartbeat_required", True)
         self.declare_parameter("nav_telemetry_hz", 5.0)
         self.declare_parameter("telemetry_topic", "/nav_command_server/telemetry")
         self.declare_parameter("event_topic", "/nav_command_server/events")
@@ -78,6 +83,11 @@ class NavCommandServerNode(Node):
         self.declare_parameter("cancel_goal_service", "/nav_command_server/cancel_goal")
         self.declare_parameter("brake_service", "/nav_command_server/brake")
         self.declare_parameter("set_manual_mode_service", "/nav_command_server/set_manual_mode")
+        self.declare_parameter("set_control_lock_service", "/nav_command_server/set_control_lock")
+        self.declare_parameter(
+            "touch_control_heartbeat_service",
+            "/nav_command_server/touch_control_heartbeat",
+        )
         self.declare_parameter("get_state_service", "/nav_command_server/get_state")
         self.declare_parameter("follow_waypoints_action", "follow_waypoints")
         self.declare_parameter("navigate_through_poses_action", "navigate_through_poses")
@@ -149,6 +159,12 @@ class NavCommandServerNode(Node):
         self.manual_watchdog_hz = max(
             1.0, float(self.get_parameter("manual_watchdog_hz").value)
         )
+        self.control_lock_heartbeat_timeout_s = max(
+            0.5, float(self.get_parameter("control_lock_heartbeat_timeout_s").value)
+        )
+        self.control_lock_heartbeat_required = bool(
+            self.get_parameter("control_lock_heartbeat_required").value
+        )
         self.nav_telemetry_hz = max(1.0, float(self.get_parameter("nav_telemetry_hz").value))
         self.telemetry_topic = str(self.get_parameter("telemetry_topic").value)
         self.event_topic = str(self.get_parameter("event_topic").value)
@@ -157,6 +173,12 @@ class NavCommandServerNode(Node):
         self.brake_service = str(self.get_parameter("brake_service").value)
         self.set_manual_mode_service = str(
             self.get_parameter("set_manual_mode_service").value
+        )
+        self.set_control_lock_service = str(
+            self.get_parameter("set_control_lock_service").value
+        )
+        self.touch_control_heartbeat_service = str(
+            self.get_parameter("touch_control_heartbeat_service").value
         )
         self.get_state_service = str(self.get_parameter("get_state_service").value)
         self.follow_waypoints_action = str(
@@ -169,6 +191,9 @@ class NavCommandServerNode(Node):
         self._lock = threading.Lock()
         self._current_goal_handle = None
         self._manual_enabled = False
+        self._control_locked = True
+        self._control_lock_reason = "STARTUP_LOCKED"
+        self._last_control_heartbeat_monotonic: Optional[float] = None
         self._last_manual_cmd = CmdVelFinal()
         self._last_manual_cmd_time: Optional[float] = None
         self._manual_watchdog_stop_sent = False
@@ -255,6 +280,18 @@ class NavCommandServerNode(Node):
             self._on_set_manual_mode,
             callback_group=self._service_group,
         )
+        self._set_control_lock_srv = self.create_service(
+            SetControlLock,
+            self.set_control_lock_service,
+            self._on_set_control_lock,
+            callback_group=self._service_group,
+        )
+        self._touch_control_heartbeat_srv = self.create_service(
+            TouchControlHeartbeat,
+            self.touch_control_heartbeat_service,
+            self._on_touch_control_heartbeat,
+            callback_group=self._service_group,
+        )
         self._get_state_srv = self.create_service(
             GetNavState,
             self.get_state_service,
@@ -289,6 +326,8 @@ class NavCommandServerNode(Node):
             f"(set_goal={self.set_goal_service}, cancel={self.cancel_goal_service}, "
             f"brake={self.brake_service}, telemetry={self.telemetry_topic}, "
             f"events={self.event_topic}, "
+            f"set_control_lock={self.set_control_lock_service}, "
+            f"touch_control_heartbeat={self.touch_control_heartbeat_service}, "
             f"teleop_topic={self.teleop_cmd_topic}, "
             f"forward_without_goal={self.forward_cmd_vel_safe_without_goal}, "
             f"cmd_vel_final_topic={self.cmd_vel_final_topic}, "
@@ -303,6 +342,8 @@ class NavCommandServerNode(Node):
         self.get_logger().info(
             "Callback groups configured (services=MutuallyExclusive, clients=Reentrant)"
         )
+        self._publish_stop(brake_pct=100)
+        self._publish_brake_sequence_async(brake_pct=100, skip_first=True)
 
     def _wait_for_future(self, future: Any, timeout_sec: float) -> Optional[Any]:
         start = time.monotonic()
@@ -590,6 +631,16 @@ class NavCommandServerNode(Node):
         transformed.header.stamp = self.get_clock().now().to_msg()
         return transformed
 
+    def _prepare_poses_for_nav2(self, poses: Sequence[PoseStamped]) -> List[PoseStamped]:
+        prepared: List[PoseStamped] = []
+        for pose in poses:
+            cloned = copy.deepcopy(pose)
+            if not cloned.header.frame_id:
+                cloned.header.frame_id = str(self.map_frame)
+            cloned.header.stamp = Time().to_msg()
+            prepared.append(cloned)
+        return prepared
+
     def _cmd_vel_safe_payload_locked(self) -> Dict[str, Any]:
         if self._last_cmd_vel_safe is None:
             return {"available": False, "linear_x": 0.0, "angular_z": 0.0}
@@ -607,6 +658,12 @@ class NavCommandServerNode(Node):
             "angular_z_cmd": float(self._last_manual_cmd.twist.angular.z),
         }
 
+    def _control_lock_payload_locked(self) -> Dict[str, Any]:
+        return {
+            "locked": bool(self._control_locked),
+            "reason": str(self._control_lock_reason),
+        }
+
     @staticmethod
     def _details_to_key_values(details: Optional[Dict[str, Any]]) -> List[KeyValue]:
         if not details:
@@ -622,6 +679,86 @@ class NavCommandServerNode(Node):
     def _set_failure_locked(self, code: str = "", component: str = "") -> None:
         self._failure_code = str(code)
         self._failure_component = str(component)
+
+    def _engage_control_lock(
+        self,
+        reason: str,
+        *,
+        event_code: str,
+        event_message: str,
+    ) -> bool:
+        with self._lock:
+            already_locked = bool(self._control_locked)
+            handle = self._detach_goal_handle_locked(clear_loop_config=True)
+            had_goal = handle is not None
+            was_manual = bool(self._manual_enabled)
+            self._control_locked = True
+            self._control_lock_reason = str(reason)
+            self._last_control_heartbeat_monotonic = None
+            self._manual_enabled = False
+            self._last_manual_cmd = CmdVelFinal()
+            self._last_manual_cmd_time = None
+            self._manual_watchdog_stop_sent = False
+            self._is_navigating = False
+            self._auto_mode = "idle"
+            self._set_failure_locked(str(event_code), "nav_command_server")
+
+        self._publish_stop(brake_pct=100)
+        self._publish_brake_sequence_async(brake_pct=100, skip_first=True)
+        if handle is not None:
+            self._cancel_goal_async(handle, reason=f"control lock engaged ({event_code})")
+        self._publish_event(
+            DiagnosticStatus.WARN,
+            "nav_command_server",
+            str(event_code),
+            str(event_message),
+            details={
+                "already_locked": already_locked,
+                "had_goal": had_goal,
+                "was_manual": was_manual,
+                "reason": str(reason),
+            },
+        )
+        self._publish_telemetry(force=True)
+        return not already_locked
+
+    def set_control_lock(self, locked: bool) -> Tuple[bool, str, bool]:
+        requested_locked = bool(locked)
+        if requested_locked:
+            self._engage_control_lock(
+                "UI_LOCK_REQUEST",
+                event_code="CONTROL_LOCK_ENGAGED",
+                event_message="Control lock engaged",
+            )
+            return True, "control locked", True
+
+        with self._lock:
+            if not self._control_locked:
+                self._last_control_heartbeat_monotonic = time.monotonic()
+                return True, "control already unlocked", False
+            self._control_locked = False
+            self._control_lock_reason = ""
+            self._last_control_heartbeat_monotonic = time.monotonic()
+            self._set_failure_locked("", "")
+        self._publish_event(
+            DiagnosticStatus.WARN,
+            "nav_command_server",
+            "CONTROL_LOCK_RELEASED",
+            "Control lock released",
+        )
+        self._publish_telemetry(force=True)
+        return True, "control unlocked", False
+
+    def touch_control_heartbeat(self) -> Tuple[bool, str, bool]:
+        with self._lock:
+            locked = bool(self._control_locked)
+            if not locked:
+                self._last_control_heartbeat_monotonic = time.monotonic()
+                self._control_lock_reason = ""
+            reason = str(self._control_lock_reason)
+        if locked:
+            return True, reason or "control locked", True
+        return True, "", False
 
     def _publish_event(
         self,
@@ -837,12 +974,15 @@ class NavCommandServerNode(Node):
             goal_active = self._is_navigating
             cmd_vel_safe = self._cmd_vel_safe_payload_locked()
             manual_control = self._manual_control_payload_locked()
+            control_lock = self._control_lock_payload_locked()
             robot_pose = self._last_robot_pose
 
         response.ok = True
         response.error = ""
         response.goal_active = bool(goal_active)
         response.manual_enabled = bool(manual_control["enabled"])
+        response.control_locked = bool(control_lock["locked"])
+        response.control_lock_reason = str(control_lock["reason"])
         response.manual_linear_x_cmd = float(manual_control["linear_x_cmd"])
         response.manual_angular_z_cmd = float(manual_control["angular_z_cmd"])
         response.cmd_vel_available = bool(cmd_vel_safe["available"])
@@ -867,6 +1007,7 @@ class NavCommandServerNode(Node):
 
             goal_active = self._is_navigating
             manual_control = self._manual_control_payload_locked()
+            control_lock = self._control_lock_payload_locked()
             cmd_vel_safe = self._cmd_vel_safe_payload_locked()
             robot_pose = self._last_robot_pose
             nav_result = self._nav_result_payload_locked()
@@ -890,6 +1031,8 @@ class NavCommandServerNode(Node):
         msg = NavTelemetry()
         msg.goal_active = bool(goal_active)
         msg.manual_enabled = bool(manual_control["enabled"])
+        msg.control_locked = bool(control_lock["locked"])
+        msg.control_lock_reason = str(control_lock["reason"])
         msg.auto_mode = auto_mode
         msg.active_action = active_action
         msg.manual_linear_x_cmd = float(manual_control["linear_x_cmd"])
@@ -933,10 +1076,16 @@ class NavCommandServerNode(Node):
         with self._lock:
             self._last_cmd_vel_safe = msg
             self._last_cmd_vel_safe_monotonic = time.monotonic()
+            control_locked = bool(self._control_locked)
             manual_enabled = bool(self._manual_enabled)
             is_navigating = bool(self._is_navigating)
             collision_stop_active = bool(self._collision_stop_active)
             forward_without_goal = bool(self.forward_cmd_vel_safe_without_goal)
+
+        if control_locked:
+            self._publish_stop(brake_pct=100)
+            self._publish_telemetry(force=False)
+            return
 
         if manual_enabled or ((not is_navigating) and (not forward_without_goal)):
             self._publish_telemetry(force=False)
@@ -979,18 +1128,30 @@ class NavCommandServerNode(Node):
         self._publish_telemetry(force=False)
 
     def _on_teleop_cmd(self, msg: CmdVelFinal) -> None:
-        self._activate_manual_takeover_if_needed()
+        linear_x = float(msg.twist.linear.x)
+        angular_z = float(msg.twist.angular.z)
+        brake_pct = int(msg.brake_pct)
+        has_control_intent = (
+            abs(linear_x) > 1.0e-3 or abs(angular_z) > 1.0e-3 or brake_pct > 0
+        )
+        with self._lock:
+            manual_enabled = bool(self._manual_enabled)
+        if (not manual_enabled) and (not has_control_intent):
+            return
+
+        if not manual_enabled:
+            self._activate_manual_takeover_if_needed()
         ok, err = self.set_manual_cmd(
-            linear_x=float(msg.twist.linear.x),
-            angular_z=float(msg.twist.angular.z),
-            brake_pct=int(msg.brake_pct),
+            linear_x=linear_x,
+            angular_z=angular_z,
+            brake_pct=brake_pct,
         )
         if (not ok) and (err != "manual control is disabled"):
             self.get_logger().warning(
                 "Teleop cmd rejected "
-                f"(linear_x={float(msg.twist.linear.x):.3f}, "
-                f"angular_z={float(msg.twist.angular.z):.3f}, "
-                f"brake_pct={int(msg.brake_pct)}, "
+                f"(linear_x={linear_x:.3f}, "
+                f"angular_z={angular_z:.3f}, "
+                f"brake_pct={brake_pct}, "
                 f"error='{err}')"
             )
 
@@ -1054,6 +1215,7 @@ class NavCommandServerNode(Node):
         poses_list = list(poses)
         if not poses_list:
             return False, "no waypoint poses to send"
+        nav2_poses = self._prepare_poses_for_nav2(poses_list)
 
         if not self._follow_waypoints_client.wait_for_server(timeout_sec=2.0):
             with self._lock:
@@ -1067,7 +1229,7 @@ class NavCommandServerNode(Node):
             return False, "FollowWaypoints action server not available"
 
         goal = FollowWaypoints.Goal()
-        goal.poses = poses_list
+        goal.poses = nav2_poses
 
         future = self._follow_waypoints_client.send_goal_async(goal)
         goal_handle = self._wait_for_future(future, timeout_sec=5.0)
@@ -1132,6 +1294,7 @@ class NavCommandServerNode(Node):
         poses_list = list(poses)
         if not poses_list:
             return False, "no waypoint poses to send"
+        nav2_poses = self._prepare_poses_for_nav2(poses_list)
 
         if not self._navigate_through_poses_client.wait_for_server(timeout_sec=2.0):
             with self._lock:
@@ -1145,7 +1308,7 @@ class NavCommandServerNode(Node):
             return False, "NavigateThroughPoses action server not available"
 
         goal = NavigateThroughPoses.Goal()
-        goal.poses = poses_list
+        goal.poses = nav2_poses
 
         future = self._navigate_through_poses_client.send_goal_async(goal)
         goal_handle = self._wait_for_future(future, timeout_sec=5.0)
@@ -1227,6 +1390,9 @@ class NavCommandServerNode(Node):
             return False, "at least one waypoint is required"
 
         with self._lock:
+            if self._control_locked:
+                reason = str(self._control_lock_reason)
+                return False, f"control locked: {reason or 'locked'}"
             has_goal = self._current_goal_handle is not None
         if has_goal:
             cancel_ok, cancel_msg = self.cancel_current_goal(clear_loop_config=True)
@@ -1446,6 +1612,13 @@ class NavCommandServerNode(Node):
     def set_manual_mode(self, enabled: bool) -> Tuple[bool, str, bool]:
         if enabled:
             with self._lock:
+                control_locked = bool(self._control_locked)
+                reason = str(self._control_lock_reason)
+            if control_locked:
+                return False, f"control locked: {reason or 'locked'}", False
+
+        if enabled:
+            with self._lock:
                 has_goal = self._current_goal_handle is not None
                 self._manual_enabled = True
                 self._is_navigating = False
@@ -1493,6 +1666,9 @@ class NavCommandServerNode(Node):
         now = time.monotonic()
         clamped_brake = int(max(0, min(100, int(brake_pct))))
         with self._lock:
+            if self._control_locked:
+                reason = str(self._control_lock_reason)
+                return False, f"control locked: {reason or 'locked'}"
             if not self._manual_enabled:
                 return False, "manual control is disabled"
             self._last_manual_cmd.twist.linear.x = float(linear_x)
@@ -1509,17 +1685,34 @@ class NavCommandServerNode(Node):
             enabled = bool(self._manual_enabled)
             last_cmd_time = self._last_manual_cmd_time
             stop_sent = bool(self._manual_watchdog_stop_sent)
+            control_locked = bool(self._control_locked)
+            heartbeat_required = bool(self.control_lock_heartbeat_required)
+            last_control_heartbeat = self._last_control_heartbeat_monotonic
+
+        now = time.monotonic()
+        if (not control_locked) and heartbeat_required:
+            heartbeat_stale = (
+                last_control_heartbeat is None
+                or ((now - last_control_heartbeat) > float(self.control_lock_heartbeat_timeout_s))
+            )
+            if heartbeat_stale:
+                self._engage_control_lock(
+                    "UI_HEARTBEAT_TIMEOUT",
+                    event_code="UI_HEARTBEAT_TIMEOUT",
+                    event_message="UI heartbeat timeout forced control lock",
+                )
+                return
 
         if not enabled:
             return
 
-        now = time.monotonic()
         stale = (
             (last_cmd_time is None)
             or ((now - last_cmd_time) > float(self.manual_cmd_timeout_s))
         )
         if stale and (not stop_sent):
-            self._publish_manual_stop()
+            self._publish_stop(brake_pct=100)
+            self._publish_brake_sequence_async(brake_pct=100, skip_first=True)
             with self._lock:
                 self._last_manual_cmd = CmdVelFinal()
                 self._manual_watchdog_stop_sent = True
@@ -1572,7 +1765,13 @@ class NavCommandServerNode(Node):
         response: SetNavGoalLL.Response,
     ) -> SetNavGoalLL.Response:
         with self._lock:
-            manual_enabled = self._manual_enabled
+            manual_enabled = bool(self._manual_enabled)
+            control_locked = bool(self._control_locked)
+            control_lock_reason = str(self._control_lock_reason)
+        if control_locked:
+            response.ok = False
+            response.error = f"control locked: {control_lock_reason or 'locked'}"
+            return response
         if manual_enabled:
             response.ok = False
             response.error = "manual control enabled; disable manual mode to send goals"
@@ -1645,6 +1844,32 @@ class NavCommandServerNode(Node):
             f"SetManualMode response (requested={bool(request.enabled)}, "
             f"enabled_after={response.enabled_after}, ok={response.ok}, error='{response.error}')"
         )
+        return response
+
+    def _on_set_control_lock(
+        self,
+        request: SetControlLock.Request,
+        response: SetControlLock.Response,
+    ) -> SetControlLock.Response:
+        ok, err, locked_after = self.set_control_lock(bool(request.locked))
+        response.ok = bool(ok)
+        response.error = "" if ok else str(err)
+        response.locked_after = bool(locked_after)
+        self.get_logger().info(
+            f"SetControlLock response (requested={bool(request.locked)}, "
+            f"locked_after={response.locked_after}, ok={response.ok}, error='{response.error}')"
+        )
+        return response
+
+    def _on_touch_control_heartbeat(
+        self,
+        _request: TouchControlHeartbeat.Request,
+        response: TouchControlHeartbeat.Response,
+    ) -> TouchControlHeartbeat.Response:
+        ok, err, locked = self.touch_control_heartbeat()
+        response.ok = bool(ok)
+        response.error = "" if ok else str(err)
+        response.locked = bool(locked)
         return response
 
     def _on_get_state(

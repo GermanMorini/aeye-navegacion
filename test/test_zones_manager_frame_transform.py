@@ -94,3 +94,12 @@ def test_zones_manager_source_rejects_apply_when_transform_unavailable() -> None
 
     assert "if xy_polygons is None:" in source_contents
     assert "str(tf_error)" in source_contents
+
+
+def test_zones_manager_source_retries_initial_load_until_keepout_applies() -> None:
+    source_path = Path(__file__).resolve().parents[1] / "navegacion_gps" / "zones_manager.py"
+    source_contents = source_path.read_text(encoding="utf-8")
+
+    assert 'self.declare_parameter("startup_reload_retry_period_s", 1.0)' in source_contents
+    assert "self._schedule_startup_reload_retry()" in source_contents
+    assert "def _on_startup_reload_retry_timer(self) -> None:" in source_contents

@@ -106,6 +106,19 @@ def test_nav2_no_map_follow_path_uses_less_aggressive_ackermann_tuning() -> None
     assert "regulated_linear_scaling_min_speed: 0.4" in nav2_config_contents
 
 
+def test_navigate_through_poses_prunes_passed_goals_with_radius_matching_goal_tolerance() -> None:
+    nav2_config_path = PACKAGE_ROOT / "config" / "nav2_no_map_params.yaml"
+    bt_xml_path = (
+        PACKAGE_ROOT / "config" / "navigate_through_poses_w_replanning_and_recovery_no_spin.xml"
+    )
+
+    nav2_config_contents = nav2_config_path.read_text(encoding="utf-8")
+    bt_xml_contents = bt_xml_path.read_text(encoding="utf-8")
+
+    assert "xy_goal_tolerance: 1.2" in nav2_config_contents
+    assert 'RemovePassedGoals input_goals="{goals}" output_goals="{goals}" radius="1.2"' in bt_xml_contents
+
+
 def test_dual_ekf_local_uses_wheel_and_pixhawk_odometry_topics() -> None:
     ekf_config_path = PACKAGE_ROOT / "config" / "dual_ekf_navsat_params.yaml"
     ekf_config_contents = ekf_config_path.read_text(encoding="utf-8")
@@ -251,6 +264,7 @@ def test_real_local_v2_launch_uses_map_output_frame_for_fromll() -> None:
     launch_contents = launch_path.read_text(encoding="utf-8")
 
     assert '"fromll_output_frame": "map"' in launch_contents
+    assert '"map_frame": "map"' in launch_contents
     assert '"fromll_frame": "odom"' not in launch_contents
 
 

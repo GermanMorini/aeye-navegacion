@@ -258,6 +258,7 @@ class ZonesManagerNode(Node):
 
         self.declare_parameter("load_map_service", "/keepout_filter_mask_server/load_map")
         self.declare_parameter("load_map_wait_timeout_s", 8.0)
+        self.declare_parameter("startup_reload_retry_period_s", 1.0)
         self.declare_parameter("clear_global_after_reload", True)
         self.declare_parameter(
             "clear_global_costmap_service", "/global_costmap/clear_entirely_global_costmap"
@@ -314,6 +315,9 @@ class ZonesManagerNode(Node):
         self.load_map_service = str(self.get_parameter("load_map_service").value)
         self.load_map_wait_timeout_s = max(
             0.5, float(self.get_parameter("load_map_wait_timeout_s").value)
+        )
+        self.startup_reload_retry_period_s = max(
+            0.0, float(self.get_parameter("startup_reload_retry_period_s").value)
         )
         self.clear_global_after_reload = bool(
             self.get_parameter("clear_global_after_reload").value
@@ -374,6 +378,8 @@ class ZonesManagerNode(Node):
         self._geojson_text = json.dumps(self._geojson_doc, separators=(",", ":"))
         self._mask_ready = False
         self._mask_source = "none"
+        self._startup_reload_retry_timer = None
+        self._startup_reload_retry_active = False
 
         self._service_group = MutuallyExclusiveCallbackGroup()
         self._client_group = ReentrantCallbackGroup()
@@ -949,6 +955,62 @@ class ZonesManagerNode(Node):
             )
         return True, "", True, feature_count, polygon_count
 
+    def _schedule_startup_reload_retry(self) -> None:
+        if self.startup_reload_retry_period_s <= 0.0:
+            return
+        if self._startup_reload_retry_timer is not None:
+            return
+        self._startup_reload_retry_timer = self.create_timer(
+            float(self.startup_reload_retry_period_s),
+            self._on_startup_reload_retry_timer,
+            callback_group=self._client_group,
+        )
+        self.get_logger().warning(
+            "Startup zones reload retry scheduled "
+            f"(period_s={self.startup_reload_retry_period_s:.2f})"
+        )
+
+    def _cancel_startup_reload_retry(self) -> None:
+        timer = self._startup_reload_retry_timer
+        self._startup_reload_retry_timer = None
+        if timer is not None:
+            timer.cancel()
+            self.destroy_timer(timer)
+
+    def _on_startup_reload_retry_timer(self) -> None:
+        with self._lock:
+            if self._mask_ready:
+                self._cancel_startup_reload_retry()
+                return
+            if self._startup_reload_retry_active:
+                return
+            self._startup_reload_retry_active = True
+
+        try:
+            geojson_doc, err = self._load_geojson_from_disk()
+            if geojson_doc is None:
+                self.get_logger().warning(
+                    f"Startup zones reload retry failed reading GeoJSON: {err}"
+                )
+                return
+
+            ok, apply_err, reloaded, feature_count, polygon_count = self._apply_geojson(
+                geojson_doc, persist_geojson=False
+            )
+            if ok:
+                self.get_logger().info(
+                    "Startup zones reload retry succeeded "
+                    f"(features={feature_count}, polygons={polygon_count}, map_reloaded={reloaded})"
+                )
+                self._cancel_startup_reload_retry()
+            else:
+                self.get_logger().warning(
+                    f"Startup zones reload retry failed: {apply_err}"
+                )
+        finally:
+            with self._lock:
+                self._startup_reload_retry_active = False
+
     def _load_geojson_from_disk(self) -> Tuple[Optional[Dict[str, Any]], str]:
         if not self.geojson_file.exists():
             return self._empty_geojson_doc(), ""
@@ -976,8 +1038,10 @@ class ZonesManagerNode(Node):
                 "Initial zones loaded "
                 f"(features={feature_count}, polygons={polygon_count}, map_reloaded={reloaded})"
             )
+            self._cancel_startup_reload_retry()
         else:
             self.get_logger().warning(f"Initial zones load failed: {apply_err}")
+            self._schedule_startup_reload_retry()
 
         self.get_logger().info(f"GeoJSON file path: {self.geojson_file}")
         self.get_logger().info(f"Mask image path: {self.mask_image_file}")

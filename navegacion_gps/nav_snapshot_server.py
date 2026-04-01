@@ -117,7 +117,7 @@ class NavSnapshotServerNode(Node):
         self.declare_parameter("snapshot_extent_m", 30.0)
         self.declare_parameter("snapshot_size_px", 512)
         self.declare_parameter("snapshot_global_inset_px", 160)
-        self.declare_parameter("snapshot_timeout_ms", 500)
+        self.declare_parameter("snapshot_timeout_ms", 1500)
         self.declare_parameter("tf_timeout_s", 0.2)
         self.declare_parameter("odom_arrow_spacing_m", 1.5)
         self.declare_parameter("odom_history_max_samples", 2000)

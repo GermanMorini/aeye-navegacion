@@ -199,7 +199,7 @@ def generate_launch_description():
                         "fromll_service_fallback": "/navsat_transform/fromLL",
                         "fromll_wait_timeout_s": 2.0,
                         "fromll_output_frame": "map",
-                        "map_frame": "odom",
+                        "map_frame": "map",
                         "gps_topic": "/gps/fix",
                         "cmd_vel_safe_topic": "/cmd_vel_safe",
                         "cmd_vel_final_topic": "/cmd_vel_final",
@@ -261,7 +261,7 @@ def generate_launch_description():
                 launch_arguments={
                     "ws_host": "0.0.0.0",
                     "ws_port": web_app_port,
-                    "map_frame": "odom",
+                    "map_frame": "map",
                     "launch_zones_manager": "false",
                     "launch_nav_command_server": "false",
                     "launch_nav_snapshot_server": "false",
