@@ -12,6 +12,8 @@ def test_sim_local_v2_launch_uses_realistic_command_chain() -> None:
     assert '"transport_backend": "sim_gazebo"' in launch_contents
     assert '"cmd_vel_final_topic": "/cmd_vel_final"' in launch_contents
     assert '"forward_cmd_vel_safe_without_goal": True' in launch_contents
+    assert '"fromll_output_frame": "map"' in launch_contents
+    assert '"fromll_frame": "odom"' not in launch_contents
 
 
 def test_sim_local_v2_launch_exposes_optional_bridge_mode() -> None:

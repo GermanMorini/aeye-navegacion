@@ -232,6 +232,18 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /local_nav_v2/path_tracking_debug
       Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: No-Go Zones
+      Namespaces:
+        {}
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /zone_markers
+      Value: true
     - Angle Tolerance: 0.1
       Class: rviz_default_plugins/Odometry
       Color: 0; 180; 255

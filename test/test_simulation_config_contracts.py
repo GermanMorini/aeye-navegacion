@@ -243,6 +243,15 @@ def test_real_launch_auto_resolves_map_frame_from_ekf_global_toggle() -> None:
     assert "'.lower() == 'true' else 'odom'))" in launch_contents
     assert '"map_frame": resolved_map_frame,' in launch_contents
     assert '"fromll_target_frame": resolved_map_frame,' in launch_contents
+    assert '"fromll_output_frame": "map"' in launch_contents
+
+
+def test_real_local_v2_launch_uses_map_output_frame_for_fromll() -> None:
+    launch_path = PACKAGE_ROOT / "launch" / "real_local_v2.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert '"fromll_output_frame": "map"' in launch_contents
+    assert '"fromll_frame": "odom"' not in launch_contents
 
 
 def test_real_launch_includes_tf_consistency_fail_fast_validation() -> None:

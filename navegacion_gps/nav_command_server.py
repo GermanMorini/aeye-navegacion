@@ -55,6 +55,7 @@ class NavCommandServerNode(Node):
         self.declare_parameter("approx_fromll_datum_yaw_deg", 0.0)
         self.declare_parameter("approx_fromll_zero_threshold_m", 1.0e-3)
         self.declare_parameter("approx_fromll_min_distance_for_fallback_m", 0.5)
+        self.declare_parameter("fromll_output_frame", "")
         self.declare_parameter("fromll_frame", "odom")
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("tf_lookup_timeout_s", 0.5)
@@ -114,7 +115,14 @@ class NavCommandServerNode(Node):
             0.0,
             float(self.get_parameter("approx_fromll_min_distance_for_fallback_m").value),
         )
-        self.fromll_frame = str(self.get_parameter("fromll_frame").value).strip() or "odom"
+        configured_fromll_output_frame = str(
+            self.get_parameter("fromll_output_frame").value
+        ).strip()
+        configured_fromll_frame = str(self.get_parameter("fromll_frame").value).strip()
+        self.fromll_output_frame = (
+            configured_fromll_output_frame or configured_fromll_frame or "odom"
+        )
+        self.fromll_frame = self.fromll_output_frame
         self.map_frame = str(self.get_parameter("map_frame").value)
         self.tf_lookup_timeout_s = max(
             0.05, float(self.get_parameter("tf_lookup_timeout_s").value)
@@ -286,6 +294,11 @@ class NavCommandServerNode(Node):
             f"cmd_vel_final_topic={self.cmd_vel_final_topic}, "
             f"follow_waypoints_action={self.follow_waypoints_action}, "
             f"navigate_through_poses_action={self.navigate_through_poses_action})"
+        )
+        self.get_logger().info(
+            "fromLL frame config "
+            f"(service={self.fromll_service}, fallback={self.fromll_service_fallback}, "
+            f"output_frame={self.fromll_output_frame}, target_frame={self.map_frame})"
         )
         self.get_logger().info(
             "Callback groups configured (services=MutuallyExclusive, clients=Reentrant)"
@@ -1007,7 +1020,7 @@ class NavCommandServerNode(Node):
         fromll_yaw_deg = self._project_geographic_yaw_to_fromll(lat, lon, yaw_deg, converted)
 
         pose = PoseStamped()
-        pose.header.frame_id = self.fromll_frame
+        pose.header.frame_id = self.fromll_output_frame
         pose.header.stamp = Time().to_msg()
         pose.pose.position.x = float(x)
         pose.pose.position.y = float(y)

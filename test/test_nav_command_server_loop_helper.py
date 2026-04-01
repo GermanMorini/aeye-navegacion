@@ -154,6 +154,68 @@ class _FakeSendNode:
         return self.logger
 
 
+class _FakeClockNow:
+    def __init__(self, sec: int = 999, nanosec: int = 123) -> None:
+        self._stamp = Time(sec=int(sec), nanosec=int(nanosec))
+
+    def to_msg(self) -> Time:
+        return Time(sec=int(self._stamp.sec), nanosec=int(self._stamp.nanosec))
+
+
+class _FakeClock:
+    def now(self) -> _FakeClockNow:
+        return _FakeClockNow()
+
+
+class _FakeTransformBuffer:
+    def __init__(self, transformed_pose: PoseStamped | None = None) -> None:
+        self.transformed_pose = transformed_pose
+        self.calls = []
+
+    def transform(self, pose: PoseStamped, target_frame: str, timeout):
+        self.calls.append((pose, str(target_frame), timeout))
+        if self.transformed_pose is None:
+            raise AssertionError("unexpected transform call without prepared pose")
+        return self.transformed_pose
+
+
+class _FakeTransformNode:
+    _transform_pose_to_map = NavCommandServerNode._transform_pose_to_map
+
+    def __init__(self, map_frame: str, transformed_pose: PoseStamped | None = None) -> None:
+        self.map_frame = str(map_frame)
+        self.tf_lookup_timeout_s = 0.5
+        self._tf_buffer = _FakeTransformBuffer(transformed_pose=transformed_pose)
+        self._last_fromll_error = None
+
+    def get_clock(self):
+        return _FakeClock()
+
+
+class _FakeBuildPoseNode:
+    _build_pose_from_ll = NavCommandServerNode._build_pose_from_ll
+
+    def __init__(self, fromll_output_frame: str) -> None:
+        self.fromll_output_frame = str(fromll_output_frame)
+        self.captured_pose = None
+
+    def _call_from_ll(self, lat: float, lon: float):
+        assert lat == -31.0
+        assert lon == -64.0
+        return (1.5, -2.5, 0.0)
+
+    def _project_geographic_yaw_to_fromll(self, lat: float, lon: float, yaw_deg: float, converted):
+        assert lat == -31.0
+        assert lon == -64.0
+        assert yaw_deg == 90.0
+        assert converted == (1.5, -2.5, 0.0)
+        return 12.0
+
+    def _transform_pose_to_map(self, pose: PoseStamped):
+        self.captured_pose = pose
+        return pose
+
+
 def _pose(frame_id: str, sec: int, nanosec: int = 0) -> PoseStamped:
     msg = PoseStamped()
     msg.header.frame_id = str(frame_id)
@@ -230,6 +292,49 @@ def test_send_follow_waypoints_goal_uses_prepared_pose_copies() -> None:
     assert sent_poses[0].header.stamp.nanosec == 0
     assert sent_poses[0].header.frame_id == "map"
     assert original_poses[0].header.stamp.sec == 170
+
+
+def test_transform_pose_to_map_skips_tf_when_pose_already_in_target_frame() -> None:
+    node = _FakeTransformNode(map_frame="map")
+    pose = _pose("map", sec=170, nanosec=10)
+
+    transformed = NavCommandServerNode._transform_pose_to_map(node, pose)
+
+    assert transformed is pose
+    assert transformed.header.frame_id == "map"
+    assert transformed.header.stamp.sec == 999
+    assert transformed.header.stamp.nanosec == 123
+    assert node._tf_buffer.calls == []
+
+
+def test_transform_pose_to_map_uses_tf_buffer_when_fromll_output_frame_differs() -> None:
+    pose = _pose("map", sec=170, nanosec=10)
+    expected = _pose("odom", sec=0, nanosec=0)
+    expected.pose.position.x = 12.0
+    expected.pose.position.y = -4.0
+    node = _FakeTransformNode(map_frame="odom", transformed_pose=expected)
+
+    transformed = NavCommandServerNode._transform_pose_to_map(node, pose)
+
+    assert transformed is expected
+    assert transformed.header.frame_id == "odom"
+    assert transformed.header.stamp.sec == 999
+    assert transformed.header.stamp.nanosec == 123
+    assert len(node._tf_buffer.calls) == 1
+    assert node._tf_buffer.calls[0][0] is pose
+    assert node._tf_buffer.calls[0][1] == "odom"
+
+
+def test_build_pose_from_ll_uses_fromll_output_frame_for_intermediate_pose() -> None:
+    node = _FakeBuildPoseNode(fromll_output_frame="map")
+
+    pose = NavCommandServerNode._build_pose_from_ll(node, -31.0, -64.0, 90.0)
+
+    assert pose is node.captured_pose
+    assert pose.header.frame_id == "map"
+    assert pose.pose.position.x == 1.5
+    assert pose.pose.position.y == -2.5
+    assert pose.pose.orientation.w != 0.0
 
 
 def test_send_nav_goal_for_poses_multi_pose_path_uses_zero_stamp_latest() -> None:

@@ -355,7 +355,7 @@ def generate_launch_description():
                         "fromll_service": "/fromLL",
                         "fromll_service_fallback": "/navsat_transform/fromLL",
                         "fromll_wait_timeout_s": 2.0,
-                        "fromll_frame": "odom",
+                        "fromll_output_frame": "map",
                         "map_frame": "odom",
                         "gps_topic": "/gps/fix",
                         "cmd_vel_safe_topic": "/cmd_vel_safe",

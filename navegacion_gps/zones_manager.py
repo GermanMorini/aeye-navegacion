@@ -12,7 +12,7 @@ import rclpy
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from geographic_msgs.msg import GeoPoint
-from geometry_msgs.msg import Pose, Quaternion
+from geometry_msgs.msg import Point, Pose, Quaternion
 from nav2_msgs.srv import ClearEntireCostmap
 from nav2_msgs.srv import LoadMap
 from nav_msgs.msg import MapMetaData
@@ -20,10 +20,12 @@ from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallb
 from rclpy.duration import Duration
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.time import Time
 from robot_localization.srv import FromLL
 from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformException, TransformListener
+from visualization_msgs.msg import Marker, MarkerArray
 
 from interfaces.srv import GetZonesState, SetZonesGeoJson
 
@@ -54,6 +56,77 @@ def apply_planar_transform(
     x_out = (cos_yaw * float(x_m)) - (sin_yaw * float(y_m)) + float(tx_m)
     y_out = (sin_yaw * float(x_m)) + (cos_yaw * float(y_m)) + float(ty_m)
     return x_out, y_out
+
+
+def _ring_to_marker_points(
+    ring_xy: List[Dict[str, float]],
+    z_offset_m: float,
+) -> List[Point]:
+    points: List[Point] = []
+    for vertex in ring_xy:
+        pt = Point()
+        pt.x = float(vertex.get("x", 0.0))
+        pt.y = float(vertex.get("y", 0.0))
+        pt.z = float(z_offset_m)
+        points.append(pt)
+
+    if len(points) >= 2:
+        first = points[0]
+        last = points[-1]
+        if (abs(first.x - last.x) > 1e-6) or (abs(first.y - last.y) > 1e-6):
+            closing = Point()
+            closing.x = float(first.x)
+            closing.y = float(first.y)
+            closing.z = float(first.z)
+            points.append(closing)
+    return points
+
+
+def build_zone_markers(
+    polygons_xy: List[Dict[str, Any]],
+    frame_id: str,
+    *,
+    line_width_m: float = 0.18,
+    z_offset_m: float = 0.05,
+) -> MarkerArray:
+    marker_array = MarkerArray()
+
+    delete_all = Marker()
+    delete_all.header.frame_id = str(frame_id)
+    delete_all.ns = "zone_markers"
+    delete_all.id = 0
+    delete_all.action = Marker.DELETEALL
+    marker_array.markers.append(delete_all)
+
+    marker_id = 1
+    for polygon_index, polygon in enumerate(polygons_xy):
+        ring_specs = [("outer", polygon.get("outer_xy", []), (1.0, 0.18, 0.12, 1.0))]
+        for hole_index, hole_xy in enumerate(polygon.get("holes_xy", [])):
+            ring_specs.append((f"hole_{hole_index}", hole_xy, (0.9, 0.55, 0.10, 0.9)))
+
+        for ring_name, ring_xy, rgba in ring_specs:
+            points = _ring_to_marker_points(list(ring_xy), z_offset_m=float(z_offset_m))
+            if len(points) < 4:
+                continue
+
+            marker = Marker()
+            marker.header.frame_id = str(frame_id)
+            marker.ns = f"zone_{ring_name}"
+            marker.id = int(marker_id)
+            marker.type = Marker.LINE_STRIP
+            marker.action = Marker.ADD
+            marker.pose.orientation.w = 1.0
+            marker.scale.x = float(line_width_m)
+            marker.color.r = float(rgba[0])
+            marker.color.g = float(rgba[1])
+            marker.color.b = float(rgba[2])
+            marker.color.a = float(rgba[3])
+            marker.text = str(polygon.get("id", f"zone_{polygon_index}"))
+            marker.points = points
+            marker_array.markers.append(marker)
+            marker_id += 1
+
+    return marker_array
 
 
 def lookup_planar_transform_from_buffer(
@@ -195,6 +268,7 @@ class ZonesManagerNode(Node):
         self.declare_parameter(
             "reload_from_disk_service", "/zones_manager/reload_from_disk"
         )
+        self.declare_parameter("markers_topic", "/zone_markers")
 
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("buffer_margin_m", 0.0)
@@ -255,6 +329,7 @@ class ZonesManagerNode(Node):
         self.reload_from_disk_service = str(
             self.get_parameter("reload_from_disk_service").value
         )
+        self.markers_topic = str(self.get_parameter("markers_topic").value)
 
         self.map_frame = str(self.get_parameter("map_frame").value)
         self.buffer_margin_m = max(0.0, float(self.get_parameter("buffer_margin_m").value))
@@ -333,6 +408,15 @@ class ZonesManagerNode(Node):
             self.clear_global_costmap_service,
             callback_group=self._client_group,
         )
+        self._zone_markers_pub = self.create_publisher(
+            MarkerArray,
+            self.markers_topic,
+            QoSProfile(
+                depth=1,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                reliability=ReliabilityPolicy.RELIABLE,
+            ),
+        )
 
         self._set_geojson_srv = self.create_service(
             SetZonesGeoJson,
@@ -358,7 +442,7 @@ class ZonesManagerNode(Node):
             "Zones manager ready "
             f"(set_service={self.set_geojson_service}, get_service={self.get_state_service}, "
             f"reload_service={self.reload_from_disk_service}, "
-            f"load_map_service={self.load_map_service})"
+            f"load_map_service={self.load_map_service}, markers_topic={self.markers_topic})"
         )
         self.get_logger().info(
             "fromLL frame transform config "
@@ -763,6 +847,15 @@ class ZonesManagerNode(Node):
             self.get_logger().warning(
                 "Some polygons failed LL->XY conversion: " + ", ".join(failed_polygon_ids)
             )
+
+        try:
+            marker_array = build_zone_markers(
+                xy_polygons,
+                self._effective_fromll_target_frame(),
+            )
+            self._zone_markers_pub.publish(marker_array)
+        except Exception as exc:
+            self.get_logger().warning(f"failed publishing zone markers: {exc}")
 
         info = self._build_fixed_mask_metadata()
         image, clipped_vertices, outside_polygon_ids = rasterize_polygons_trinary(

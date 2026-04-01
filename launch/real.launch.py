@@ -550,7 +550,7 @@ def generate_launch_description():
                 "fromll_service": "/fromLL",
                 "fromll_service_fallback": "/navsat_transform/fromLL",
                 "fromll_wait_timeout_s": 2.0,
-                "fromll_frame": resolved_map_frame,
+                "fromll_output_frame": "map",
                 "map_frame": resolved_map_frame,
                 "gps_topic": gps_topic,
                 "cmd_vel_safe_topic": "/cmd_vel_safe",
