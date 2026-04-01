@@ -6,13 +6,18 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
+    EmitEvent,
     IncludeLaunchDescription,
+    LogInfo,
     OpaqueFunction,
+    RegisterEventHandler,
     TimerAction,
 )
 from launch.conditions import IfCondition
+from launch.event_handlers import OnProcessExit
+from launch.events import Shutdown
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch.substitutions import LaunchConfiguration, LocalSubstitution, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -102,6 +107,64 @@ def _validate_tf_configuration(context, nav2_params_file: str):
     return []
 
 
+def _on_rtk_gate_exit(context, delayed_start_actions):
+    return_code = int(LocalSubstitution("event.returncode").perform(context))
+    if return_code == 0:
+        return list(delayed_start_actions)
+    timeout_s = str(LaunchConfiguration("rtk_gate_timeout_s").perform(context))
+    return [
+        LogInfo(msg=f"RTK gate failed; shutting down launch (timeout_s={timeout_s})"),
+        EmitEvent(event=Shutdown(reason=f"RTK gate timeout after {timeout_s}s")),
+    ]
+
+
+def _build_navigation_startup(
+    context,
+    delayed_start_actions,
+    gps_topic,
+    rtk_status_topic,
+    fix_type_topic,
+):
+    require_gate = _as_bool(
+        LaunchConfiguration("require_rtk_before_navigation").perform(context)
+    )
+    if not require_gate:
+        return [TimerAction(period=5.0, actions=list(delayed_start_actions))]
+
+    rtk_gate_cmd = Node(
+        package="navegacion_gps",
+        executable="rtk_start_gate",
+        name="rtk_start_gate",
+        output="screen",
+        parameters=[
+            {"use_sim_time": False},
+            {"gps_topic": gps_topic},
+            {"rtk_status_topic": rtk_status_topic},
+            {"fix_type_topic": fix_type_topic},
+            {
+                "timeout_s": ParameterValue(
+                    LaunchConfiguration("rtk_gate_timeout_s"),
+                    value_type=float,
+                )
+            },
+        ],
+    )
+    return [
+        rtk_gate_cmd,
+        RegisterEventHandler(
+            OnProcessExit(
+                target_action=rtk_gate_cmd,
+                on_exit=[
+                    OpaqueFunction(
+                        function=_on_rtk_gate_exit,
+                        kwargs={"delayed_start_actions": list(delayed_start_actions)},
+                    )
+                ],
+            )
+        ),
+    ]
+
+
 def generate_launch_description():
     gps_wpf_dir = get_package_share_directory("navegacion_gps")
     map_tools_dir = get_package_share_directory("map_tools")
@@ -140,6 +203,8 @@ def generate_launch_description():
     ws_host = LaunchConfiguration("ws_host")
     ws_port = LaunchConfiguration("ws_port")
     gps_topic = LaunchConfiguration("gps_topic")
+    rtk_status_topic = LaunchConfiguration("rtk_status_topic")
+    fix_type_topic = LaunchConfiguration("fix_type_topic")
     map_frame = LaunchConfiguration("map_frame")
     zones_manager = LaunchConfiguration("zones_manager")
     datum_setter = LaunchConfiguration("datum_setter")
@@ -288,6 +353,16 @@ def generate_launch_description():
         default_value="/gps/fix",
         description="GPS topic used by web console backend/gateway",
     )
+    declare_rtk_status_topic_cmd = DeclareLaunchArgument(
+        "rtk_status_topic",
+        default_value="/gps/rtk_status",
+        description="RTK status topic used to gate navigation startup",
+    )
+    declare_fix_type_topic_cmd = DeclareLaunchArgument(
+        "fix_type_topic",
+        default_value="/gps/fix_type",
+        description="GPS fix_type topic used to gate navigation startup",
+    )
     declare_map_frame_cmd = DeclareLaunchArgument(
         "map_frame",
         default_value="auto",
@@ -347,6 +422,16 @@ def generate_launch_description():
         "gps_course_heading_transform_timeout_s",
         default_value="0.2",
         description="TF lookup timeout for gps_course_heading antenna offset compensation",
+    )
+    declare_require_rtk_before_navigation_cmd = DeclareLaunchArgument(
+        "require_rtk_before_navigation",
+        default_value="true",
+        description="Wait for RTK float-or-better before starting localization and Nav2",
+    )
+    declare_rtk_gate_timeout_s_cmd = DeclareLaunchArgument(
+        "rtk_gate_timeout_s",
+        default_value="60.0",
+        description="Wall-clock timeout in seconds for the RTK startup gate",
     )
 
     # Block 5 - Navigation
@@ -435,7 +520,7 @@ def generate_launch_description():
             {
                 "gps_topic": gps_topic,
                 "imu_topic": "/imu/data",
-                "rtk_status_topic": "/gps/rtk_status",
+                "rtk_status_topic": rtk_status_topic,
                 "set_datum_service": "/datum_setter/set_datum",
                 "get_datum_service": "/datum_setter/get_datum",
                 "datum_service": "/datum",
@@ -735,7 +820,15 @@ def generate_launch_description():
         # Block 7 - Optional Runtime Utilities
         gazebo_utils_cmd,
     ]
-    delayed_start_cmd = TimerAction(period=5.0, actions=delayed_start_actions)
+    delayed_start_cmd = OpaqueFunction(
+        function=_build_navigation_startup,
+        kwargs={
+            "delayed_start_actions": delayed_start_actions,
+            "gps_topic": gps_topic,
+            "rtk_status_topic": rtk_status_topic,
+            "fix_type_topic": fix_type_topic,
+        },
+    )
 
     ld = LaunchDescription()
     # Block 1 - Launch Arguments
@@ -762,6 +855,8 @@ def generate_launch_description():
     ld.add_action(declare_ws_host_cmd)
     ld.add_action(declare_ws_port_cmd)
     ld.add_action(declare_gps_topic_cmd)
+    ld.add_action(declare_rtk_status_topic_cmd)
+    ld.add_action(declare_fix_type_topic_cmd)
     ld.add_action(declare_map_frame_cmd)
     ld.add_action(declare_zones_manager_cmd)
     ld.add_action(declare_datum_setter_cmd)
@@ -774,6 +869,8 @@ def generate_launch_description():
     ld.add_action(declare_gps_course_heading_enable_offset_compensation_cmd)
     ld.add_action(declare_gps_course_heading_gps_frame_cmd)
     ld.add_action(declare_gps_course_heading_transform_timeout_s_cmd)
+    ld.add_action(declare_require_rtk_before_navigation_cmd)
+    ld.add_action(declare_rtk_gate_timeout_s_cmd)
     # Block 2 - Launch Validation
     ld.add_action(OpaqueFunction(function=_validate_telemetry_backend))
     ld.add_action(

@@ -54,6 +54,7 @@ setup(
             'sim_global_straight_benchmark = navegacion_gps.sim_global_straight_benchmark:main',
             'startup_heading_diagnosis = navegacion_gps.startup_heading_diagnosis:main',
             'gps_course_heading = navegacion_gps.gps_course_heading:main',
+            'rtk_start_gate = navegacion_gps.rtk_start_gate:main',
         ],
     },
 )
