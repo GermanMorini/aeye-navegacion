@@ -89,6 +89,23 @@ def test_nav2_no_map_direct_frame_values() -> None:
     assert "global_frame: map" in nav2_config_contents
 
 
+def test_nav2_no_map_follow_path_uses_less_aggressive_ackermann_tuning() -> None:
+    nav2_config_path = PACKAGE_ROOT / "config" / "nav2_no_map_params.yaml"
+    nav2_config_contents = nav2_config_path.read_text(encoding="utf-8")
+
+    assert 'plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"' in (
+        nav2_config_contents
+    )
+    assert "desired_linear_vel: 0.8" in nav2_config_contents
+    assert "lookahead_dist: 2.0" in nav2_config_contents
+    assert "min_lookahead_dist: 0.8" in nav2_config_contents
+    assert "max_lookahead_dist: 2.5" in nav2_config_contents
+    assert "lookahead_time: 1.2" in nav2_config_contents
+    assert "use_velocity_scaled_lookahead_dist: true" in nav2_config_contents
+    assert "min_approach_linear_velocity: 0.4" in nav2_config_contents
+    assert "regulated_linear_scaling_min_speed: 0.4" in nav2_config_contents
+
+
 def test_dual_ekf_local_uses_wheel_and_pixhawk_odometry_topics() -> None:
     ekf_config_path = PACKAGE_ROOT / "config" / "dual_ekf_navsat_params.yaml"
     ekf_config_contents = ekf_config_path.read_text(encoding="utf-8")

@@ -224,11 +224,11 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "gps_course_heading_enable_consistency_filters",
-                default_value="false",
+                default_value="true",
             ),
             DeclareLaunchArgument(
                 "gps_course_heading_enable_offset_compensation",
-                default_value="false",
+                default_value="true",
             ),
             DeclareLaunchArgument("gps_course_heading_gps_frame", default_value="gps_link"),
             DeclareLaunchArgument(
