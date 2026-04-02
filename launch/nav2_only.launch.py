@@ -3,7 +3,12 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    OpaqueFunction,
+    TimerAction,
+)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
@@ -75,6 +80,9 @@ def generate_launch_description():
         gps_wpf_dir, "navigate_through_poses_w_replanning_and_recovery_no_spin.xml"
     )
     use_keepout = LaunchConfiguration("use_keepout")
+    keepout_lifecycle_start_delay_s = LaunchConfiguration(
+        "keepout_lifecycle_start_delay_s"
+    )
     configured_params = RewrittenYaml(
         source_file=nav2_params,
         root_key="",
@@ -118,6 +126,11 @@ def generate_launch_description():
         "use_keepout",
         default_value="True",
         description="Enable keepout filter servers and keepout layer in Nav2 costmaps",
+    )
+    declare_keepout_lifecycle_start_delay_cmd = DeclareLaunchArgument(
+        "keepout_lifecycle_start_delay_s",
+        default_value="2.0",
+        description="Delay before starting keepout lifecycle manager to avoid startup races",
     )
     declare_use_collision_monitor_cmd = DeclareLaunchArgument(
         "use_collision_monitor",
@@ -189,23 +202,28 @@ def generate_launch_description():
         ],
         condition=IfCondition(use_keepout),
     )
-    keepout_lifecycle_cmd = Node(
-        package="nav2_lifecycle_manager",
-        executable="lifecycle_manager",
-        name="lifecycle_manager_keepout_filters",
-        output="screen",
-        parameters=[
-            {
-                "autostart": True,
-                "bond_timeout": 4.0,
-                "node_names": [
-                    "keepout_filter_mask_server",
-                    "keepout_costmap_filter_info_server",
+    keepout_lifecycle_cmd = TimerAction(
+        period=keepout_lifecycle_start_delay_s,
+        actions=[
+            Node(
+                package="nav2_lifecycle_manager",
+                executable="lifecycle_manager",
+                name="lifecycle_manager_keepout_filters",
+                output="screen",
+                parameters=[
+                    {
+                        "autostart": True,
+                        "bond_timeout": 4.0,
+                        "node_names": [
+                            "keepout_filter_mask_server",
+                            "keepout_costmap_filter_info_server",
+                        ],
+                    },
+                    {"use_sim_time": nav2_use_sim_time},
                 ],
-            },
-            {"use_sim_time": nav2_use_sim_time},
+                condition=IfCondition(use_keepout),
+            )
         ],
-        condition=IfCondition(use_keepout),
     )
 
     collision_monitor_cmd = Node(
@@ -254,6 +272,7 @@ def generate_launch_description():
     ld.add_action(declare_use_sim_time_cmd)
     ld.add_action(declare_map_frame_cmd)
     ld.add_action(declare_use_keepout_cmd)
+    ld.add_action(declare_keepout_lifecycle_start_delay_cmd)
     ld.add_action(declare_use_collision_monitor_cmd)
     ld.add_action(declare_use_rviz_cmd)
     ld.add_action(declare_rviz_config_cmd)

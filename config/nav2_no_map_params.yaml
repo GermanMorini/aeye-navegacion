@@ -248,8 +248,8 @@ global_costmap:
       footprint: "[[1.19,0.46],[1.19,-0.46],[-0.25,-0.46],[-0.25,0.46]]"
       footprint_padding: 0.0
       rolling_window: true
-      width: 250
-      height: 250
+      width: 350
+      height: 350
       resolution: 0.25
       transform_tolerance: 1.0
       # En modo sin mapa estático, mantener celdas como conocidas permite

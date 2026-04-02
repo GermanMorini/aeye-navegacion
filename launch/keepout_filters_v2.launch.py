@@ -2,7 +2,7 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, TimerAction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -28,12 +28,18 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
     keepout_mask_yaml = LaunchConfiguration("keepout_mask_yaml")
     keepout_mask_frame = LaunchConfiguration("keepout_mask_frame")
+    keepout_lifecycle_start_delay_s = LaunchConfiguration(
+        "keepout_lifecycle_start_delay_s"
+    )
 
     return LaunchDescription(
         [
             DeclareLaunchArgument("use_sim_time", default_value="False"),
             DeclareLaunchArgument("keepout_mask_yaml", default_value=default_keepout_mask),
             DeclareLaunchArgument("keepout_mask_frame", default_value="odom"),
+            DeclareLaunchArgument(
+                "keepout_lifecycle_start_delay_s", default_value="2.0"
+            ),
             Node(
                 package="nav2_map_server",
                 executable="map_server",
@@ -64,21 +70,26 @@ def generate_launch_description():
                     {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
                 ],
             ),
-            Node(
-                package="nav2_lifecycle_manager",
-                executable="lifecycle_manager",
-                name="lifecycle_manager_keepout_filters",
-                output="screen",
-                parameters=[
-                    {
-                        "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
-                        "autostart": True,
-                        "bond_timeout": 4.0,
-                        "node_names": [
-                            "keepout_filter_mask_server",
-                            "keepout_costmap_filter_info_server",
+            TimerAction(
+                period=keepout_lifecycle_start_delay_s,
+                actions=[
+                    Node(
+                        package="nav2_lifecycle_manager",
+                        executable="lifecycle_manager",
+                        name="lifecycle_manager_keepout_filters",
+                        output="screen",
+                        parameters=[
+                            {
+                                "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
+                                "autostart": True,
+                                "bond_timeout": 4.0,
+                                "node_names": [
+                                    "keepout_filter_mask_server",
+                                    "keepout_costmap_filter_info_server",
+                                ],
+                            }
                         ],
-                    }
+                    )
                 ],
             ),
         ]

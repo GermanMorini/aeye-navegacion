@@ -79,6 +79,27 @@ def test_nav2_only_launch_exposes_use_keepout_toggle() -> None:
     )
 
 
+def test_nav2_only_launch_delays_keepout_lifecycle_manager_start() -> None:
+    launch_path = PACKAGE_ROOT / "launch" / "nav2_only.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert 'DeclareLaunchArgument(\n        "keepout_lifecycle_start_delay_s",' in launch_contents
+    assert 'default_value="2.0"' in launch_contents
+    assert "keepout_lifecycle_cmd = TimerAction(" in launch_contents
+    assert "period=keepout_lifecycle_start_delay_s" in launch_contents
+    assert 'name="lifecycle_manager_keepout_filters"' in launch_contents
+
+
+def test_keepout_filters_v2_launch_delays_keepout_lifecycle_manager_start() -> None:
+    launch_path = PACKAGE_ROOT / "launch" / "keepout_filters_v2.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert 'DeclareLaunchArgument(\n                "keepout_lifecycle_start_delay_s", default_value="2.0"' in launch_contents
+    assert "TimerAction(" in launch_contents
+    assert "period=keepout_lifecycle_start_delay_s" in launch_contents
+    assert 'name="lifecycle_manager_keepout_filters"' in launch_contents
+
+
 def test_nav2_no_map_direct_frame_values() -> None:
     nav2_config_path = PACKAGE_ROOT / "config" / "nav2_no_map_params.yaml"
     nav2_config_contents = nav2_config_path.read_text(encoding="utf-8")
@@ -117,6 +138,30 @@ def test_navigate_through_poses_prunes_passed_goals_with_radius_matching_goal_to
 
     assert "xy_goal_tolerance: 1.2" in nav2_config_contents
     assert 'RemovePassedGoals input_goals="{goals}" output_goals="{goals}" radius="1.2"' in bt_xml_contents
+
+
+def test_navigate_to_pose_bt_only_uses_backup_for_follow_path_recovery() -> None:
+    bt_xml_path = (
+        PACKAGE_ROOT / "config" / "navigate_to_pose_w_replanning_and_recovery_no_spin.xml"
+    )
+    bt_xml_contents = bt_xml_path.read_text(encoding="utf-8")
+
+    assert '<Sequence name="FollowPathRecoveryActions">' in bt_xml_contents
+    assert '<BackUp backup_dist="2.0" backup_speed="1.2" />' in bt_xml_contents
+    assert '<ReactiveFallback name="FallbackRecoveries">' not in bt_xml_contents
+    assert '<Sequence name="WaitAndReplan">' not in bt_xml_contents
+
+
+def test_navigate_through_poses_bt_only_uses_backup_for_follow_path_recovery() -> None:
+    bt_xml_path = (
+        PACKAGE_ROOT / "config" / "navigate_through_poses_w_replanning_and_recovery_no_spin.xml"
+    )
+    bt_xml_contents = bt_xml_path.read_text(encoding="utf-8")
+
+    assert '<Sequence name="FollowPathRecoveryActions">' in bt_xml_contents
+    assert '<BackUp backup_dist="2.0" backup_speed="1.2"/>' in bt_xml_contents
+    assert '<ReactiveFallback name="RecoveryFallback">' not in bt_xml_contents
+    assert '<RoundRobin name="RecoveryActions">' not in bt_xml_contents
 
 
 def test_dual_ekf_local_uses_wheel_and_pixhawk_odometry_topics() -> None:
