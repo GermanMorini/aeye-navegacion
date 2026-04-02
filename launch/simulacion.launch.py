@@ -26,6 +26,7 @@ def generate_launch_description():
     vx_min_effective_mps = LaunchConfiguration("vx_min_effective_mps")
     invert_steer_from_cmd_vel = LaunchConfiguration("invert_steer_from_cmd_vel")
     use_cmd_vel_ackermann_bridge = LaunchConfiguration("use_cmd_vel_ackermann_bridge")
+    launch_controller_server = LaunchConfiguration("launch_controller_server")
     nav2_params_file = LaunchConfiguration("nav2_params_file")
     collision_monitor_params_file = LaunchConfiguration("collision_monitor_params_file")
     keepout_mask_yaml_arg = LaunchConfiguration("keepout_mask_yaml")
@@ -150,6 +151,7 @@ def generate_launch_description():
             DeclareLaunchArgument("vx_min_effective_mps", default_value="0.5"),
             DeclareLaunchArgument("invert_steer_from_cmd_vel", default_value="True"),
             DeclareLaunchArgument("use_cmd_vel_ackermann_bridge", default_value="False"),
+            DeclareLaunchArgument("launch_controller_server", default_value="False"),
             DeclareLaunchArgument(
                 "nav2_params_file",
                 default_value=os.path.join(gps_wpf_dir, "config", "nav2_no_map_params.yaml"),
@@ -254,6 +256,7 @@ def generate_launch_description():
                     "vx_min_effective_mps": vx_min_effective_mps,
                     "invert_steer_from_cmd_vel": invert_steer_from_cmd_vel,
                     "use_cmd_vel_ackermann_bridge": use_cmd_vel_ackermann_bridge,
+                    "launch_controller_server": launch_controller_server,
                     "nav2_params_file": nav2_params_file,
                     "collision_monitor_params_file": collision_monitor_params_file,
                     "keepout_mask_yaml": keepout_mask_yaml_arg,

@@ -17,6 +17,18 @@ def test_sim_local_v2_launch_uses_realistic_command_chain() -> None:
     assert '"fromll_frame": "odom"' not in launch_contents
 
 
+def test_sim_local_v2_launch_exposes_controller_server_toggle() -> None:
+    launch_path = (
+        Path(__file__).resolve().parents[1] / "launch" / "sim_local_v2.launch.py"
+    )
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert 'DeclareLaunchArgument("launch_controller_server", default_value="True")' in launch_contents
+    assert 'executable="controller_server_node"' in launch_contents
+    assert "launch_controller_server," in launch_contents
+    assert "use_cmd_vel_ackermann_bridge," in launch_contents
+
+
 def test_sim_local_v2_launch_exposes_optional_bridge_mode() -> None:
     launch_path = (
         Path(__file__).resolve().parents[1] / "launch" / "sim_local_v2.launch.py"

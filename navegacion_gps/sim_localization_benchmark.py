@@ -465,6 +465,7 @@ def _launch_simulation(
         "navegacion_gps",
         "simulacion.launch.py",
         "use_rviz:=False",
+        "launch_controller_server:=True",
         "use_mapviz:=False",
         f"realism_mode:={_bool_to_launch_arg(realism_mode)}",
         f"sim_localization_profile:={profile}",

@@ -7,6 +7,7 @@ def test_simulacion_launch_wraps_sim_local_v2() -> None:
 
     assert "sim_local_v2.launch.py" in launch_contents
     assert 'DeclareLaunchArgument("use_cmd_vel_ackermann_bridge", default_value="False")' in launch_contents
+    assert 'DeclareLaunchArgument("launch_controller_server", default_value="False")' in launch_contents
 
 
 def test_simulacion_launch_uses_requested_defaults() -> None:
@@ -62,6 +63,13 @@ def test_simulacion_launch_includes_web_zone_server_stack() -> None:
     assert '"launch_nav_command_server": "false"' in launch_contents
     assert '"map_frame": "map"' in launch_contents
     assert '"zones_fromll_output_frame": "map"' in launch_contents
+
+
+def test_simulacion_launch_disables_controller_server_by_default() -> None:
+    launch_path = Path(__file__).resolve().parents[1] / "launch" / "simulacion.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert '"launch_controller_server": launch_controller_server' in launch_contents
 
 
 def test_simulacion_launch_exposes_ekf_global_toggle() -> None:

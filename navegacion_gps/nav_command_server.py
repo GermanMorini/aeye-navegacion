@@ -206,8 +206,9 @@ class NavCommandServerNode(Node):
         self._last_telemetry_sent: Optional[float] = None
         self._last_cmd_vel_safe_monotonic: Optional[float] = None
         self._loop_waypoint_poses: List[PoseStamped] = []
-        self._loop_original_poses: List[PoseStamped] = []
-        self._loop_restart_poses: List[PoseStamped] = []
+        self._loop_plan1_poses: List[PoseStamped] = []
+        self._loop_plan2_poses: List[PoseStamped] = []
+        self._loop_next_phase = "plan2"
         self._loop_enabled = False
         self._last_nav_result_status = int(GoalStatus.STATUS_UNKNOWN)
         self._last_nav_result_text = "idle"
@@ -1169,8 +1170,9 @@ class NavCommandServerNode(Node):
 
     def _clear_loop_config_locked(self) -> None:
         self._loop_waypoint_poses = []
-        self._loop_original_poses = []
-        self._loop_restart_poses = []
+        self._loop_plan1_poses = []
+        self._loop_plan2_poses = []
+        self._loop_next_phase = "plan2"
         self._loop_enabled = False
 
     def _build_pose_from_ll(self, lat: float, lon: float, yaw_deg: float) -> Optional[PoseStamped]:
@@ -1203,11 +1205,11 @@ class NavCommandServerNode(Node):
         return poses, ""
 
     @staticmethod
-    def _build_loop_restart_poses(poses: Sequence[PoseStamped]) -> List[PoseStamped]:
+    def _build_loop_plan2_poses(poses: Sequence[PoseStamped]) -> List[PoseStamped]:
         poses_list = list(poses)
         if len(poses_list) <= 1:
             return poses_list
-        return poses_list[1:] + [poses_list[0]]
+        return [poses_list[-1], poses_list[0]]
 
     def _send_follow_waypoints_goal(
         self, poses: Sequence[PoseStamped], loop_enabled: bool, reason: str
@@ -1435,15 +1437,16 @@ class NavCommandServerNode(Node):
                     )
             return ok, err
 
-        loop_restart_poses = self._build_loop_restart_poses(poses)
+        loop_plan2_poses = self._build_loop_plan2_poses(poses)
         with self._lock:
-            self._loop_original_poses = list(poses)
-            self._loop_restart_poses = loop_restart_poses
-            self._loop_waypoint_poses = list(loop_restart_poses)
+            self._loop_plan1_poses = list(poses)
+            self._loop_plan2_poses = loop_plan2_poses
+            self._loop_waypoint_poses = list(poses)
+            self._loop_next_phase = "plan2"
             self._loop_enabled = True
         self.get_logger().info(
-            "Loop paths configured "
-            f"(original={len(self._loop_original_poses)}, restart={len(loop_restart_poses)})"
+            "Loop plans configured "
+            f"(plan1={len(self._loop_plan1_poses)}, plan2={len(loop_plan2_poses)})"
         )
         return ok, err
 
@@ -1461,6 +1464,7 @@ class NavCommandServerNode(Node):
 
         restart_goal_poses: Optional[List[PoseStamped]] = None
         restart_reason = ""
+        next_loop_phase_after_restart = "plan2"
         force_brake = False
         with self._lock:
             auto_mode = str(self._auto_mode)
@@ -1471,11 +1475,17 @@ class NavCommandServerNode(Node):
                 and status == GoalStatus.STATUS_SUCCEEDED
                 and self._loop_enabled
                 and (not manual_enabled)
-                and len(self._loop_original_poses) > 1
-                and len(self._loop_restart_poses) > 1
+                and len(self._loop_plan1_poses) > 1
+                and len(self._loop_plan2_poses) > 1
             ):
-                restart_goal_poses = list(self._loop_restart_poses)
-                restart_reason = "loop_restart_rotated"
+                next_phase = str(self._loop_next_phase)
+                if next_phase == "plan1":
+                    restart_goal_poses = list(self._loop_plan1_poses)
+                    next_loop_phase_after_restart = "plan2"
+                else:
+                    restart_goal_poses = list(self._loop_plan2_poses)
+                    next_loop_phase_after_restart = "plan1"
+                restart_reason = "loop_restart"
             else:
                 self._is_navigating = False
                 self._auto_mode = "idle"
@@ -1505,6 +1515,7 @@ class NavCommandServerNode(Node):
                 if ok and self._loop_enabled and (not self._manual_enabled):
                     self._is_navigating = True
                     self._auto_mode = "loop"
+                    self._loop_next_phase = str(next_loop_phase_after_restart)
                     NavCommandServerNode._set_nav_result_locked(
                         self,
                         int(GoalStatus.STATUS_EXECUTING),

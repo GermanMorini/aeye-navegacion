@@ -3,7 +3,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
-from launch.conditions import IfCondition, UnlessCondition
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
@@ -26,6 +26,7 @@ def generate_launch_description():
     vx_min_effective_mps = LaunchConfiguration("vx_min_effective_mps")
     invert_steer_from_cmd_vel = LaunchConfiguration("invert_steer_from_cmd_vel")
     use_cmd_vel_ackermann_bridge = LaunchConfiguration("use_cmd_vel_ackermann_bridge")
+    launch_controller_server = LaunchConfiguration("launch_controller_server")
     nav2_params_file = LaunchConfiguration("nav2_params_file")
     collision_monitor_params_file = LaunchConfiguration("collision_monitor_params_file")
     keepout_mask_yaml_arg = LaunchConfiguration("keepout_mask_yaml")
@@ -138,6 +139,7 @@ def generate_launch_description():
             DeclareLaunchArgument("vx_min_effective_mps", default_value="0.5"),
             DeclareLaunchArgument("invert_steer_from_cmd_vel", default_value="True"),
             DeclareLaunchArgument("use_cmd_vel_ackermann_bridge", default_value="False"),
+            DeclareLaunchArgument("launch_controller_server", default_value="True"),
             DeclareLaunchArgument(
                 "nav2_params_file",
                 default_value=os.path.join(gps_wpf_dir, "config", "nav2_no_map_params.yaml"),
@@ -259,7 +261,17 @@ def generate_launch_description():
                 executable="controller_server_node",
                 name="vehicle_controller_server",
                 output="screen",
-                condition=UnlessCondition(use_cmd_vel_ackermann_bridge),
+                condition=IfCondition(
+                    PythonExpression(
+                        [
+                            "'",
+                            launch_controller_server,
+                            "'.lower() == 'true' and '",
+                            use_cmd_vel_ackermann_bridge,
+                            "'.lower() != 'true'",
+                        ]
+                    )
+                ),
                 parameters=[
                     {
                         "use_sim_time": ParameterValue(use_sim_time, value_type=bool),
