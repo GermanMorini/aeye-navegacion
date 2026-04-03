@@ -3,6 +3,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
 
@@ -32,16 +33,21 @@ def generate_launch_description():
     custom_urdf = LaunchConfiguration("custom_urdf")
     world = LaunchConfiguration("world")
     world_name = LaunchConfiguration("world_name")
+    gz_headless = LaunchConfiguration("gz_headless")
+    spawn_yaw_rad = LaunchConfiguration("spawn_yaw_rad")
     model_name = LaunchConfiguration("model_name")
     pose_covariance_xy = LaunchConfiguration("pose_covariance_xy")
     pose_covariance_yaw = LaunchConfiguration("pose_covariance_yaw")
     twist_covariance_vx = LaunchConfiguration("twist_covariance_vx")
     twist_covariance_vy = LaunchConfiguration("twist_covariance_vy")
     twist_covariance_yaw_rate = LaunchConfiguration("twist_covariance_yaw_rate")
+    gps_horizontal_variance = LaunchConfiguration("gps_horizontal_variance")
+    gps_vertical_variance = LaunchConfiguration("gps_vertical_variance")
     ekf_local = LaunchConfiguration("ekf_local")
     ekf_global = LaunchConfiguration("ekf_global")
     ukf = LaunchConfiguration("ukf")
     datum_setter = LaunchConfiguration("datum_setter")
+    use_dual_gps_heading = LaunchConfiguration("use_dual_gps_heading")
     launch_web_zone_server = LaunchConfiguration("launch_web_zone_server")
     web_ws_host = LaunchConfiguration("web_ws_host")
     web_ws_port = LaunchConfiguration("web_ws_port")
@@ -58,6 +64,13 @@ def generate_launch_description():
             "' == 'local' else '",
             rviz_full,
             "'",
+        ]
+    )
+    resolved_map_frame = PythonExpression(
+        [
+            "'map' if '",
+            ekf_global,
+            "'.lower() == 'true' else 'odom'",
         ]
     )
 
@@ -77,7 +90,7 @@ def generate_launch_description():
             DeclareLaunchArgument("wheelbase_m", default_value="0.94"),
             DeclareLaunchArgument("invert_measured_steer_sign", default_value="True"),
             DeclareLaunchArgument("vx_deadband_mps", default_value="0.01"),
-            DeclareLaunchArgument("vx_min_effective_mps", default_value="0.5"),
+            DeclareLaunchArgument("vx_min_effective_mps", default_value="0.35"),
             DeclareLaunchArgument("invert_steer_from_cmd_vel", default_value="True"),
             DeclareLaunchArgument("use_cmd_vel_ackermann_bridge", default_value="False"),
             DeclareLaunchArgument(
@@ -89,21 +102,31 @@ def generate_launch_description():
                 default_value=os.path.join(gps_wpf_dir, "config", "collision_monitor.yaml"),
             ),
             DeclareLaunchArgument("keepout_mask_yaml", default_value=keepout_mask_yaml),
+            DeclareLaunchArgument("use_dual_gps_heading", default_value="true"),
             DeclareLaunchArgument(
                 "custom_urdf",
-                default_value=os.path.join(gps_wpf_dir, "models", "cuatri_real.urdf"),
+                default_value=PythonExpression([
+                    "'" + os.path.join(gps_wpf_dir, "models", "cuatri_2gps.urdf") + "' if '",
+                    use_dual_gps_heading,
+                    "'.lower() == 'true' else '"
+                    + os.path.join(gps_wpf_dir, "models", "cuatri_real.urdf") + "'",
+                ]),
             ),
             DeclareLaunchArgument(
                 "world",
                 default_value=os.path.join(gps_wpf_dir, "worlds", "vacio.world"),
             ),
             DeclareLaunchArgument("world_name", default_value="vacio"),
+            DeclareLaunchArgument("gz_headless", default_value="true"),
+            DeclareLaunchArgument("spawn_yaw_rad", default_value="auto"),
             DeclareLaunchArgument("model_name", default_value="quad_ackermann_viewer_safe"),
             DeclareLaunchArgument("pose_covariance_xy", default_value="0.01"),
             DeclareLaunchArgument("pose_covariance_yaw", default_value="0.05"),
             DeclareLaunchArgument("twist_covariance_vx", default_value="0.02"),
             DeclareLaunchArgument("twist_covariance_vy", default_value="0.02"),
             DeclareLaunchArgument("twist_covariance_yaw_rate", default_value="0.05"),
+            DeclareLaunchArgument("gps_horizontal_variance", default_value="9.0"),
+            DeclareLaunchArgument("gps_vertical_variance", default_value="16.0"),
             DeclareLaunchArgument("ekf_local", default_value="True"),
             DeclareLaunchArgument("ekf_global", default_value="False"),
             DeclareLaunchArgument("ukf", default_value="False"),
@@ -133,28 +156,34 @@ def generate_launch_description():
                     "custom_urdf": custom_urdf,
                     "world": world,
                     "world_name": world_name,
+                    "gz_headless": gz_headless,
+                    "spawn_yaw_rad": spawn_yaw_rad,
                     "model_name": model_name,
                     "pose_covariance_xy": pose_covariance_xy,
                     "pose_covariance_yaw": pose_covariance_yaw,
                     "twist_covariance_vx": twist_covariance_vx,
                     "twist_covariance_vy": twist_covariance_vy,
                     "twist_covariance_yaw_rate": twist_covariance_yaw_rate,
+                    "gps_horizontal_variance": gps_horizontal_variance,
+                    "gps_vertical_variance": gps_vertical_variance,
                     "ekf_local": ekf_local,
                     "ekf_global": ekf_global,
                     "ukf": ukf,
                     "datum_setter": datum_setter,
+                    "use_dual_gps_heading": use_dual_gps_heading,
                 }.items(),
             ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
                     os.path.join(map_tools_dir, "launch", "no_go_editor.launch.py")
                 ),
+                condition=IfCondition(launch_web_zone_server),
                 launch_arguments={
                     "ws_host": web_ws_host,
                     "ws_port": web_ws_port,
                     "gps_topic": "/gps/fix",
-                    "map_frame": "map",
-                    "zones_fromll_output_frame": "map",
+                    "map_frame": resolved_map_frame,
+                    "zones_fromll_output_frame": resolved_map_frame,
                     "launch_nav_command_server": "false",
                     "launch_zones_manager": launch_web_zone_server,
                     "launch_nav_snapshot_server": launch_web_zone_server,

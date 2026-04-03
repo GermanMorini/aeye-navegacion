@@ -1,3 +1,4 @@
+import math
 import os
 
 from ament_index_python.packages import get_package_share_directory
@@ -32,16 +33,28 @@ def generate_launch_description():
     custom_urdf = LaunchConfiguration("custom_urdf")
     world = LaunchConfiguration("world")
     world_name = LaunchConfiguration("world_name")
+    gz_headless = LaunchConfiguration("gz_headless")
+    spawn_yaw_rad = LaunchConfiguration("spawn_yaw_rad")
     model_name = LaunchConfiguration("model_name")
     pose_covariance_xy = LaunchConfiguration("pose_covariance_xy")
     pose_covariance_yaw = LaunchConfiguration("pose_covariance_yaw")
     twist_covariance_vx = LaunchConfiguration("twist_covariance_vx")
     twist_covariance_vy = LaunchConfiguration("twist_covariance_vy")
     twist_covariance_yaw_rate = LaunchConfiguration("twist_covariance_yaw_rate")
+    gps_horizontal_variance = LaunchConfiguration("gps_horizontal_variance")
+    gps_vertical_variance = LaunchConfiguration("gps_vertical_variance")
     ekf_local = LaunchConfiguration("ekf_local")
     ekf_global = LaunchConfiguration("ekf_global")
     ukf = LaunchConfiguration("ukf")
     datum_setter = LaunchConfiguration("datum_setter")
+    use_dual_gps_heading = LaunchConfiguration("use_dual_gps_heading")
+    resolved_map_frame = PythonExpression(
+        [
+            "'map' if '",
+            ekf_global,
+            "'.lower() == 'true' else 'odom'",
+        ]
+    )
 
     return LaunchDescription(
         [
@@ -53,7 +66,7 @@ def generate_launch_description():
             DeclareLaunchArgument("use_rviz", default_value="True"),
             DeclareLaunchArgument("rviz_config", default_value=default_rviz),
             DeclareLaunchArgument("vx_deadband_mps", default_value="0.01"),
-            DeclareLaunchArgument("vx_min_effective_mps", default_value="0.5"),
+            DeclareLaunchArgument("vx_min_effective_mps", default_value="0.35"),
             DeclareLaunchArgument("invert_steer_from_cmd_vel", default_value="True"),
             DeclareLaunchArgument("use_cmd_vel_ackermann_bridge", default_value="False"),
             DeclareLaunchArgument(
@@ -62,7 +75,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "collision_monitor_params_file",
-                default_value=os.path.join(gps_wpf_dir, "config", "collision_monitor_v2.yaml"),
+                default_value=os.path.join(gps_wpf_dir, "config", "collision_monitor.yaml"),
             ),
             DeclareLaunchArgument("keepout_mask_yaml", default_value=keepout_mask_yaml),
             DeclareLaunchArgument(
@@ -74,6 +87,8 @@ def generate_launch_description():
                 default_value=os.path.join(gps_wpf_dir, "worlds", "vacio.world"),
             ),
             DeclareLaunchArgument("world_name", default_value="vacio"),
+            DeclareLaunchArgument("gz_headless", default_value="true"),
+            DeclareLaunchArgument("spawn_yaw_rad", default_value="auto"),
             DeclareLaunchArgument(
                 "model_name", default_value="quad_ackermann_viewer_safe"
             ),
@@ -82,10 +97,13 @@ def generate_launch_description():
             DeclareLaunchArgument("twist_covariance_vx", default_value="0.02"),
             DeclareLaunchArgument("twist_covariance_vy", default_value="0.02"),
             DeclareLaunchArgument("twist_covariance_yaw_rate", default_value="0.05"),
+            DeclareLaunchArgument("gps_horizontal_variance", default_value="9.0"),
+            DeclareLaunchArgument("gps_vertical_variance", default_value="16.0"),
             DeclareLaunchArgument("ekf_local", default_value="True"),
             DeclareLaunchArgument("ekf_global", default_value="False"),
             DeclareLaunchArgument("ukf", default_value="False"),
             DeclareLaunchArgument("datum_setter", default_value="false"),
+            DeclareLaunchArgument("use_dual_gps_heading", default_value="true"),
             Node(
                 package="navegacion_gps",
                 executable="sim_sensor_normalizer_v2",
@@ -98,6 +116,26 @@ def generate_launch_description():
                     {"imu_yaw_calib_odom_topic": "/odom_raw"},
                     {"imu_yaw_calib_speed_threshold_mps": 0.05},
                     {"imu_yaw_calib_timeout_s": 3.0},
+                    {
+                        "gps_horizontal_variance": ParameterValue(
+                            gps_horizontal_variance, value_type=float
+                        )
+                    },
+                    {
+                        "gps_vertical_variance": ParameterValue(
+                            gps_vertical_variance, value_type=float
+                        )
+                    },
+                    {
+                        "gps2_in_topic": ParameterValue(
+                            PythonExpression([
+                                "'/gps2/fix_raw' if '",
+                                use_dual_gps_heading,
+                                "'.lower() == 'true' else ''",
+                            ]),
+                            value_type=str,
+                        )
+                    },
                 ],
             ),
             IncludeLaunchDescription(
@@ -109,6 +147,8 @@ def generate_launch_description():
                     "custom_urdf": custom_urdf,
                     "world": world,
                     "world_name": world_name,
+                    "gz_headless": gz_headless,
+                    "spawn_yaw_rad": spawn_yaw_rad,
                     "model_name": model_name,
                 }.items(),
             ),
@@ -124,15 +164,19 @@ def generate_launch_description():
                         "transport_backend": "sim_gazebo",
                         "serial_port": "/dev/null",
                         "serial_baud": 115200,
-                        "serial_tx_hz": 50.0,
+                        "serial_tx_hz": 20.0,
+                        "control_hz": 20.0,
                         "max_reverse_mps": 1.30,
                         "max_abs_angular_z": 0.4,
+                        "wheelbase_m": ParameterValue(wheelbase_m, value_type=float),
+                        "max_steering_angle_rad": 0.5235987756,
                         "vx_deadband_mps": ParameterValue(
                             vx_deadband_mps, value_type=float
                         ),
                         "vx_min_effective_mps": ParameterValue(
                             vx_min_effective_mps, value_type=float
                         ),
+                        "cmd_log_enabled": False,
                         "invert_steer_from_cmd_vel": ParameterValue(
                             invert_steer_from_cmd_vel, value_type=bool
                         ),
@@ -168,6 +212,7 @@ def generate_launch_description():
                             vx_min_effective_mps, value_type=float
                         ),
                         "max_abs_angular_z": 0.4,
+                        "wheelbase_m": ParameterValue(wheelbase_m, value_type=float),
                         "invert_steer_from_cmd_vel": ParameterValue(
                             invert_steer_from_cmd_vel, value_type=bool
                         ),
@@ -213,7 +258,9 @@ def generate_launch_description():
                         "fromll_service": "/fromLL",
                         "fromll_service_fallback": "/navsat_transform/fromLL",
                         "fromll_wait_timeout_s": 2.0,
-                        "map_frame": "odom",
+                        "map_frame": ParameterValue(
+                            resolved_map_frame, value_type=str
+                        ),
                         "gps_topic": "/gps/fix",
                         "cmd_vel_safe_topic": "/cmd_vel_safe",
                         "cmd_vel_final_topic": "/cmd_vel_final",
@@ -223,6 +270,7 @@ def generate_launch_description():
                         "teleop_cmd_topic": "/cmd_vel_teleop",
                         "brake_publish_count": 5,
                         "brake_publish_interval_s": 0.1,
+                        "goal_arrival_radius_m": 0.8,
                         "manual_cmd_timeout_s": 0.4,
                         "manual_watchdog_hz": 10.0,
                         "nav_telemetry_hz": 5.0,
@@ -251,6 +299,7 @@ def generate_launch_description():
                     "ekf_local": ekf_local,
                     "ekf_global": ekf_global,
                     "ukf": ukf,
+                    "use_dual_gps_heading": use_dual_gps_heading,
                 }.items(),
             ),
             Node(
@@ -276,6 +325,7 @@ def generate_launch_description():
                         "datum_call_timeout_s": 2.5,
                         "datum_call_retries": 3,
                         "datum_retry_delay_s": 0.15,
+                        "auto_set_on_first_fix": True,
                     }
                 ],
             ),
@@ -289,10 +339,11 @@ def generate_launch_description():
                         launch_arguments={
                             "use_sim_time": use_sim_time,
                             "use_keepout": use_keepout,
+                            "map_frame": resolved_map_frame,
                             "nav2_params_file": nav2_params_file,
                             "collision_monitor_params_file": collision_monitor_params_file,
                             "keepout_mask_yaml": keepout_mask_yaml_arg,
-                            "keepout_mask_frame": "map",
+                            "keepout_mask_frame": resolved_map_frame,
                         }.items(),
                     )
                 ],
@@ -305,6 +356,74 @@ def generate_launch_description():
                 arguments=["-d", rviz_config],
                 parameters=[{"use_sim_time": ParameterValue(use_sim_time, value_type=bool)}],
                 condition=IfCondition(use_rviz),
+            ),
+            Node(
+                package="navegacion_gps",
+                executable="dual_gps_heading_sim",
+                name="dual_gps_heading_sim",
+                output="screen",
+                condition=IfCondition(
+                    PythonExpression(["'", use_dual_gps_heading, "'.lower() == 'true'"])
+                ),
+                parameters=[
+                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+                    {"gps_right_topic": "/gps2/fix"},
+                    {"gps_left_topic": "/gps/fix"},
+                    {"raw_heading_imu_topic": "/ublox_rover/navheading"},
+                    {"heading_imu_topic": ""},
+                    {"heading_deg_topic": "/dual_gps/heading_deg"},
+                    {"odom_heading_topic": "/odom_raw"},
+                    {"output_frame": "base_link"},
+                    {"corrected_yaw_offset_rad": math.pi / 2.0},
+                ],
+            ),
+            Node(
+                package="navegacion_gps",
+                executable="dual_gps_heading_real",
+                name="dual_gps_heading_real_sim",
+                output="screen",
+                condition=IfCondition(
+                    PythonExpression(["'", use_dual_gps_heading, "'.lower() == 'true'"])
+                ),
+                parameters=[
+                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+                    {"input_topic": "/ublox_rover/navheading"},
+                    {"output_topic": "/dual_gps/heading"},
+                    {"yaw_offset_rad": -math.pi / 2.0},
+                    {"output_frame": "base_link"},
+                ],
+            ),
+            Node(
+                package="navegacion_gps",
+                executable="imu_pose_republisher",
+                name="ublox_navheading_pose_republisher",
+                output="screen",
+                condition=IfCondition(
+                    PythonExpression(["'", use_dual_gps_heading, "'.lower() == 'true'"])
+                ),
+                parameters=[
+                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+                    {"input_topic": "/ublox_rover/navheading"},
+                    {"output_topic": "/ublox_rover/navheading_pose"},
+                    {"output_frame": "odom"},
+                    {"odom_topic": "/odometry/local"},
+                ],
+            ),
+            Node(
+                package="navegacion_gps",
+                executable="imu_pose_republisher",
+                name="dual_gps_heading_pose_republisher",
+                output="screen",
+                condition=IfCondition(
+                    PythonExpression(["'", use_dual_gps_heading, "'.lower() == 'true'"])
+                ),
+                parameters=[
+                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
+                    {"input_topic": "/dual_gps/heading"},
+                    {"output_topic": "/dual_gps/heading_pose"},
+                    {"output_frame": "odom"},
+                    {"odom_topic": "/odometry/local"},
+                ],
             ),
         ]
     )

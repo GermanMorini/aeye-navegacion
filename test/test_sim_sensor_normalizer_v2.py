@@ -116,3 +116,12 @@ def test_sim_sensor_normalizer_source_declares_yaw_auto_calibration_params() -> 
         in source_contents
     )
     assert 'self.declare_parameter("imu_yaw_calib_timeout_s", 3.0)' in source_contents
+    assert (
+        'self.declare_parameter(\n'
+        '            "gps_horizontal_variance", DEFAULT_GPS_HORIZONTAL_VARIANCE\n'
+        "        )" in source_contents
+    )
+    assert (
+        'self.declare_parameter("gps_vertical_variance", DEFAULT_GPS_VERTICAL_VARIANCE)'
+        in source_contents
+    )

@@ -38,6 +38,9 @@ class _FakeAutoNode:
         self.imu_yaw_max_age_s = 1.0
         self._rtk_current = False
         self._pending_auto_set = False
+        self._pending_first_fix_auto_set = False
+        self.auto_set_on_first_fix = False
+        self.already_set = False
         self.logger = _FakeLogger()
         self.auto_calls = []
 
@@ -127,6 +130,43 @@ class _FakeSetWithImuNode:
 
     def get_clock(self) -> _FakeClock:
         return _FakeClock()
+
+
+class _ImmediateFuture:
+    def __init__(self, result) -> None:
+        self._result = result
+
+    def done(self) -> bool:
+        return True
+
+    def result(self):
+        return self._result
+
+
+class _RecordingDatumClient:
+    def __init__(self) -> None:
+        self.request = None
+
+    def call_async(self, req):
+        self.request = req
+        return _ImmediateFuture(object())
+
+
+class _FakeCallDatumNode:
+    _call_set_datum = DatumSetterNode._call_set_datum
+
+    def __init__(self) -> None:
+        self.datum_call_retries = 1
+        self.datum_call_timeout_s = 1.0
+        self.datum_retry_delay_s = 0.0
+        self._last_datum_error = None
+        self.client = _RecordingDatumClient()
+
+    def _resolve_datum_client(self):
+        return self.client
+
+    def _wait_for_future(self, future, timeout_sec: float):
+        return future.result()
 
 
 def _gps_msg(lat: float, lon: float, status: int) -> NavSatFix:
@@ -233,6 +273,36 @@ def test_auto_set_is_deferred_until_imu_yaw_becomes_available() -> None:
     assert node.auto_calls[0][3] == "rtk_edge_pending_imu"
 
 
+def test_auto_set_can_run_on_first_fix_without_rtk() -> None:
+    node = _FakeAutoNode()
+    node.auto_set_on_first_fix = True
+    DatumSetterNode._on_imu(node, _imu_msg(0.1))
+
+    DatumSetterNode._on_gps_fix(
+        node,
+        _gps_msg(-31.7, -64.7, NavSatStatus.STATUS_FIX),
+    )
+    assert len(node.auto_calls) == 1
+    assert node.auto_calls[0][2] is False
+    assert node.auto_calls[0][3] == "first_fix_gps"
+
+
+def test_auto_set_first_fix_waits_for_imu_when_needed() -> None:
+    node = _FakeAutoNode()
+    node.auto_set_on_first_fix = True
+
+    DatumSetterNode._on_gps_fix(
+        node,
+        _gps_msg(-31.8, -64.8, NavSatStatus.STATUS_FIX),
+    )
+    assert node.auto_calls == []
+    assert node._pending_first_fix_auto_set is True
+
+    DatumSetterNode._on_imu(node, _imu_msg(0.4))
+    assert len(node.auto_calls) == 1
+    assert node.auto_calls[0][3] == "first_fix_pending_imu"
+
+
 def test_set_datum_fails_without_current_gps_for_empty_coords() -> None:
     node = _FakeSetNode()
     req = SetDatum.Request()
@@ -318,3 +388,20 @@ def test_set_datum_manual_uses_imu_yaw_in_setdatum_call() -> None:
     assert out.ok is True
     assert len(node.calls) == 1
     assert math.isclose(node.calls[0][2], 1.234, rel_tol=1e-6, abs_tol=1e-6)
+
+
+def test_call_set_datum_builds_quaternion_from_yaw() -> None:
+    node = _FakeCallDatumNode()
+
+    ok, err = node._call_set_datum(-31.5, -64.3, 1.234)
+    assert ok is True
+    assert err == ""
+    assert node.client.request is not None
+
+    geo_pose = node.client.request.geo_pose
+    assert math.isclose(
+        geo_pose.orientation.z, math.sin(1.234 / 2.0), rel_tol=1e-6, abs_tol=1e-6
+    )
+    assert math.isclose(
+        geo_pose.orientation.w, math.cos(1.234 / 2.0), rel_tol=1e-6, abs_tol=1e-6
+    )

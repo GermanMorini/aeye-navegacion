@@ -51,9 +51,13 @@ class _FakeResultFuture:
 
 
 class _FakeLoopNode:
+    _activate_auto_stop_hold = NavCommandServerNode._activate_auto_stop_hold
+    _arm_final_stop_latch = NavCommandServerNode._arm_final_stop_latch
+
     def __init__(self):
         self._lock = threading.Lock()
         self._current_goal_handle = object()
+        self._ignored_goal_result_ids = set()
         self._loop_enabled = True
         self._loop_waypoint_poses = [1, 2]
         self._loop_original_poses = [1, 2, 3]
@@ -61,6 +65,12 @@ class _FakeLoopNode:
         self._manual_enabled = False
         self._is_navigating = True
         self._auto_mode = "loop"
+        self._active_goal_target_ll = None
+        self._pending_nav_result_override = None
+        self.auto_stop_hold_s = 0.75
+        self._auto_stop_hold_until_s = 0.0
+        self._final_stop_latched = False
+        self._final_stop_brake_pct = 100
 
         self._send_ok = True
         self._send_err = ""
@@ -147,7 +157,7 @@ class _FakeSendNode:
     def _publish_telemetry(self, force: bool = False) -> None:
         _ = force
 
-    def _on_nav_action_result_done(self, _action_name, _future) -> None:
+    def _on_nav_action_result_done(self, _action_name, _goal_handle, _future) -> None:
         return None
 
     def get_logger(self):
@@ -255,10 +265,12 @@ def test_send_nav_goal_for_poses_multi_pose_path_uses_zero_stamp_latest() -> Non
 
 def test_result_callback_restarts_with_rotated_path_on_each_success():
     node = _FakeLoopNode()
+    first_handle = node._current_goal_handle
 
     NavCommandServerNode._on_nav_action_result_done(
         node,
         "NavigateThroughPoses",
+        first_handle,
         _FakeResultFuture(GoalStatus.STATUS_SUCCEEDED),
     )
     assert node.sent_calls[0] == ([2, 3, 1], True, "loop_restart_rotated")
@@ -266,9 +278,11 @@ def test_result_callback_restarts_with_rotated_path_on_each_success():
     assert node._auto_mode == "loop"
 
     node._current_goal_handle = object()
+    second_handle = node._current_goal_handle
     NavCommandServerNode._on_nav_action_result_done(
         node,
         "NavigateThroughPoses",
+        second_handle,
         _FakeResultFuture(GoalStatus.STATUS_SUCCEEDED),
     )
     assert node.sent_calls[1] == ([2, 3, 1], True, "loop_restart_rotated")
@@ -278,10 +292,12 @@ def test_result_callback_restarts_with_rotated_path_on_each_success():
 
 def test_result_callback_stops_loop_when_status_not_succeeded():
     node = _FakeLoopNode()
+    handle = node._current_goal_handle
 
     NavCommandServerNode._on_nav_action_result_done(
         node,
         "NavigateThroughPoses",
+        handle,
         _FakeResultFuture(GoalStatus.STATUS_ABORTED),
     )
     assert node.sent_calls == []
@@ -295,10 +311,12 @@ def test_result_callback_stops_loop_when_restart_send_fails():
     node = _FakeLoopNode()
     node._send_ok = False
     node._send_err = "goal rejected by NavigateThroughPoses"
+    handle = node._current_goal_handle
 
     NavCommandServerNode._on_nav_action_result_done(
         node,
         "NavigateThroughPoses",
+        handle,
         _FakeResultFuture(GoalStatus.STATUS_SUCCEEDED),
     )
     assert len(node.sent_calls) == 1
@@ -317,10 +335,12 @@ def test_result_callback_point_to_point_stops_on_success():
     node._auto_mode = "point_to_point"
     node._loop_original_poses = []
     node._loop_restart_poses = []
+    handle = node._current_goal_handle
 
     NavCommandServerNode._on_nav_action_result_done(
         node,
         "NavigateThroughPoses",
+        handle,
         _FakeResultFuture(GoalStatus.STATUS_SUCCEEDED),
     )
     assert node.sent_calls == []
@@ -336,13 +356,39 @@ def test_result_callback_point_to_point_manual_mode_does_not_brake():
     node._manual_enabled = True
     node._loop_original_poses = []
     node._loop_restart_poses = []
+    handle = node._current_goal_handle
 
     NavCommandServerNode._on_nav_action_result_done(
         node,
         "NavigateThroughPoses",
+        handle,
         _FakeResultFuture(GoalStatus.STATUS_ABORTED),
     )
     assert node.sent_calls == []
     assert node.brake_calls == []
     assert node._is_navigating is False
     assert node._auto_mode == "idle"
+
+
+def test_result_callback_ignores_superseded_goal_result_during_preemption():
+    node = _FakeLoopNode()
+    stale_handle = object()
+    active_handle = object()
+    node._current_goal_handle = active_handle
+    node._ignored_goal_result_ids.add(id(stale_handle))
+    node._loop_enabled = False
+    node._auto_mode = "point_to_point"
+    node._is_navigating = True
+
+    NavCommandServerNode._on_nav_action_result_done(
+        node,
+        "NavigateThroughPoses",
+        stale_handle,
+        _FakeResultFuture(GoalStatus.STATUS_CANCELED),
+    )
+
+    assert node._current_goal_handle is active_handle
+    assert node._is_navigating is True
+    assert node._auto_mode == "point_to_point"
+    assert node.brake_calls == []
+    assert id(stale_handle) not in node._ignored_goal_result_ids

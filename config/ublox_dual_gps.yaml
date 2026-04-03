@@ -1,0 +1,61 @@
+# ublox_dual_gps.yaml
+#
+# Configuration for the ZED-F9P rover receiver used in GPS-for-Yaw (moving
+# baseline) mode with the Salus AGV.
+#
+# Antenna layout (body frame, REP-103: +y = left):
+#   Base  receiver → left  antenna  (body y = +0.25 m)  ← sends RTCM3 corrections
+#   Rover receiver → right antenna  (body y = −0.25 m)  ← this file
+#
+# The rover F9P outputs UBX-NAV-RELPOSNED (relative position of rover w.r.t.
+# base).  The ublox_gps driver converts the NED heading to ENU and publishes it
+# as sensor_msgs/Imu on <node_name>/navheading.  The heading_offset_relay node
+# then applies an additional +π/2 correction for this left=base, right=rover
+# lateral-antenna geometry before forwarding to robot_localization.
+#
+# Usage (inside dual_gps_heading_hw.launch.py):
+#   ros2 run ublox_gps ublox_gps_node --ros-args \
+#       --params-file <path>/ublox_dual_gps.yaml \
+#       -r __node:=ublox_rover
+#
+# Adjust 'device' to the actual serial port of the rover F9P.
+
+ublox_rover:
+  ros__parameters:
+    device: /dev/ttyUSB1          # serial port for rover F9P (adjust as needed)
+    frame_id: gps_link2           # left antenna link in URDF
+    uart1:
+      baudrate: 115200
+
+    # Enable publishing of relative-position heading (UBX-NAV-RELPOSNED).
+    publish:
+      nav:
+        heading: true
+
+    # Rate configuration: 10 Hz to match GPS fix rate.
+    rate: 10.0
+
+    # Moving baseline rover: disable internal RTK (corrections come from base).
+    # The base station must be connected separately and configured to output
+    # RTCM3 moving-baseline corrections via its UART2 → rover UART2.
+    dynamic_model: portable
+
+    # Only request the messages we actually need.
+    rtcm:
+      rate: 1.0
+
+    # Suppress noisy topics we don't use.
+    publish_all: false
+    publish:
+      nav:
+        heading: true
+        pvt: false
+        relposned: false
+      rxm:
+        rtcm: false
+      inf:
+        error: true
+        warning: true
+        notice: false
+        debug: false
+        test: false

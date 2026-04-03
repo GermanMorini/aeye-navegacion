@@ -7,7 +7,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, TextSubstitution
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -76,7 +76,11 @@ def _spawn_robot(context):
     use_sim_time = LaunchConfiguration("use_sim_time").perform(context) == "True"
     robot_description = _read_file(custom_urdf)
     world_name = _extract_world_name_from_sdf(world_path)
-    spawn_yaw_rad = "2.35619449019" if world_name == "vacio" else "0.0"
+    requested_spawn_yaw = LaunchConfiguration("spawn_yaw_rad").perform(context)
+    if requested_spawn_yaw.strip().lower() == "auto":
+        spawn_yaw_rad = "2.35619449019" if world_name == "vacio" else "0.0"
+    else:
+        spawn_yaw_rad = requested_spawn_yaw
 
     return [
         Node(
@@ -146,6 +150,10 @@ def generate_launch_description():
 
     use_sim_time = LaunchConfiguration("use_sim_time")
     world = LaunchConfiguration("world")
+    gz_headless = LaunchConfiguration("gz_headless")
+    gz_args_prefix = PythonExpression(
+        ["'-r -s ' if '", gz_headless, "'.lower() == 'true' else '-r '"]
+    )
 
     return LaunchDescription(
         [
@@ -156,6 +164,8 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument("world", default_value=world_path),
             DeclareLaunchArgument("world_name", default_value="vacio"),
+            DeclareLaunchArgument("spawn_yaw_rad", default_value="auto"),
+            DeclareLaunchArgument("gz_headless", default_value="false"),
             DeclareLaunchArgument(
                 "model_name", default_value="quad_ackermann_viewer_safe"
             ),
@@ -163,7 +173,7 @@ def generate_launch_description():
                 PythonLaunchDescriptionSource(
                     os.path.join(ros_gz_sim_dir, "launch", "gz_sim.launch.py")
                 ),
-                launch_arguments={"gz_args": [TextSubstitution(text="-r "), world]}.items(),
+                launch_arguments={"gz_args": [gz_args_prefix, world]}.items(),
             ),
             OpaqueFunction(
                 function=_build_gz_bridge, kwargs={"bridge_config": bridge_config}

@@ -51,7 +51,7 @@ ekf_filter_node_odom:
 
     imu0: /imu/data
     imu0_config: [false, false, false,
-                  true, true, true,
+                  false, false, false,
                   # false, false, true,
                   false, false, false,
                   false, false, true,
@@ -89,20 +89,18 @@ ekf_filter_node_map:
     imu0_relative: false
     imu0_remove_gravitational_acceleration: true
 
-    # odom0: /odometry/local
-    odom0: /wheel/odometry
+    odom0: /odometry/local
     odom0_config: [false, false, false,
-                   false, false, false,
-                   true,  false,  false,
-                   false, false, false,
+                   false, false, true,
+                   true,  false, false,
+                   false, false, true,
                    false, false, false]
     odom0_differential: false
     odom0_relative: false
 
-    # odom1: /odometry/gps
-    odom1: /odom
+    odom1: /odometry/gps
     odom1_config: [true, true, false,
-                   false, false, true,
+                   false, false, false,
                    false, false, false,
                    false, false, false,
                    false, false, false]
@@ -116,17 +114,12 @@ navsat_transform:
     yaw_offset: 0.0
     # yaw_offset: 1.57
     zero_altitude: true
-    broadcast_utm_transform: true
+    broadcast_utm_transform: false
     publish_filtered_gps: true
     use_odometry_yaw: false
     # use_odometry_yaw: true
-    # wait_for_datum: false
     wait_for_datum: true
-    # datum: [-31.4858037, -64.2410570, 0.0] # Ejemplo: hub de la UCC, Córdoba, Argentina
-    # datum: [-31.4858037, -64.2410570, 2.35619449019] # Ejemplo: hub de la UCC, Córdoba, Argentina
-    # datum: [-31.4858626, -64.2410570, 0.0] # Ejemplo: hub de la UCC, Córdoba, Argentina
 
     gps_topic: /gps/fix
-    # odom_topic: /wheel/odometry
-    odom_topic: /odom
+    odom_topic: /odometry/local
     output_topic: /odometry/gps

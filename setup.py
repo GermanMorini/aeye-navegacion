@@ -44,6 +44,9 @@ setup(
             'polygon_stamped_republisher = navegacion_gps.polygon_stamped_republisher:main',
             'sim_drive_telemetry = navegacion_gps.sim_drive_telemetry:main',
             'sim_sensor_normalizer_v2 = navegacion_gps.sim_sensor_normalizer_v2:main',
+            'dual_gps_heading_sim = navegacion_gps.dual_gps_heading_sim:main',
+            'dual_gps_heading_real = navegacion_gps.dual_gps_heading_real:main',
+            'imu_pose_republisher = navegacion_gps.imu_pose_republisher:main',
         ],
     },
 )

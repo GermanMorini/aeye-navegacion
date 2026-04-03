@@ -75,21 +75,6 @@ def generate_launch_description():
         gps_wpf_dir, "navigate_through_poses_w_replanning_and_recovery_no_spin.xml"
     )
     use_keepout = LaunchConfiguration("use_keepout")
-    configured_params = RewrittenYaml(
-        source_file=nav2_params,
-        root_key="",
-        param_rewrites={
-            "default_nav_to_pose_bt_xml": bt_xml,
-            "default_nav_through_poses_bt_xml": bt_through_poses_xml,
-            "local_costmap.local_costmap.ros__parameters.keepout_filter.enabled": use_keepout,
-            "global_costmap.global_costmap.ros__parameters.keepout_filter.enabled": use_keepout,
-        },
-        convert_types=True,
-    )
-
-    # Force real-time for Nav2 stack regardless of launch argument.
-    nav2_use_sim_time = False
-    use_sim_time = LaunchConfiguration("use_sim_time")
     map_frame = LaunchConfiguration("map_frame")
     resolved_map_frame = PythonExpression(
         [
@@ -100,6 +85,24 @@ def generate_launch_description():
             "'.strip().lower() not in ('', 'auto') else 'odom')",
         ]
     )
+    configured_params = RewrittenYaml(
+        source_file=nav2_params,
+        root_key="",
+        param_rewrites={
+            "default_nav_to_pose_bt_xml": bt_xml,
+            "default_nav_through_poses_bt_xml": bt_through_poses_xml,
+            "bt_navigator.ros__parameters.global_frame": resolved_map_frame,
+            "behavior_server.ros__parameters.global_frame": resolved_map_frame,
+            "global_costmap.global_costmap.ros__parameters.global_frame": resolved_map_frame,
+            "local_costmap.local_costmap.ros__parameters.keepout_filter.enabled": use_keepout,
+            "global_costmap.global_costmap.ros__parameters.keepout_filter.enabled": use_keepout,
+        },
+        convert_types=True,
+    )
+
+    # Force real-time for Nav2 stack regardless of launch argument.
+    nav2_use_sim_time = False
+    use_sim_time = LaunchConfiguration("use_sim_time")
     use_collision_monitor = LaunchConfiguration("use_collision_monitor")
     use_rviz = LaunchConfiguration("use_rviz")
     rviz_config = LaunchConfiguration("rviz_config")

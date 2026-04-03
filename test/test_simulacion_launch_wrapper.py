@@ -59,9 +59,11 @@ def test_simulacion_launch_includes_web_zone_server_stack() -> None:
 
     assert "no_go_editor.launch.py" in launch_contents
     assert 'DeclareLaunchArgument("launch_web_zone_server", default_value="True")' in launch_contents
+    assert "condition=IfCondition(launch_web_zone_server)" in launch_contents
     assert '"launch_nav_command_server": "false"' in launch_contents
-    assert '"map_frame": "map"' in launch_contents
-    assert '"zones_fromll_output_frame": "map"' in launch_contents
+    assert "resolved_map_frame = PythonExpression(" in launch_contents
+    assert '"map_frame": resolved_map_frame' in launch_contents
+    assert '"zones_fromll_output_frame": resolved_map_frame' in launch_contents
 
 
 def test_simulacion_launch_exposes_ekf_global_toggle() -> None:
@@ -72,6 +74,14 @@ def test_simulacion_launch_exposes_ekf_global_toggle() -> None:
     assert '"ekf_local": ekf_local' in launch_contents
     assert 'DeclareLaunchArgument("ekf_global", default_value="False")' in launch_contents
     assert '"ekf_global": ekf_global' in launch_contents
+
+
+def test_simulacion_launch_forwards_spawn_yaw_override() -> None:
+    launch_path = Path(__file__).resolve().parents[1] / "launch" / "simulacion.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert 'DeclareLaunchArgument("spawn_yaw_rad", default_value="auto")' in launch_contents
+    assert '"spawn_yaw_rad": spawn_yaw_rad' in launch_contents
 
 
 def test_simulacion_launch_forwards_ukf_toggle() -> None:
@@ -88,3 +98,39 @@ def test_simulacion_launch_forwards_datum_setter_toggle() -> None:
 
     assert 'DeclareLaunchArgument("datum_setter", default_value="false")' in launch_contents
     assert '"datum_setter": datum_setter' in launch_contents
+    assert 'DeclareLaunchArgument("gps_horizontal_variance", default_value="9.0")' in launch_contents
+    assert 'DeclareLaunchArgument("gps_vertical_variance", default_value="16.0")' in launch_contents
+    assert '"gps_horizontal_variance": gps_horizontal_variance' in launch_contents
+    assert '"gps_vertical_variance": gps_vertical_variance' in launch_contents
+
+
+def test_simulacion_launch_declares_dual_gps_heading_before_custom_urdf() -> None:
+    launch_path = Path(__file__).resolve().parents[1] / "launch" / "simulacion.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    declare_idx = launch_contents.index(
+        'DeclareLaunchArgument("use_dual_gps_heading", default_value="true")'
+    )
+    custom_urdf_idx = launch_contents.index('DeclareLaunchArgument(\n                "custom_urdf",')
+    assert declare_idx < custom_urdf_idx
+
+
+def test_launch_sim_global_v2_wrapper_spawns_robot_facing_east() -> None:
+    wrapper_path = Path(__file__).resolve().parents[3] / "tools" / "launch_sim_global_v2.sh"
+    wrapper_contents = wrapper_path.read_text(encoding="utf-8")
+
+    assert 'RVIZ_CONF="${RVIZ_CONF:-global}"' in wrapper_contents
+    assert 'SPAWN_YAW_RAD="${SPAWN_YAW_RAD:-0.0}"' in wrapper_contents
+    assert "spawn_yaw_rad:=${SPAWN_YAW_RAD}" in wrapper_contents
+    assert 'LAUNCH_WEB_ZONE_SERVER="${LAUNCH_WEB_ZONE_SERVER:-False}"' in wrapper_contents
+    assert 'USE_DUAL_GPS_HEADING="${USE_DUAL_GPS_HEADING:-true}"' in wrapper_contents
+    assert 'GZ_HEADLESS="${GZ_HEADLESS:-false}"' in wrapper_contents
+    assert "gz_headless:=${GZ_HEADLESS}" in wrapper_contents
+
+
+def test_launch_sim_local_v2_wrapper_forces_dual_gps_heading() -> None:
+    wrapper_path = Path(__file__).resolve().parents[3] / "tools" / "launch_sim_local_v2.sh"
+    wrapper_contents = wrapper_path.read_text(encoding="utf-8")
+
+    assert 'EXTRA_ARGS="${*:-}"' in wrapper_contents
+    assert "sim_local_v2.launch.py use_dual_gps_heading:=true" in wrapper_contents

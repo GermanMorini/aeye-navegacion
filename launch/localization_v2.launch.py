@@ -2,9 +2,8 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
-from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -22,33 +21,125 @@ def _resolve_config_file_path(package_share_dir: str, filename: str) -> str:
     return str(default_path)
 
 
-def generate_launch_description():
+def _build_localization_nodes(context):
     gps_wpf_dir = get_package_share_directory("navegacion_gps")
-    dual_ekf_params_file = _resolve_config_file_path(gps_wpf_dir, "dual_ekf_navsat_params.yaml")
-
-    use_sim_time = LaunchConfiguration("use_sim_time")
-    drive_telemetry_topic = LaunchConfiguration("drive_telemetry_topic")
-    imu_topic = LaunchConfiguration("imu_topic")
-    pixhawk_gps_topic = LaunchConfiguration("pixhawk_gps_topic")
-    pixhawk_output_odom_topic = LaunchConfiguration("pixhawk_output_odom_topic")
-    wheelbase_m = LaunchConfiguration("wheelbase_m")
-    invert_measured_steer_sign = LaunchConfiguration("invert_measured_steer_sign")
-    pose_covariance_xy = LaunchConfiguration("pose_covariance_xy")
-    pose_covariance_yaw = LaunchConfiguration("pose_covariance_yaw")
-    twist_covariance_vx = LaunchConfiguration("twist_covariance_vx")
-    twist_covariance_vy = LaunchConfiguration("twist_covariance_vy")
-    twist_covariance_yaw_rate = LaunchConfiguration("twist_covariance_yaw_rate")
-    ekf_local = LaunchConfiguration("ekf_local")
-    ekf_global = LaunchConfiguration("ekf_global")
-    ukf = LaunchConfiguration("ukf")
-    localization_filter_executable = PythonExpression(
-        ["'ukf_node' if '", ukf, "'.lower() == 'true' else 'ekf_node'"]
-    )
-    publish_odom_tf = ParameterValue(
-        PythonExpression(["'", ekf_local, "' == 'False'"]),
-        value_type=bool,
+    base_params = _resolve_config_file_path(gps_wpf_dir, "dual_ekf_navsat_params.yaml")
+    overlay_params = _resolve_config_file_path(
+        gps_wpf_dir, "dual_gps_heading_ekf_overlay.yaml"
     )
 
+    use_sim_time = LaunchConfiguration("use_sim_time").perform(context) == "True"
+    ekf_local = LaunchConfiguration("ekf_local").perform(context).lower() == "true"
+    ekf_global = LaunchConfiguration("ekf_global").perform(context).lower() == "true"
+    use_ukf = LaunchConfiguration("ukf").perform(context).lower() == "true"
+    use_dual = (
+        LaunchConfiguration("use_dual_gps_heading").perform(context).lower() == "true"
+    )
+    ackermann_odom_topic = "/wheel/odometry" if ekf_local else "/odometry/local"
+
+    imu_topic = LaunchConfiguration("imu_topic").perform(context)
+    drive_telemetry_topic = LaunchConfiguration("drive_telemetry_topic").perform(context)
+    wheelbase_m = float(LaunchConfiguration("wheelbase_m").perform(context))
+    invert_measured_steer_sign = (
+        LaunchConfiguration("invert_measured_steer_sign").perform(context).lower()
+        == "true"
+    )
+    pose_covariance_xy = float(
+        LaunchConfiguration("pose_covariance_xy").perform(context)
+    )
+    pose_covariance_yaw = float(
+        LaunchConfiguration("pose_covariance_yaw").perform(context)
+    )
+    twist_covariance_vx = float(
+        LaunchConfiguration("twist_covariance_vx").perform(context)
+    )
+    twist_covariance_vy = float(
+        LaunchConfiguration("twist_covariance_vy").perform(context)
+    )
+    twist_covariance_yaw_rate = float(
+        LaunchConfiguration("twist_covariance_yaw_rate").perform(context)
+    )
+
+    executable = "ukf_node" if use_ukf else "ekf_node"
+
+    # Base params; when dual GPS heading is active, also load the overlay
+    # (overlay params override conflicting keys in the base file).
+    ekf_param_files = [base_params]
+    if use_dual:
+        ekf_param_files.append(overlay_params)
+
+    publish_odom_tf = not ekf_local  # ackermann_odometry publishes TF when EKF is off
+
+    nodes = [
+        Node(
+            package="navegacion_gps",
+            executable="ackermann_odometry",
+            name="ackermann_odometry",
+            output="screen",
+            parameters=[
+                {"use_sim_time": use_sim_time},
+                {"telemetry_topic": drive_telemetry_topic},
+                {"odom_topic": ackermann_odom_topic},
+                {"wheelbase_m": wheelbase_m},
+                {"invert_measured_steer_sign": invert_measured_steer_sign},
+                {"pose_covariance_xy": pose_covariance_xy},
+                {"pose_covariance_yaw": pose_covariance_yaw},
+                {"twist_covariance_vx": twist_covariance_vx},
+                {"twist_covariance_vy": twist_covariance_vy},
+                {"twist_covariance_yaw_rate": twist_covariance_yaw_rate},
+                {"periodic_log_enabled": False},
+                {"publish_odom_tf": publish_odom_tf},
+            ],
+        ),
+    ]
+
+    if ekf_local:
+        nodes.append(
+            Node(
+                package="robot_localization",
+                executable=executable,
+                name="ekf_filter_node_odom",
+                output="screen",
+                parameters=ekf_param_files + [{"use_sim_time": use_sim_time}],
+                remappings=[
+                    ("imu/data", imu_topic),
+                    ("/odom", "/wheel/odometry"),
+                    ("odometry/filtered", "/odometry/local"),
+                ],
+            )
+        )
+
+    if ekf_global:
+        nodes.append(
+            Node(
+                package="robot_localization",
+                executable=executable,
+                name="ekf_filter_node_map",
+                output="screen",
+                parameters=ekf_param_files + [{"use_sim_time": use_sim_time}],
+                remappings=[
+                    ("imu/data", imu_topic),
+                    ("odometry/filtered", "/odometry/global"),
+                ],
+            )
+        )
+        nodes.append(
+            Node(
+                package="robot_localization",
+                executable="navsat_transform_node",
+                name="navsat_transform",
+                output="screen",
+                parameters=ekf_param_files + [{"use_sim_time": use_sim_time}],
+                remappings=[
+                    ("odometry/filtered", "/odometry/global"),
+                ],
+            )
+        )
+
+    return nodes
+
+
+def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("use_sim_time", default_value="False"),
@@ -57,16 +148,8 @@ def generate_launch_description():
                 default_value="/controller/drive_telemetry",
             ),
             DeclareLaunchArgument("imu_topic", default_value="/imu/data"),
-            DeclareLaunchArgument("pixhawk_gps_topic", default_value="/gps/fix"),
-            DeclareLaunchArgument(
-                "pixhawk_output_odom_topic",
-                default_value="/odometry/pixhawk",
-            ),
             DeclareLaunchArgument("wheelbase_m", default_value="0.94"),
-            DeclareLaunchArgument(
-                "invert_measured_steer_sign",
-                default_value="False",
-            ),
+            DeclareLaunchArgument("invert_measured_steer_sign", default_value="False"),
             DeclareLaunchArgument("pose_covariance_xy", default_value="0.01"),
             DeclareLaunchArgument("pose_covariance_yaw", default_value="0.05"),
             DeclareLaunchArgument("twist_covariance_vx", default_value="0.02"),
@@ -75,110 +158,7 @@ def generate_launch_description():
             DeclareLaunchArgument("ekf_local", default_value="True"),
             DeclareLaunchArgument("ekf_global", default_value="False"),
             DeclareLaunchArgument("ukf", default_value="False"),
-            Node(
-                package="navegacion_gps",
-                executable="ackermann_odometry",
-                name="ackermann_odometry",
-                output="screen",
-                parameters=[
-                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
-                    {"telemetry_topic": drive_telemetry_topic},
-                    {"wheelbase_m": ParameterValue(wheelbase_m, value_type=float)},
-                    {
-                        "invert_measured_steer_sign": ParameterValue(
-                            invert_measured_steer_sign,
-                            value_type=bool,
-                        )
-                    },
-                    {
-                        "pose_covariance_xy": ParameterValue(
-                            pose_covariance_xy,
-                            value_type=float,
-                        )
-                    },
-                    {
-                        "pose_covariance_yaw": ParameterValue(
-                            pose_covariance_yaw,
-                            value_type=float,
-                        )
-                    },
-                    {
-                        "twist_covariance_vx": ParameterValue(
-                            twist_covariance_vx,
-                            value_type=float,
-                        )
-                    },
-                    {
-                        "twist_covariance_vy": ParameterValue(
-                            twist_covariance_vy,
-                            value_type=float,
-                        )
-                    },
-                    {
-                        "twist_covariance_yaw_rate": ParameterValue(
-                            twist_covariance_yaw_rate,
-                            value_type=float,
-                        )
-                    },
-                    {"publish_odom_tf": publish_odom_tf},
-                ],
-            ),
-            Node(
-                package="navegacion_gps",
-                executable="pixhawk_odometry",
-                name="pixhawk_odometry",
-                output="screen",
-                parameters=[
-                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
-                    {"imu_topic": imu_topic},
-                    {"gps_topic": pixhawk_gps_topic},
-                    {"output_odom_topic": pixhawk_output_odom_topic},
-                ],
-            ),
-            Node(
-                package="robot_localization",
-                executable=localization_filter_executable,
-                name="ekf_filter_node_odom",
-                output="screen",
-                condition=IfCondition(ekf_local),
-                parameters=[
-                    dual_ekf_params_file,
-                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
-                ],
-                remappings=[
-                    ("imu/data", imu_topic),
-                    ("/odom", "/wheel/odometry"),
-                    ("odometry/filtered", "/odometry/local"),
-                ],
-            ),
-            Node(
-                package="robot_localization",
-                executable=localization_filter_executable,
-                name="ekf_filter_node_map",
-                output="screen",
-                condition=IfCondition(ekf_global),
-                parameters=[
-                    dual_ekf_params_file,
-                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
-                ],
-                remappings=[
-                    ("imu/data", imu_topic),
-                    ("odometry/filtered", "/odometry/global"),
-                ],
-            ),
-            Node(
-                package="robot_localization",
-                executable="navsat_transform_node",
-                name="navsat_transform",
-                output="screen",
-                condition=IfCondition(ekf_global),
-                parameters=[
-                    dual_ekf_params_file,
-                    {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
-                ],
-                remappings=[
-                    ("odometry/filtered", "/odometry/global"),
-                ],
-            ),
+            DeclareLaunchArgument("use_dual_gps_heading", default_value="false"),
+            OpaqueFunction(function=_build_localization_nodes),
         ]
     )

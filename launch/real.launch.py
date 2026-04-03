@@ -1,3 +1,4 @@
+import math
 import os
 from pathlib import Path
 
@@ -23,6 +24,69 @@ def _resolve_config_file_path(package_share_dir: str, filename: str) -> str:
     except IndexError:
         pass
     return str(default_path)
+
+
+def _build_ekf_nodes(context):
+    """Build EKF/UKF nodes, optionally loading the dual-GPS heading overlay."""
+    gps_wpf_dir = get_package_share_directory("navegacion_gps")
+    rl_params_file = _resolve_config_file_path(gps_wpf_dir, "dual_ekf_navsat_params.yaml")
+    overlay_params = _resolve_config_file_path(
+        gps_wpf_dir, "dual_gps_heading_ekf_overlay.yaml"
+    )
+
+    use_sim_time = LaunchConfiguration("use_sim_time").perform(context).strip().lower() == "true"
+    ekf_local = LaunchConfiguration("ekf_local").perform(context).strip().lower() == "true"
+    ekf_global = LaunchConfiguration("ekf_global").perform(context).strip().lower() == "true"
+    use_ukf = LaunchConfiguration("ukf").perform(context).strip().lower() == "true"
+    use_dual = (
+        LaunchConfiguration("use_dual_gps_heading").perform(context).strip().lower() == "true"
+    )
+
+    executable = "ukf_node" if use_ukf else "ekf_node"
+    ekf_param_files = [rl_params_file]
+    if use_dual:
+        ekf_param_files.append(overlay_params)
+
+    nodes = []
+
+    if ekf_local:
+        nodes.append(
+            Node(
+                package="robot_localization",
+                executable=executable,
+                name="ekf_filter_node_odom",
+                output="screen",
+                parameters=ekf_param_files + [{"use_sim_time": use_sim_time}],
+                remappings=[("odometry/filtered", "odometry/local")],
+            )
+        )
+
+    if ekf_global:
+        nodes.append(
+            Node(
+                package="robot_localization",
+                executable=executable,
+                name="ekf_filter_node_map",
+                output="screen",
+                parameters=ekf_param_files + [{"use_sim_time": use_sim_time}],
+            )
+        )
+        nodes.append(
+            Node(
+                package="robot_localization",
+                executable="navsat_transform_node",
+                name="navsat_transform",
+                output="screen",
+                parameters=ekf_param_files + [{"use_sim_time": use_sim_time}],
+                remappings=[
+                    ("gps/filtered", "gps/filtered"),
+                    ("odometry/gps", "odometry/gps"),
+                    ("odometry/filtered", "odometry/local"),
+                ],
+            )
+        )
+
+    return nodes
 
 
 def _validate_telemetry_backend(context):
@@ -79,11 +143,16 @@ def _validate_tf_configuration(context, nav2_params_file: str):
     ackermann_enabled = _as_bool(
         LaunchConfiguration("ackermann_odometry").perform(context)
     )
-    nav2_requires_map = _nav2_uses_map_frame(nav2_params_file)
+    requested_map_frame = LaunchConfiguration("map_frame").perform(context).strip().lower()
+    resolved_nav_frame = (
+        requested_map_frame
+        if requested_map_frame not in ("", "auto")
+        else ("map" if ekf_global_enabled else "odom")
+    )
 
-    if nav2_requires_map and (not ekf_global_enabled):
+    if (resolved_nav_frame == "map") and (not ekf_global_enabled):
         raise RuntimeError(
-            "Invalid TF configuration: nav2_no_map_params.yaml is using frame 'map', "
+            "Invalid TF configuration: navigation frame resolves to 'map', "
             "but ekf_global:=False removes map->odom publication. "
             "Para modo map: usar `ekf_global:=True`."
         )
@@ -97,6 +166,18 @@ def _validate_tf_configuration(context, nav2_params_file: str):
     return []
 
 
+def _validate_real_dual_gps_heading_required(context):
+    use_dual_gps_heading = _as_bool(
+        LaunchConfiguration("use_dual_gps_heading").perform(context)
+    )
+    if not use_dual_gps_heading:
+        raise RuntimeError(
+            "Invalid real navigation configuration: use_dual_gps_heading:=true "
+            "is required so the stack uses ublox_gps heading."
+        )
+    return []
+
+
 def generate_launch_description():
     gps_wpf_dir = get_package_share_directory("navegacion_gps")
     map_tools_dir = get_package_share_directory("map_tools")
@@ -105,7 +186,6 @@ def generate_launch_description():
     zones_geojson_path = _resolve_config_file_path(gps_wpf_dir, "no_go_zones.geojson")
     keepout_mask_image_path = _resolve_config_file_path(gps_wpf_dir, "keepout_mask.pgm")
     keepout_mask_yaml_path = _resolve_config_file_path(gps_wpf_dir, "keepout_mask.yaml")
-    rl_params_file = _resolve_config_file_path(gps_wpf_dir, "dual_ekf_navsat_params.yaml")
     nav2_params_file = _resolve_config_file_path(gps_wpf_dir, "nav2_no_map_params.yaml")
     lidar_to_scan_params = _resolve_config_file_path(
         gps_wpf_dir, "pointcloud_to_laserscan.yaml"
@@ -136,9 +216,8 @@ def generate_launch_description():
     ekf_local = LaunchConfiguration("ekf_local")
     ekf_global = LaunchConfiguration("ekf_global")
     ukf = LaunchConfiguration("ukf")
-    localization_filter_executable = PythonExpression(
-        ["'ukf_node' if '", ukf, "'.lower() == 'true' else 'ekf_node'"]
-    )
+    use_dual_gps_heading = LaunchConfiguration("use_dual_gps_heading")
+    ublox_device = LaunchConfiguration("ublox_device")
     resolved_map_frame = PythonExpression(
         [
             "('",
@@ -163,7 +242,17 @@ def generate_launch_description():
     )
     declare_custom_urdf_cmd = DeclareLaunchArgument(
         "custom_urdf",
-        default_value=os.path.join(gps_wpf_dir, "models", "cuatri_real.urdf"),
+        default_value=PythonExpression(
+            [
+                "'"
+                + os.path.join(gps_wpf_dir, "models", "cuatri_2gps.urdf")
+                + "' if '",
+                use_dual_gps_heading,
+                "'.lower() == 'true' else '"
+                + os.path.join(gps_wpf_dir, "models", "cuatri_real.urdf")
+                + "'",
+            ]
+        ),
         description="Path to custom URDF for TF tree",
     )
     declare_use_rviz_cmd = DeclareLaunchArgument(
@@ -271,6 +360,16 @@ def generate_launch_description():
         default_value="False",
         description="Use UKF for local/global robot_localization filters; if false, use EKF",
     )
+    declare_use_dual_gps_heading_cmd = DeclareLaunchArgument(
+        "use_dual_gps_heading",
+        default_value="true",
+        description="Enable dual-GPS heading pipeline (lateral right=base, left=rover)",
+    )
+    declare_ublox_device_cmd = DeclareLaunchArgument(
+        "ublox_device",
+        default_value="/dev/ttyUSB1",
+        description="Serial device for the rover ZED-F9P (used when use_dual_gps_heading=true)",
+    )
 
     nav2_only_cmd = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(gps_wpf_dir, "launch", "nav2_only.launch.py")),
@@ -286,17 +385,18 @@ def generate_launch_description():
         }.items(),
     )
 
-    ekf_odom_cmd = Node(
-        package="robot_localization",
-        executable=localization_filter_executable,
-        name="ekf_filter_node_odom",
-        output="screen",
-        condition=IfCondition(ekf_local),
-        parameters=[
-            rl_params_file,
-            {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
-        ],
-        remappings=[("odometry/filtered", "odometry/local")],
+    ekf_nodes_cmd = OpaqueFunction(function=_build_ekf_nodes)
+    dual_gps_hw_cmd = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(gps_wpf_dir, "launch", "dual_gps_heading_hw.launch.py")
+        ),
+        launch_arguments={
+            "use_sim_time": use_sim_time,
+            "ublox_device": ublox_device,
+        }.items(),
+        condition=IfCondition(
+            PythonExpression(["'", use_dual_gps_heading, "'.lower() == 'true'"])
+        ),
     )
     ackermann_odometry_cmd = Node(
         package="navegacion_gps",
@@ -309,7 +409,18 @@ def generate_launch_description():
         parameters=[
             {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
             {"telemetry_topic": "/controller/drive_telemetry"},
-            {"odom_topic": "/wheel/odometry"},
+            {
+                "odom_topic": ParameterValue(
+                    PythonExpression(
+                        [
+                            "'/wheel/odometry' if '",
+                            ekf_local,
+                            "'.lower() == 'true' else '/odometry/local'",
+                        ]
+                    ),
+                    value_type=str,
+                )
+            },
             {"periodic_log_enabled": False},
             {
                 "publish_odom_tf": ParameterValue(
@@ -317,33 +428,6 @@ def generate_launch_description():
                     value_type=bool,
                 )
             },
-        ],
-    )
-    ekf_map_cmd = Node(
-        package="robot_localization",
-        executable=localization_filter_executable,
-        name="ekf_filter_node_map",
-        output="screen",
-        condition=IfCondition(ekf_global),
-        parameters=[
-            rl_params_file,
-            {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
-        ],
-    )
-    navsat_transform_cmd = Node(
-        package="robot_localization",
-        executable="navsat_transform_node",
-        name="navsat_transform",
-        output="screen",
-        condition=IfCondition(ekf_global),
-        parameters=[
-            rl_params_file,
-            {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
-        ],
-        remappings=[
-            ("gps/filtered", "gps/filtered"),
-            ("odometry/gps", "odometry/gps"),
-            ("odometry/filtered", "odometry/local"),
         ],
     )
     datum_setter_cmd = Node(
@@ -427,6 +511,7 @@ def generate_launch_description():
                 "teleop_cmd_topic": "/cmd_vel_teleop",
                 "brake_publish_count": 5,
                 "brake_publish_interval_s": 0.1,
+                "goal_arrival_radius_m": 0.8,
                 "manual_cmd_timeout_s": 0.4,
                 "manual_watchdog_hz": 10.0,
                 "nav_telemetry_hz": 5.0,
@@ -592,7 +677,10 @@ def generate_launch_description():
     ld.add_action(declare_ekf_local_cmd)
     ld.add_action(declare_ekf_global_cmd)
     ld.add_action(declare_ukf_cmd)
+    ld.add_action(declare_use_dual_gps_heading_cmd)
+    ld.add_action(declare_ublox_device_cmd)
     ld.add_action(OpaqueFunction(function=_validate_telemetry_backend))
+    ld.add_action(OpaqueFunction(function=_validate_real_dual_gps_heading_required))
     ld.add_action(
         OpaqueFunction(
             function=lambda context: _validate_tf_configuration(context, nav2_params_file)
@@ -604,9 +692,8 @@ def generate_launch_description():
     ld.add_action(camera_cmd)
     ld.add_action(lidar_cmd)
     ld.add_action(ackermann_odometry_cmd)
-    ld.add_action(ekf_odom_cmd)
-    ld.add_action(ekf_map_cmd)
-    ld.add_action(navsat_transform_cmd)
+    ld.add_action(ekf_nodes_cmd)
+    ld.add_action(dual_gps_hw_cmd)
     ld.add_action(nav2_only_cmd)
     ld.add_action(datum_setter_cmd)
     ld.add_action(zones_manager_cmd)
