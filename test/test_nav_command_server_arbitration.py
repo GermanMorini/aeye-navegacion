@@ -185,6 +185,7 @@ def test_set_manual_mode_enables_even_if_cancel_fails() -> None:
 
 
 class _FakeSetGoalNode(_FakeArbNode):
+    _normalize_yaw_deg = staticmethod(NavCommandServerNode._normalize_yaw_deg)
     _parse_set_goal_request = NavCommandServerNode._parse_set_goal_request
 
     def __init__(self) -> None:

@@ -133,10 +133,12 @@ class _FakeActionClient:
 
 
 class _FakeSendNode:
+    _normalize_yaw_deg = staticmethod(NavCommandServerNode._normalize_yaw_deg)
     _yaw_to_quaternion = NavCommandServerNode._yaw_to_quaternion
     _densify_waypoint_poses = NavCommandServerNode._densify_waypoint_poses
     _drop_leading_near_start_waypoints = NavCommandServerNode._drop_leading_near_start_waypoints
     _prepare_poses_for_nav2 = NavCommandServerNode._prepare_poses_for_nav2
+    _send_navigate_to_pose_goal = NavCommandServerNode._send_navigate_to_pose_goal
     _send_follow_waypoints_goal = NavCommandServerNode._send_follow_waypoints_goal
     _send_navigate_through_poses_goal = NavCommandServerNode._send_navigate_through_poses_goal
     _send_nav_goal_for_poses = NavCommandServerNode._send_nav_goal_for_poses
@@ -154,6 +156,7 @@ class _FakeSendNode:
         self._is_navigating = False
         self._auto_mode = "idle"
         self._nav_result_event_id = 0
+        self._navigate_to_pose_client = _FakeActionClient()
         self._follow_waypoints_client = _FakeActionClient()
         self._navigate_through_poses_client = _FakeActionClient()
         self.logger = _FakeLogger()
@@ -248,6 +251,42 @@ def test_send_follow_waypoints_goal_uses_prepared_pose_copies() -> None:
     assert sent_poses[0].header.stamp.nanosec == 0
     assert sent_poses[0].header.frame_id == "map"
     assert original_poses[0].header.stamp.sec == 170
+
+
+def test_send_navigate_to_pose_goal_uses_prepared_pose_copy() -> None:
+    node = _FakeSendNode()
+    original_pose = _pose("", sec=171, nanosec=11)
+
+    ok, err = NavCommandServerNode._send_navigate_to_pose_goal(
+        node,
+        original_pose,
+        reason="set_goal_service",
+    )
+
+    assert ok is True
+    assert err == "goal accepted"
+    sent_pose = node._navigate_to_pose_client.last_goal.pose
+    assert sent_pose is not original_pose
+    assert sent_pose.header.stamp.sec == 0
+    assert sent_pose.header.stamp.nanosec == 0
+    assert sent_pose.header.frame_id == "map"
+    assert original_pose.header.stamp.sec == 171
+
+
+def test_send_nav_goal_for_single_pose_uses_navigate_to_pose() -> None:
+    node = _FakeSendNode()
+    original_pose = _pose("map", sec=172, nanosec=12)
+
+    ok, err = node._send_nav_goal_for_poses(
+        [original_pose],
+        loop_enabled=False,
+        reason="single_goal",
+    )
+
+    assert ok is True
+    assert err == "goal accepted"
+    assert node._navigate_to_pose_client.last_goal is not None
+    assert node._follow_waypoints_client.last_goal is None
 
 
 def test_send_nav_goal_for_poses_multi_pose_path_uses_zero_stamp_latest() -> None:

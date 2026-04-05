@@ -11,7 +11,7 @@ from action_msgs.msg import GoalStatus
 from builtin_interfaces.msg import Time as BuiltinTime
 from geographic_msgs.msg import GeoPoint
 from geometry_msgs.msg import PoseStamped, Quaternion, Twist
-from nav2_msgs.action import FollowWaypoints, NavigateThroughPoses
+from nav2_msgs.action import FollowWaypoints, NavigateThroughPoses, NavigateToPose
 from nav2_msgs.msg import CollisionMonitorState
 from rclpy.action import ActionClient
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
@@ -64,6 +64,7 @@ class NavCommandServerNode(Node):
         self.declare_parameter("set_manual_mode_service", "/nav_command_server/set_manual_mode")
         self.declare_parameter("get_state_service", "/nav_command_server/get_state")
         self.declare_parameter("follow_waypoints_action", "follow_waypoints")
+        self.declare_parameter("navigate_to_pose_action", "navigate_to_pose")
         self.declare_parameter("navigate_through_poses_action", "navigate_through_poses")
         self.declare_parameter("multi_waypoint_action_mode", "follow_waypoints")
         self.declare_parameter("multi_waypoint_spacing_m", 2.0)
@@ -123,6 +124,9 @@ class NavCommandServerNode(Node):
         self.get_state_service = str(self.get_parameter("get_state_service").value)
         self.follow_waypoints_action = str(
             self.get_parameter("follow_waypoints_action").value
+        )
+        self.navigate_to_pose_action = str(
+            self.get_parameter("navigate_to_pose_action").value
         )
         self.navigate_through_poses_action = str(
             self.get_parameter("navigate_through_poses_action").value
@@ -193,6 +197,12 @@ class NavCommandServerNode(Node):
             self,
             FollowWaypoints,
             self.follow_waypoints_action,
+            callback_group=self._client_group,
+        )
+        self._navigate_to_pose_client = ActionClient(
+            self,
+            NavigateToPose,
+            self.navigate_to_pose_action,
             callback_group=self._client_group,
         )
         self._navigate_through_poses_client = ActionClient(
@@ -268,6 +278,7 @@ class NavCommandServerNode(Node):
             f"forward_without_goal={self.forward_cmd_vel_safe_without_goal}, "
             f"cmd_vel_final_topic={self.cmd_vel_final_topic}, "
             f"follow_waypoints_action={self.follow_waypoints_action}, "
+            f"navigate_to_pose_action={self.navigate_to_pose_action}, "
             f"navigate_through_poses_action={self.navigate_through_poses_action}, "
             f"multi_waypoint_action_mode={self.multi_waypoint_action_mode}, "
             f"multi_waypoint_spacing_m={self.multi_waypoint_spacing_m:.2f}, "
@@ -360,8 +371,17 @@ class NavCommandServerNode(Node):
         self._active_fromll_name = service_name
         self.get_logger().info(f"Using fromLL service: {service_name}")
 
+    @staticmethod
+    def _normalize_yaw_deg(yaw_deg: float) -> float:
+        yaw = float(yaw_deg)
+        while yaw <= -180.0:
+            yaw += 360.0
+        while yaw > 180.0:
+            yaw -= 360.0
+        return float(yaw)
+
     def _yaw_to_quaternion(self, yaw_deg: float) -> Quaternion:
-        yaw_rad = math.radians(yaw_deg)
+        yaw_rad = math.radians(self._normalize_yaw_deg(yaw_deg))
         half_yaw = yaw_rad / 2.0
         qz = math.sin(half_yaw)
         qw = math.cos(half_yaw)
@@ -938,7 +958,7 @@ class NavCommandServerNode(Node):
             self._auto_mode = "idle"
             self._pending_nav_result_override = None
 
-        return self._send_nav_goal_for_poses(poses=[pose], loop_enabled=False, reason=reason)
+        return self._send_navigate_to_pose_goal(pose=pose, reason=reason)
 
     def _prepare_poses_for_nav2(self, poses: Sequence[PoseStamped]) -> List[PoseStamped]:
         prepared: List[PoseStamped] = []
@@ -949,6 +969,54 @@ class NavCommandServerNode(Node):
             cloned_pose.header.stamp = BuiltinTime(sec=0, nanosec=0)
             prepared.append(cloned_pose)
         return prepared
+
+    def _send_navigate_to_pose_goal(
+        self, pose: PoseStamped, reason: str
+    ) -> Tuple[bool, str]:
+        prepared_pose = self._prepare_poses_for_nav2([pose])[0]
+
+        if not self._navigate_to_pose_client.wait_for_server(timeout_sec=2.0):
+            self.get_logger().error(
+                "SetNavGoalLL failed: NavigateToPose action server not available"
+            )
+            return False, "NavigateToPose action server not available"
+
+        goal = NavigateToPose.Goal()
+        goal.pose = prepared_pose
+
+        future = self._navigate_to_pose_client.send_goal_async(goal)
+        goal_handle = self._wait_for_future(future, timeout_sec=5.0)
+        if goal_handle is None:
+            self.get_logger().error("SetNavGoalLL failed: timeout sending NavigateToPose goal")
+            return False, "failed to send NavigateToPose goal"
+        if not goal_handle.accepted:
+            self.get_logger().warning("SetNavGoalLL rejected by NavigateToPose")
+            return False, "goal rejected by NavigateToPose"
+
+        with self._lock:
+            self._current_goal_handle = goal_handle
+            self._loop_waypoint_poses = []
+            self._loop_enabled = False
+            self._is_navigating = True
+            self._auto_mode = "point_to_point"
+            NavCommandServerNode._set_nav_result_locked(
+                self,
+                int(GoalStatus.STATUS_EXECUTING),
+                "NavigateToPose goal accepted",
+                increment_event=True,
+            )
+
+        result_future = goal_handle.get_result_async()
+        result_future.add_done_callback(
+            partial(self._on_nav_action_result_done, "NavigateToPose", goal_handle)
+        )
+        self.get_logger().info(
+            "Prepared NavigateToPose goal "
+            f"(stamp_mode=zero/latest, default_frame={self.map_frame})"
+        )
+        self.get_logger().info(f"NavigateToPose goal accepted (reason={reason})")
+        self._publish_telemetry(force=True)
+        return True, "goal accepted"
 
     def _send_follow_waypoints_goal(
         self, poses: Sequence[PoseStamped], loop_enabled: bool, reason: str
@@ -1070,6 +1138,11 @@ class NavCommandServerNode(Node):
         self, poses: Sequence[PoseStamped], loop_enabled: bool, reason: str
     ) -> Tuple[bool, str]:
         poses_list = list(poses)
+        if len(poses_list) == 1:
+            return self._send_navigate_to_pose_goal(
+                pose=poses_list[0],
+                reason=reason,
+            )
         multi_waypoint_action_mode = str(
             getattr(self, "multi_waypoint_action_mode", "follow_waypoints")
         ).strip().lower()
@@ -1421,7 +1494,7 @@ class NavCommandServerNode(Node):
                 lon = float(lons[idx])
                 if (not np.isfinite(lat)) or (not np.isfinite(lon)) or (not np.isfinite(yaw_deg)):
                     return None, False, f"invalid waypoint values at index {idx}"
-                waypoints.append((lat, lon, float(yaw_deg)))
+                waypoints.append((lat, lon, self._normalize_yaw_deg(float(yaw_deg))))
             loop_enabled = bool(request.loop)
             return waypoints, loop_enabled, ""
 
@@ -1430,7 +1503,7 @@ class NavCommandServerNode(Node):
         yaw_deg = float(request.yaw_deg)
         if (not np.isfinite(lat)) or (not np.isfinite(lon)) or (not np.isfinite(yaw_deg)):
             return None, False, "invalid waypoint values"
-        return [(lat, lon, yaw_deg)], bool(request.loop), ""
+        return [(lat, lon, self._normalize_yaw_deg(yaw_deg))], bool(request.loop), ""
 
     def _on_set_goal(
         self,

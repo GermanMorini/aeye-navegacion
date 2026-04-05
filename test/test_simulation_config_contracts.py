@@ -112,13 +112,13 @@ def test_nav2_no_map_direct_frame_values() -> None:
     assert "odom_topic: /odometry/filtered" not in nav2_config_contents
 
 
-def test_nav2_no_map_slows_down_near_goal_for_ackermann() -> None:
+def test_nav2_no_map_uses_sim_german_speed_floor_for_ackermann() -> None:
     nav2_config_path = PACKAGE_ROOT / "config" / "nav2_no_map_params.yaml"
     nav2_config_contents = nav2_config_path.read_text(encoding="utf-8")
 
     assert "xy_goal_tolerance: 0.8" in nav2_config_contents
     assert nav2_config_contents.count("minimum_turning_radius: 2.6") == 2
-    assert "desired_linear_vel: 0.50" in nav2_config_contents
+    assert "desired_linear_vel: 1.2" in nav2_config_contents
     assert "lookahead_dist: 2.8" in nav2_config_contents
     assert "min_lookahead_dist: 1.0" in nav2_config_contents
     assert "max_lookahead_dist: 5.0" in nav2_config_contents
@@ -126,8 +126,8 @@ def test_nav2_no_map_slows_down_near_goal_for_ackermann() -> None:
     assert "approach_velocity_scaling_dist: 2.0" in nav2_config_contents
     assert "regulated_linear_scaling_min_radius: 5.0" in nav2_config_contents
     assert "max_robot_pose_search_dist: 5.0" in nav2_config_contents
-    assert "min_approach_linear_velocity: 0.35" in nav2_config_contents
-    assert "regulated_linear_scaling_min_speed: 0.25" in nav2_config_contents
+    assert "min_approach_linear_velocity: 1.0" in nav2_config_contents
+    assert "regulated_linear_scaling_min_speed: 1.0" in nav2_config_contents
     assert "keep_goal_orientation: true" in nav2_config_contents
 
 

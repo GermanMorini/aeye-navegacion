@@ -148,3 +148,37 @@ def test_launch_sim_local_v2_wrapper_forces_dual_gps_heading() -> None:
 
     assert 'EXTRA_ARGS="${*:-}"' in wrapper_contents
     assert "sim_local_v2.launch.py use_dual_gps_heading:=true" in wrapper_contents
+
+
+def test_launch_sim_index_wrappers_enable_web_stack_with_sim_overlay() -> None:
+    wrapper_path = Path(__file__).resolve().parents[3] / "tools" / "launch_sim_index.sh"
+    wrapper_contents = wrapper_path.read_text(encoding="utf-8")
+
+    assert 'USE_SIM_GLOBAL_OVERLAY="${USE_SIM_GLOBAL_OVERLAY:-True}"' in wrapper_contents
+    assert "use_sim_global_overlay:=${USE_SIM_GLOBAL_OVERLAY}" in wrapper_contents
+    assert 'GZ_HEADLESS="${GZ_HEADLESS:-false}"' in wrapper_contents
+    assert "gz_headless:=${GZ_HEADLESS}" in wrapper_contents
+    assert "launch_web_zone_server:=True" in wrapper_contents
+
+
+def test_launch_sim_index_rviz_wrapper_enable_web_stack_with_sim_overlay() -> None:
+    wrapper_path = Path(__file__).resolve().parents[3] / "tools" / "launch_sim_index_rviz.sh"
+    wrapper_contents = wrapper_path.read_text(encoding="utf-8")
+
+    assert 'USE_SIM_GLOBAL_OVERLAY="${USE_SIM_GLOBAL_OVERLAY:-True}"' in wrapper_contents
+    assert "use_sim_global_overlay:=${USE_SIM_GLOBAL_OVERLAY}" in wrapper_contents
+    assert 'GZ_HEADLESS="${GZ_HEADLESS:-false}"' in wrapper_contents
+    assert "gz_headless:=${GZ_HEADLESS}" in wrapper_contents
+    assert "launch_web_zone_server:=True" in wrapper_contents
+
+
+def test_open_map_tools_web_script_opens_index_with_sim_query() -> None:
+    wrapper_path = Path(__file__).resolve().parents[3] / "tools" / "open_map_tools_web.sh"
+    wrapper_contents = wrapper_path.read_text(encoding="utf-8")
+
+    assert 'MODE="${1:-sim}"' in wrapper_contents
+    assert 'WEB_DIR="/home/franco/final/src/map_tools/web"' in wrapper_contents
+    assert 'INDEX_PATH="${WEB_DIR}/index.html"' in wrapper_contents
+    assert 'QUERY="preset=${MODE}"' in wrapper_contents
+    assert 'QUERY="${QUERY}&autoconnect=1"' in wrapper_contents
+    assert 'URL="file://${INDEX_PATH}?${QUERY}"' in wrapper_contents
