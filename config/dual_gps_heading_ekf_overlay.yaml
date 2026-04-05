@@ -1,12 +1,14 @@
 # Overlay para dual GPS heading. Se carga ENCIMA de dual_ekf_navsat_params.yaml
 # cuando use_dual_gps_heading:=true.
 #
-# Solo modifica ekf_filter_node_odom:
-#   - Desactiva yaw absoluto de imu0 (Pixhawk EKF2).
-#   - Agrega imu1 (/dual_gps/heading) como fuente de yaw absoluto.
+# Modifica:
+#   - ekf_filter_node_odom: desactiva yaw absoluto de imu0 y agrega
+#     imu1 (/dual_gps/heading) como fuente de yaw absoluto.
+#   - navsat_transform: usa el yaw de /odometry/local para que la
+#     odometría GPS y el EKF local compartan la misma orientación.
 #
 # ekf_filter_node_map NO se toca: ya tenía imu0 yaw=false en el yaml base
-# y obtiene el yaw de odom1 (GPS odometry via navsat_transform).
+# y recibe las correcciones de posición vía /odometry/gps.
 
 ekf_filter_node_odom:
   ros__parameters:
@@ -27,3 +29,7 @@ ekf_filter_node_odom:
                   false, false, false]
     imu1_differential: false
     imu1_relative: false
+
+navsat_transform:
+  ros__parameters:
+    use_odometry_yaw: true

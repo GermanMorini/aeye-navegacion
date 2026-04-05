@@ -40,9 +40,12 @@ class _FakeAutoNode:
         self._pending_auto_set = False
         self._pending_first_fix_auto_set = False
         self.auto_set_on_first_fix = False
+        self.auto_set_fixed_coords = None
         self.already_set = False
         self.logger = _FakeLogger()
         self.auto_calls = []
+
+    _resolve_auto_set_coords = DatumSetterNode._resolve_auto_set_coords
 
     def _auto_set_datum_from_coords(
         self, lat: float, lon: float, gps_is_rtk: bool, reason: str
@@ -301,6 +304,41 @@ def test_auto_set_first_fix_waits_for_imu_when_needed() -> None:
     DatumSetterNode._on_imu(node, _imu_msg(0.4))
     assert len(node.auto_calls) == 1
     assert node.auto_calls[0][3] == "first_fix_pending_imu"
+
+
+def test_auto_set_uses_fixed_coords_instead_of_first_fix_sample() -> None:
+    node = _FakeAutoNode()
+    node.auto_set_on_first_fix = True
+    node.auto_set_fixed_coords = (-31.4858037, -64.2410570)
+    DatumSetterNode._on_imu(node, _imu_msg(0.1))
+
+    DatumSetterNode._on_gps_fix(
+        node,
+        _gps_msg(-31.7000000, -64.7000000, NavSatStatus.STATUS_FIX),
+    )
+    assert len(node.auto_calls) == 1
+    assert node.auto_calls[0][0] == -31.4858037
+    assert node.auto_calls[0][1] == -64.2410570
+    assert node.auto_calls[0][3] == "first_fix_gps"
+
+
+def test_auto_set_uses_fixed_coords_for_rtk_edge_too() -> None:
+    node = _FakeAutoNode()
+    node.auto_set_fixed_coords = (-31.4858037, -64.2410570)
+    DatumSetterNode._on_imu(node, _imu_msg(0.2))
+
+    DatumSetterNode._on_gps_fix(
+        node,
+        _gps_msg(-31.1000000, -64.1000000, NavSatStatus.STATUS_FIX),
+    )
+    DatumSetterNode._on_gps_fix(
+        node,
+        _gps_msg(-31.2000000, -64.2000000, NavSatStatus.STATUS_GBAS_FIX),
+    )
+    assert len(node.auto_calls) == 1
+    assert node.auto_calls[0][0] == -31.4858037
+    assert node.auto_calls[0][1] == -64.2410570
+    assert node.auto_calls[0][3] == "rtk_edge_gps"
 
 
 def test_set_datum_fails_without_current_gps_for_empty_coords() -> None:

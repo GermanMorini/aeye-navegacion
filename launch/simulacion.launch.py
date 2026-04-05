@@ -14,6 +14,7 @@ def generate_launch_description():
     rviz_full = os.path.join(gps_wpf_dir, "config", "rviz_nav2_full.rviz")
     rviz_local = os.path.join(gps_wpf_dir, "config", "rviz_ekf_local_tuning.rviz")
     rviz_global = os.path.join(gps_wpf_dir, "config", "rviz_ekf_global_tuning.rviz")
+    rviz_overlay_global = os.path.join(gps_wpf_dir, "config", "rviz_local_v2.rviz")
     keepout_mask_yaml = os.path.join(gps_wpf_dir, "config", "keepout_mask.yaml")
 
     use_sim_time = LaunchConfiguration("use_sim_time")
@@ -25,6 +26,7 @@ def generate_launch_description():
     invert_measured_steer_sign = LaunchConfiguration("invert_measured_steer_sign")
     vx_deadband_mps = LaunchConfiguration("vx_deadband_mps")
     vx_min_effective_mps = LaunchConfiguration("vx_min_effective_mps")
+    use_ackermann_geometry_steering = LaunchConfiguration("use_ackermann_geometry_steering")
     invert_steer_from_cmd_vel = LaunchConfiguration("invert_steer_from_cmd_vel")
     use_cmd_vel_ackermann_bridge = LaunchConfiguration("use_cmd_vel_ackermann_bridge")
     nav2_params_file = LaunchConfiguration("nav2_params_file")
@@ -45,6 +47,8 @@ def generate_launch_description():
     gps_vertical_variance = LaunchConfiguration("gps_vertical_variance")
     ekf_local = LaunchConfiguration("ekf_local")
     ekf_global = LaunchConfiguration("ekf_global")
+    enable_navsat_transform = LaunchConfiguration("enable_navsat_transform")
+    use_sim_global_overlay = LaunchConfiguration("use_sim_global_overlay")
     ukf = LaunchConfiguration("ukf")
     datum_setter = LaunchConfiguration("datum_setter")
     use_dual_gps_heading = LaunchConfiguration("use_dual_gps_heading")
@@ -54,6 +58,12 @@ def generate_launch_description():
     selected_rviz_config = PythonExpression(
         [
             "'",
+            rviz_overlay_global,
+            "' if '",
+            use_sim_global_overlay,
+            "'.lower() == 'true' and '",
+            rviz_conf,
+            "' == 'global' else '",
             rviz_global,
             "' if '",
             rviz_conf,
@@ -68,9 +78,69 @@ def generate_launch_description():
     )
     resolved_map_frame = PythonExpression(
         [
-            "'map' if '",
+            "'odom' if '",
+            use_sim_global_overlay,
+            "'.lower() == 'true' else ('map' if '",
             ekf_global,
-            "'.lower() == 'true' else 'odom'",
+            "'.lower() == 'true' else 'odom')",
+        ]
+    )
+    web_odom_topic = PythonExpression(
+        [
+            "'/odometry/local' if '",
+            use_sim_global_overlay,
+            "'.lower() == 'true' else ('/odometry/global' if '",
+            ekf_global,
+            "'.lower() == 'true' else '/odometry/local')",
+        ]
+    )
+    web_project_odom_to_geodetic = PythonExpression(
+        [
+            "'true' if '",
+            ekf_global,
+            "'.lower() == 'true' or '",
+            enable_navsat_transform,
+            "'.lower() == 'true' else 'false'",
+        ]
+    )
+    resolved_nav_start_delay_s = PythonExpression(
+        [
+            "'10.0' if '",
+            ekf_global,
+            "'.lower() == 'true' else '",
+            nav_start_delay_s,
+            "'",
+        ]
+    )
+    resolved_gps_horizontal_variance = PythonExpression(
+        [
+            "'900.0' if '",
+            ekf_global,
+            "'.lower() == 'true' and '",
+            gps_horizontal_variance,
+            "' == '25.0' else '",
+            gps_horizontal_variance,
+            "'",
+        ]
+    )
+    resolved_gps_vertical_variance = PythonExpression(
+        [
+            "'900.0' if '",
+            ekf_global,
+            "'.lower() == 'true' and '",
+            gps_vertical_variance,
+            "' == '36.0' else '",
+            gps_vertical_variance,
+            "'",
+        ]
+    )
+    web_launch_zones_manager = PythonExpression(
+        [
+            "'true' if '",
+            launch_web_zone_server,
+            "'.lower() == 'true' and '",
+            use_keepout,
+            "'.lower() == 'true' else 'false'",
         ]
     )
 
@@ -90,7 +160,10 @@ def generate_launch_description():
             DeclareLaunchArgument("wheelbase_m", default_value="0.94"),
             DeclareLaunchArgument("invert_measured_steer_sign", default_value="True"),
             DeclareLaunchArgument("vx_deadband_mps", default_value="0.01"),
-            DeclareLaunchArgument("vx_min_effective_mps", default_value="0.35"),
+            DeclareLaunchArgument("vx_min_effective_mps", default_value="0.5"),
+            DeclareLaunchArgument(
+                "use_ackermann_geometry_steering", default_value="False"
+            ),
             DeclareLaunchArgument("invert_steer_from_cmd_vel", default_value="True"),
             DeclareLaunchArgument("use_cmd_vel_ackermann_bridge", default_value="False"),
             DeclareLaunchArgument(
@@ -125,10 +198,12 @@ def generate_launch_description():
             DeclareLaunchArgument("twist_covariance_vx", default_value="0.02"),
             DeclareLaunchArgument("twist_covariance_vy", default_value="0.02"),
             DeclareLaunchArgument("twist_covariance_yaw_rate", default_value="0.05"),
-            DeclareLaunchArgument("gps_horizontal_variance", default_value="9.0"),
-            DeclareLaunchArgument("gps_vertical_variance", default_value="16.0"),
+            DeclareLaunchArgument("gps_horizontal_variance", default_value="25.0"),
+            DeclareLaunchArgument("gps_vertical_variance", default_value="36.0"),
             DeclareLaunchArgument("ekf_local", default_value="True"),
             DeclareLaunchArgument("ekf_global", default_value="False"),
+            DeclareLaunchArgument("enable_navsat_transform", default_value="False"),
+            DeclareLaunchArgument("use_sim_global_overlay", default_value="False"),
             DeclareLaunchArgument("ukf", default_value="False"),
             DeclareLaunchArgument("datum_setter", default_value="false"),
             DeclareLaunchArgument("launch_web_zone_server", default_value="True"),
@@ -143,11 +218,12 @@ def generate_launch_description():
                     "use_rviz": use_rviz,
                     "rviz_config": selected_rviz_config,
                     "use_keepout": use_keepout,
-                    "nav_start_delay_s": nav_start_delay_s,
+                    "nav_start_delay_s": resolved_nav_start_delay_s,
                     "wheelbase_m": wheelbase_m,
                     "invert_measured_steer_sign": invert_measured_steer_sign,
                     "vx_deadband_mps": vx_deadband_mps,
                     "vx_min_effective_mps": vx_min_effective_mps,
+                    "use_ackermann_geometry_steering": use_ackermann_geometry_steering,
                     "invert_steer_from_cmd_vel": invert_steer_from_cmd_vel,
                     "use_cmd_vel_ackermann_bridge": use_cmd_vel_ackermann_bridge,
                     "nav2_params_file": nav2_params_file,
@@ -164,10 +240,12 @@ def generate_launch_description():
                     "twist_covariance_vx": twist_covariance_vx,
                     "twist_covariance_vy": twist_covariance_vy,
                     "twist_covariance_yaw_rate": twist_covariance_yaw_rate,
-                    "gps_horizontal_variance": gps_horizontal_variance,
-                    "gps_vertical_variance": gps_vertical_variance,
+                    "gps_horizontal_variance": resolved_gps_horizontal_variance,
+                    "gps_vertical_variance": resolved_gps_vertical_variance,
                     "ekf_local": ekf_local,
                     "ekf_global": ekf_global,
+                    "enable_navsat_transform": enable_navsat_transform,
+                    "use_sim_global_overlay": use_sim_global_overlay,
                     "ukf": ukf,
                     "datum_setter": datum_setter,
                     "use_dual_gps_heading": use_dual_gps_heading,
@@ -182,10 +260,13 @@ def generate_launch_description():
                     "ws_host": web_ws_host,
                     "ws_port": web_ws_port,
                     "gps_topic": "/gps/fix",
+                    "odom_topic": web_odom_topic,
                     "map_frame": resolved_map_frame,
+                    "project_odom_to_geodetic": web_project_odom_to_geodetic,
+                    "reload_zones_on_connect": "false",
                     "zones_fromll_output_frame": resolved_map_frame,
                     "launch_nav_command_server": "false",
-                    "launch_zones_manager": launch_web_zone_server,
+                    "launch_zones_manager": web_launch_zones_manager,
                     "launch_nav_snapshot_server": launch_web_zone_server,
                 }.items(),
             ),

@@ -9,6 +9,7 @@ from geographic_msgs.msg import GeoPose
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from rclpy.qos import qos_profile_sensor_data
 from robot_localization.srv import SetDatum as RobotLocalizationSetDatum
 from sensor_msgs.msg import Imu, NavSatFix, NavSatStatus
@@ -34,6 +35,7 @@ class DatumSetterNode(Node):
         self.declare_parameter("datum_call_retries", 3)
         self.declare_parameter("datum_retry_delay_s", 0.15)
         self.declare_parameter("auto_set_on_first_fix", False)
+        self.declare_parameter("auto_set_fixed_coords", Parameter.Type.DOUBLE_ARRAY)
 
         self.gps_topic = str(self.get_parameter("gps_topic").value)
         self.rtk_status_topic = str(self.get_parameter("rtk_status_topic").value)
@@ -62,6 +64,26 @@ class DatumSetterNode(Node):
         self.auto_set_on_first_fix = bool(
             self.get_parameter("auto_set_on_first_fix").value
         )
+        auto_set_fixed_coords_raw = self.get_parameter("auto_set_fixed_coords").value
+        (
+            auto_set_fixed_coords_ok,
+            auto_set_fixed_coords_error,
+            auto_set_fixed_coords_use_current,
+            auto_set_fixed_lat,
+            auto_set_fixed_lon,
+        ) = DatumSetterNode._parse_coords(auto_set_fixed_coords_raw)
+        if not auto_set_fixed_coords_ok:
+            raise ValueError(
+                f"invalid auto_set_fixed_coords parameter: {auto_set_fixed_coords_error}"
+            )
+        self.auto_set_fixed_coords: Optional[Tuple[float, float]]
+        if auto_set_fixed_coords_use_current:
+            self.auto_set_fixed_coords = None
+        else:
+            self.auto_set_fixed_coords = (
+                float(auto_set_fixed_lat),
+                float(auto_set_fixed_lon),
+            )
 
         self._lock = threading.Lock()
         self._set_operation_lock = threading.Lock()
@@ -131,7 +153,8 @@ class DatumSetterNode(Node):
             f"rtk_status_topic={self.rtk_status_topic}, "
             f"datum_service={self.datum_service}, "
             f"datum_service_fallback={self.datum_service_fallback}, "
-            f"auto_set_on_first_fix={self.auto_set_on_first_fix})"
+            f"auto_set_on_first_fix={self.auto_set_on_first_fix}, "
+            f"auto_set_fixed_coords={self.auto_set_fixed_coords})"
         )
 
     @staticmethod
@@ -225,6 +248,12 @@ class DatumSetterNode(Node):
             else " Warning: datum was applied without RTK quality."
         )
         return f"{base}{source_msg}{quality_msg}"
+
+    def _resolve_auto_set_coords(self, lat: float, lon: float) -> Tuple[float, float]:
+        fixed_coords = getattr(self, "auto_set_fixed_coords", None)
+        if fixed_coords is None:
+            return float(lat), float(lon)
+        return float(fixed_coords[0]), float(fixed_coords[1])
 
     def _combined_rtk_locked(self) -> bool:
         return bool(self._last_navsat_rtk or self._last_rtk_status_is_rtk)
@@ -424,18 +453,24 @@ class DatumSetterNode(Node):
             self._last_navsat_rtk = navsat_rtk
 
             combined_rtk = self._combined_rtk_locked()
+            auto_lat, auto_lon = self._resolve_auto_set_coords(lat, lon)
             edge = (not self._rtk_current) and combined_rtk
             if edge:
                 self._rtk_current = True
                 self._pending_auto_set = False
-                auto_set_payload = (lat, lon, combined_rtk, "rtk_edge_gps")
+                auto_set_payload = (auto_lat, auto_lon, combined_rtk, "rtk_edge_gps")
             elif not combined_rtk:
                 self._rtk_current = False
                 self._pending_auto_set = False
             elif self._pending_auto_set:
                 self._pending_auto_set = False
                 self._rtk_current = True
-                auto_set_payload = (lat, lon, combined_rtk, "rtk_edge_pending_gps")
+                auto_set_payload = (
+                    auto_lat,
+                    auto_lon,
+                    combined_rtk,
+                    "rtk_edge_pending_gps",
+                )
             else:
                 self._rtk_current = True
 
@@ -444,7 +479,7 @@ class DatumSetterNode(Node):
                 and (not self.already_set)
                 and (not combined_rtk)
             ):
-                auto_set_first_fix_payload = (lat, lon, False, "first_fix_gps")
+                auto_set_first_fix_payload = (auto_lat, auto_lon, False, "first_fix_gps")
 
         if auto_set_payload is not None:
             yaw_ok, _yaw, _err = self._get_fresh_imu_yaw()
@@ -482,7 +517,13 @@ class DatumSetterNode(Node):
                 else:
                     self._pending_auto_set = False
                     lat, lon = self._last_gps_fix
-                    auto_set_payload = (lat, lon, combined_rtk, "rtk_edge_status")
+                    auto_lat, auto_lon = self._resolve_auto_set_coords(lat, lon)
+                    auto_set_payload = (
+                        auto_lat,
+                        auto_lon,
+                        combined_rtk,
+                        "rtk_edge_status",
+                    )
             elif not combined_rtk:
                 self._rtk_current = False
                 self._pending_auto_set = False
@@ -522,7 +563,13 @@ class DatumSetterNode(Node):
             if combined_rtk and self._pending_auto_set and self._last_gps_fix is not None:
                 self._pending_auto_set = False
                 lat, lon = self._last_gps_fix
-                auto_set_payload = (lat, lon, combined_rtk, "rtk_edge_pending_imu")
+                auto_lat, auto_lon = self._resolve_auto_set_coords(lat, lon)
+                auto_set_payload = (
+                    auto_lat,
+                    auto_lon,
+                    combined_rtk,
+                    "rtk_edge_pending_imu",
+                )
             elif (
                 self.auto_set_on_first_fix
                 and (not self.already_set)
@@ -531,7 +578,13 @@ class DatumSetterNode(Node):
             ):
                 self._pending_first_fix_auto_set = False
                 lat, lon = self._last_gps_fix
-                auto_set_first_fix_payload = (lat, lon, False, "first_fix_pending_imu")
+                auto_lat, auto_lon = self._resolve_auto_set_coords(lat, lon)
+                auto_set_first_fix_payload = (
+                    auto_lat,
+                    auto_lon,
+                    False,
+                    "first_fix_pending_imu",
+                )
 
         if auto_set_payload is not None:
             self._auto_set_datum_from_coords(*auto_set_payload)

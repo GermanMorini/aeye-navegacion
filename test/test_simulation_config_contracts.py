@@ -9,10 +9,13 @@ def test_localization_v2_launch_uses_fixed_dual_ekf_odom_node() -> None:
     launch_contents = launch_path.read_text(encoding="utf-8")
 
     assert "dual_ekf_navsat_params.yaml" in launch_contents
+    assert "dual_ekf_navsat_sim_global_overlay.yaml" in launch_contents
+    assert 'DeclareLaunchArgument("use_sim_global_overlay", default_value="False")' in launch_contents
     assert 'name="ekf_filter_node_odom"' in launch_contents
     assert "if ekf_local:" in launch_contents
     assert 'DeclareLaunchArgument("ekf_local", default_value="True")' in launch_contents
     assert 'DeclareLaunchArgument("ekf_global", default_value="False")' in launch_contents
+    assert 'DeclareLaunchArgument("enable_navsat_transform", default_value="False")' in launch_contents
     assert 'DeclareLaunchArgument("ukf", default_value="False")' in launch_contents
     assert 'executable="ackermann_odometry"' in launch_contents
     assert 'ackermann_odom_topic = "/wheel/odometry" if ekf_local else "/odometry/local"' in launch_contents
@@ -23,8 +26,12 @@ def test_localization_v2_launch_uses_fixed_dual_ekf_odom_node() -> None:
     assert 'name="ekf_filter_node_map"' in launch_contents
     assert 'name="navsat_transform"' in launch_contents
     assert '("odometry/filtered", "/odometry/local")' in launch_contents
-    assert '("odometry/filtered", "/odometry/global")' in launch_contents
+    assert launch_contents.count('("odometry/filtered", "/odometry/local")') >= 2
+    assert "if ekf_global or enable_navsat_transform:" in launch_contents
     assert "if ekf_global:" in launch_contents
+    assert 'DeclareLaunchArgument("global_start_delay_s", default_value="0.0")' in launch_contents
+    assert "TimerAction(period=global_start_delay_s, actions=global_nodes)" in launch_contents
+    assert "if use_sim_time and use_sim_global_overlay:" in launch_contents
     assert 'executable = "ukf_node" if use_ukf else "ekf_node"' in launch_contents
     assert "pixhawk_input_odom_topic" not in launch_contents
     assert 'DeclareLaunchArgument(\n                "localization_params_file",' not in launch_contents
@@ -40,6 +47,20 @@ def test_nav_local_v2_does_not_use_frame_override_overlay() -> None:
     assert "nav2_local_v2_keepout_overrides.yaml" not in launch_contents
     assert "nav2_local_v2_no_keepout_overrides.yaml" not in launch_contents
     assert "configured_nav2_overrides" not in launch_contents
+
+
+def test_nav_local_v2_rewrites_keepout_enable_flags_from_launch_arg() -> None:
+    launch_path = PACKAGE_ROOT / "launch" / "nav_local_v2.launch.py"
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert (
+        '"local_costmap.local_costmap.ros__parameters.keepout_filter.enabled": use_keepout'
+        in launch_contents
+    )
+    assert (
+        '"global_costmap.global_costmap.ros__parameters.keepout_filter.enabled": use_keepout'
+        in launch_contents
+    )
 
 
 def test_nav2_only_launch_disables_velocity_smoother() -> None:
@@ -99,14 +120,15 @@ def test_nav2_no_map_slows_down_near_goal_for_ackermann() -> None:
     assert nav2_config_contents.count("minimum_turning_radius: 2.6") == 2
     assert "desired_linear_vel: 0.50" in nav2_config_contents
     assert "lookahead_dist: 2.8" in nav2_config_contents
-    assert "min_lookahead_dist: 1.5" in nav2_config_contents
+    assert "min_lookahead_dist: 1.0" in nav2_config_contents
     assert "max_lookahead_dist: 5.0" in nav2_config_contents
     assert "lookahead_time: 2.2" in nav2_config_contents
     assert "approach_velocity_scaling_dist: 2.0" in nav2_config_contents
-    assert "regulated_linear_scaling_min_radius: 3.8" in nav2_config_contents
+    assert "regulated_linear_scaling_min_radius: 5.0" in nav2_config_contents
     assert "max_robot_pose_search_dist: 5.0" in nav2_config_contents
     assert "min_approach_linear_velocity: 0.35" in nav2_config_contents
-    assert "regulated_linear_scaling_min_speed: 0.22" in nav2_config_contents
+    assert "regulated_linear_scaling_min_speed: 0.25" in nav2_config_contents
+    assert "keep_goal_orientation: true" in nav2_config_contents
 
 
 def test_dual_ekf_local_uses_wheel_and_pixhawk_odometry_topics() -> None:
@@ -142,7 +164,9 @@ def test_nav_command_server_launches_expose_goal_arrival_radius() -> None:
     sim_launch_contents = sim_launch_path.read_text(encoding="utf-8")
     real_launch_contents = real_launch_path.read_text(encoding="utf-8")
 
-    assert '"goal_arrival_radius_m": 0.8' in sim_launch_contents
+    assert "resolved_goal_arrival_radius_m = PythonExpression(" in sim_launch_contents
+    assert "'0.5' if '" in sim_launch_contents
+    assert '"goal_arrival_radius_m": ParameterValue(' in sim_launch_contents
     assert '"goal_arrival_radius_m": 0.8' in real_launch_contents
 
 
@@ -153,14 +177,61 @@ def test_sim_launch_defaults_deweight_simulated_gps_for_global_ekf() -> None:
     sim_local_contents = sim_local_launch_path.read_text(encoding="utf-8")
     simulacion_contents = simulacion_launch_path.read_text(encoding="utf-8")
 
-    assert 'DeclareLaunchArgument("gps_horizontal_variance", default_value="9.0")' in sim_local_contents
-    assert 'DeclareLaunchArgument("gps_vertical_variance", default_value="16.0")' in sim_local_contents
+    assert 'DeclareLaunchArgument("gps_horizontal_variance", default_value="25.0")' in sim_local_contents
+    assert 'DeclareLaunchArgument("gps_vertical_variance", default_value="36.0")' in sim_local_contents
     assert '"gps_horizontal_variance": ParameterValue(' in sim_local_contents
     assert '"gps_vertical_variance": ParameterValue(' in sim_local_contents
-    assert 'DeclareLaunchArgument("gps_horizontal_variance", default_value="9.0")' in simulacion_contents
-    assert 'DeclareLaunchArgument("gps_vertical_variance", default_value="16.0")' in simulacion_contents
-    assert '"gps_horizontal_variance": gps_horizontal_variance' in simulacion_contents
-    assert '"gps_vertical_variance": gps_vertical_variance' in simulacion_contents
+    assert 'DeclareLaunchArgument("gps_horizontal_variance", default_value="25.0")' in simulacion_contents
+    assert 'DeclareLaunchArgument("gps_vertical_variance", default_value="36.0")' in simulacion_contents
+    assert "resolved_gps_horizontal_variance = PythonExpression(" in simulacion_contents
+    assert "resolved_gps_vertical_variance = PythonExpression(" in simulacion_contents
+    assert "'900.0' if '" in simulacion_contents
+    assert simulacion_contents.count("'900.0' if '") >= 2
+    assert '"gps_horizontal_variance": resolved_gps_horizontal_variance' in simulacion_contents
+    assert '"gps_vertical_variance": resolved_gps_vertical_variance' in simulacion_contents
+
+
+def test_sim_launch_uses_global_odom_projection_for_web_gateway() -> None:
+    simulacion_launch_path = PACKAGE_ROOT / "launch" / "simulacion.launch.py"
+    simulacion_contents = simulacion_launch_path.read_text(encoding="utf-8")
+
+    assert "web_odom_topic = PythonExpression(" in simulacion_contents
+    assert "web_project_odom_to_geodetic = PythonExpression(" in simulacion_contents
+    assert "web_launch_zones_manager = PythonExpression(" in simulacion_contents
+    assert '"odom_topic": web_odom_topic' in simulacion_contents
+    assert '"project_odom_to_geodetic": web_project_odom_to_geodetic' in simulacion_contents
+    assert '"reload_zones_on_connect": "false"' in simulacion_contents
+    assert '"launch_zones_manager": web_launch_zones_manager' in simulacion_contents
+    assert "'/odometry/local' if '" in simulacion_contents
+    assert "else ('/odometry/global' if '" in simulacion_contents
+    assert "enable_navsat_transform" in simulacion_contents
+    assert "'.lower() == 'true' or '" in simulacion_contents
+
+
+def test_sim_launch_uses_overlay_rviz_when_sim_global_overlay_is_enabled() -> None:
+    simulacion_launch_path = PACKAGE_ROOT / "launch" / "simulacion.launch.py"
+    simulacion_contents = simulacion_launch_path.read_text(encoding="utf-8")
+
+    assert "rviz_overlay_global = os.path.join" in simulacion_contents
+    assert "rviz_local_v2.rviz" in simulacion_contents
+    assert "'.lower() == 'true' and '" in simulacion_contents
+    assert "' == 'global' else '" in simulacion_contents
+
+
+def test_sim_global_overlay_keeps_relative_local_pose_for_map_ekf() -> None:
+    overlay_path = PACKAGE_ROOT / "config" / "dual_ekf_navsat_sim_global_overlay.yaml"
+    overlay_contents = overlay_path.read_text(encoding="utf-8")
+
+    assert "ekf_filter_node_map:" in overlay_contents
+    assert "dynamic_process_noise_covariance: false" in overlay_contents
+    assert "odom0: /wheel/odometry" in overlay_contents
+    assert "odom0_config: [false, false, false," in overlay_contents
+    assert "odom0_relative: false" in overlay_contents
+    assert "odom1: /odom" in overlay_contents
+    assert "odom1_config: [true,  true,  false," in overlay_contents
+    assert "odom1_relative: false" in overlay_contents
+    assert "navsat_transform:" in overlay_contents
+    assert "odom_topic: /odom" in overlay_contents
 
 
 def test_real_launch_includes_ackermann_odometry_by_default() -> None:

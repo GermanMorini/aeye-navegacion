@@ -7,6 +7,7 @@ import rclpy
 from geometry_msgs.msg import Quaternion
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Imu, NavSatFix, PointCloud2
 
 
@@ -205,16 +206,26 @@ class SimSensorNormalizerV2Node(Node):
         self._lidar_pub = self.create_publisher(PointCloud2, lidar_out_topic, 10)
         self._odom_pub = self.create_publisher(Odometry, odom_out_topic, 10)
 
-        self.create_subscription(Imu, imu_in_topic, self._on_imu, 10)
-        self.create_subscription(NavSatFix, gps_in_topic, self._on_gps, 10)
-        self.create_subscription(PointCloud2, lidar_in_topic, self._on_lidar, 10)
-        self.create_subscription(Odometry, odom_in_topic, self._on_odom, 10)
+        self.create_subscription(
+            Imu, imu_in_topic, self._on_imu, qos_profile_sensor_data
+        )
+        self.create_subscription(
+            NavSatFix, gps_in_topic, self._on_gps, qos_profile_sensor_data
+        )
+        self.create_subscription(
+            PointCloud2, lidar_in_topic, self._on_lidar, qos_profile_sensor_data
+        )
+        self.create_subscription(
+            Odometry, odom_in_topic, self._on_odom, qos_profile_sensor_data
+        )
 
         gps2_in_topic = str(self.get_parameter("gps2_in_topic").value)
         if gps2_in_topic:
             gps2_out_topic = str(self.get_parameter("gps2_out_topic").value)
             self._gps2_pub = self.create_publisher(NavSatFix, gps2_out_topic, 10)
-            self.create_subscription(NavSatFix, gps2_in_topic, self._on_gps2, 10)
+            self.create_subscription(
+                NavSatFix, gps2_in_topic, self._on_gps2, qos_profile_sensor_data
+            )
             self.get_logger().info(f"Second GPS antenna: {gps2_in_topic} → {gps2_out_topic}")
         else:
             self._gps2_pub = None
@@ -227,7 +238,7 @@ class SimSensorNormalizerV2Node(Node):
                 Odometry,
                 self._imu_yaw_calib_odom_topic,
                 self._on_calib_odom,
-                10,
+                qos_profile_sensor_data,
             )
 
         self._latest_odom_yaw_rad: Optional[float] = None

@@ -56,6 +56,8 @@ def generate_launch_description():
                 "bt_navigator.ros__parameters.global_frame": map_frame,
                 "behavior_server.ros__parameters.global_frame": map_frame,
                 "global_costmap.global_costmap.ros__parameters.global_frame": map_frame,
+                "local_costmap.local_costmap.ros__parameters.keepout_filter.enabled": use_keepout,
+                "global_costmap.global_costmap.ros__parameters.keepout_filter.enabled": use_keepout,
             },
             convert_types=True,
         ),

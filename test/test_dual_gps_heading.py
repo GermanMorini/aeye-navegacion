@@ -265,6 +265,14 @@ def test_dual_gps_heading_ekf_overlay_disables_imu0_absolute_yaw():
     assert "true,  true,  false" in contents
 
 
+def test_dual_gps_heading_overlay_aligns_navsat_with_local_odom_yaw():
+    overlay_path = _PACKAGE_ROOT / "config" / "dual_gps_heading_ekf_overlay.yaml"
+    contents = overlay_path.read_text(encoding="utf-8")
+
+    assert "navsat_transform:" in contents
+    assert "use_odometry_yaw: true" in contents
+
+
 # ---------------------------------------------------------------------------
 # Launch contract: relay offset must be -π/2 in sim_local_v2
 # ---------------------------------------------------------------------------

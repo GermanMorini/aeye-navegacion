@@ -133,13 +133,21 @@ class _FakeActionClient:
 
 
 class _FakeSendNode:
+    _yaw_to_quaternion = NavCommandServerNode._yaw_to_quaternion
+    _densify_waypoint_poses = NavCommandServerNode._densify_waypoint_poses
+    _drop_leading_near_start_waypoints = NavCommandServerNode._drop_leading_near_start_waypoints
     _prepare_poses_for_nav2 = NavCommandServerNode._prepare_poses_for_nav2
     _send_follow_waypoints_goal = NavCommandServerNode._send_follow_waypoints_goal
     _send_navigate_through_poses_goal = NavCommandServerNode._send_navigate_through_poses_goal
+    _send_nav_goal_for_poses = NavCommandServerNode._send_nav_goal_for_poses
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self.map_frame = "map"
+        self.multi_waypoint_action_mode = "follow_waypoints"
+        self.multi_waypoint_spacing_m = 2.0
+        self.skip_near_start_waypoint_radius_m = 1.5
+        self._last_robot_pose = None
         self._current_goal_handle = None
         self._loop_waypoint_poses = []
         self._loop_enabled = False
@@ -246,8 +254,28 @@ def test_send_nav_goal_for_poses_multi_pose_path_uses_zero_stamp_latest() -> Non
     node = _FakeSendNode()
     original_poses = [_pose("map", sec=200, nanosec=1), _pose("map", sec=201, nanosec=2)]
 
-    ok, err = NavCommandServerNode._send_nav_goal_for_poses(
-        node,
+    ok, err = node._send_nav_goal_for_poses(
+        original_poses,
+        loop_enabled=True,
+        reason="loop_restart_rotated",
+    )
+
+    assert ok is True
+    assert err == "goal accepted"
+    sent_poses = node._follow_waypoints_client.last_goal.poses
+    assert len(sent_poses) == 2
+    assert sent_poses[0].header.stamp.sec == 0
+    assert sent_poses[1].header.stamp.sec == 0
+    assert original_poses[0].header.stamp.sec == 200
+    assert original_poses[1].header.stamp.sec == 201
+
+
+def test_send_nav_goal_for_poses_multi_pose_can_use_navigate_through_poses_when_requested() -> None:
+    node = _FakeSendNode()
+    node.multi_waypoint_action_mode = "navigate_through_poses"
+    original_poses = [_pose("map", sec=210, nanosec=1), _pose("map", sec=211, nanosec=2)]
+
+    ok, err = node._send_nav_goal_for_poses(
         original_poses,
         loop_enabled=True,
         reason="loop_restart_rotated",
@@ -259,8 +287,64 @@ def test_send_nav_goal_for_poses_multi_pose_path_uses_zero_stamp_latest() -> Non
     assert len(sent_poses) == 2
     assert sent_poses[0].header.stamp.sec == 0
     assert sent_poses[1].header.stamp.sec == 0
-    assert original_poses[0].header.stamp.sec == 200
-    assert original_poses[1].header.stamp.sec == 201
+
+
+def test_densify_waypoint_poses_inserts_intermediate_points_and_tangent_yaw() -> None:
+    node = _FakeSendNode()
+    start = _pose("map", sec=1)
+    end = _pose("map", sec=2)
+    start.pose.position.x = 0.0
+    start.pose.position.y = 0.0
+    end.pose.position.x = 4.0
+    end.pose.position.y = 0.0
+
+    dense = node._densify_waypoint_poses([start, end])
+
+    assert len(dense) == 3
+    assert dense[0].pose.position.x == 0.0
+    assert dense[1].pose.position.x == 2.0
+    assert dense[2].pose.position.x == 4.0
+    assert dense[0].pose.orientation.z == 0.0
+    assert dense[0].pose.orientation.w == 1.0
+
+
+def test_densify_waypoint_poses_can_be_disabled() -> None:
+    node = _FakeSendNode()
+    node.multi_waypoint_spacing_m = 0.0
+    start = _pose("map", sec=1)
+    end = _pose("map", sec=2)
+    end.pose.position.x = 5.0
+
+    dense = node._densify_waypoint_poses([start, end])
+
+    assert len(dense) == 2
+    assert dense[0] is start
+    assert dense[1] is end
+
+
+def test_drop_leading_near_start_waypoints_skips_only_prefix_inside_radius() -> None:
+    node = _FakeSendNode()
+    node._last_robot_pose = {"lat": -31.0, "lon": -64.0}
+    waypoints = [
+        (-31.0, -64.0, 0.0),
+        (-31.0000005, -64.0, 0.0),
+        (-31.00003, -64.0, 0.0),
+    ]
+
+    trimmed = node._drop_leading_near_start_waypoints(waypoints)
+
+    assert trimmed == [(-31.00003, -64.0, 0.0)]
+    assert any("Dropped leading near-start waypoints" in msg for msg in node.logger.info_msgs)
+
+
+def test_drop_leading_near_start_waypoints_keeps_single_last_waypoint() -> None:
+    node = _FakeSendNode()
+    node._last_robot_pose = {"lat": -31.0, "lon": -64.0}
+    waypoints = [(-31.0, -64.0, 0.0)]
+
+    trimmed = node._drop_leading_near_start_waypoints(waypoints)
+
+    assert trimmed == waypoints
 
 
 def test_result_callback_restarts_with_rotated_path_on_each_success():

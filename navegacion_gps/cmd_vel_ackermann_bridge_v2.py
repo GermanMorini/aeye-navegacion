@@ -38,6 +38,7 @@ class CmdVelAckermannBridgeV2Node(Node):
         self.declare_parameter("vx_min_effective_mps", 0.35)
         self.declare_parameter("max_abs_angular_z", 0.4)
         self.declare_parameter("wheelbase_m", 0.94)
+        self.declare_parameter("use_ackermann_geometry_steering", True)
         self.declare_parameter("invert_steer_from_cmd_vel", False)
         self.declare_parameter("auto_drive_enabled", True)
         self.declare_parameter("reverse_brake_pct", 20)
@@ -65,6 +66,9 @@ class CmdVelAckermannBridgeV2Node(Node):
         if self._wheelbase_m < 1.0e-6:
             self.get_logger().warn("Invalid wheelbase_m; falling back to 0.94 m")
             self._wheelbase_m = 0.94
+        self._use_ackermann_geometry_steering = bool(
+            self.get_parameter("use_ackermann_geometry_steering").value
+        )
         self._invert_steer_from_cmd_vel = bool(
             self.get_parameter("invert_steer_from_cmd_vel").value
         )
@@ -132,6 +136,7 @@ class CmdVelAckermannBridgeV2Node(Node):
             reverse_brake_pct=self._reverse_brake_pct,
             wheelbase_m=self._wheelbase_m,
             max_steering_angle_rad=self._sim_max_steering_angle_rad,
+            use_ackermann_geometry_steering=self._use_ackermann_geometry_steering,
         )
 
         out = Twist()

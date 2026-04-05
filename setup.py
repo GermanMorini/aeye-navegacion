@@ -47,6 +47,7 @@ setup(
             'dual_gps_heading_sim = navegacion_gps.dual_gps_heading_sim:main',
             'dual_gps_heading_real = navegacion_gps.dual_gps_heading_real:main',
             'imu_pose_republisher = navegacion_gps.imu_pose_republisher:main',
+            'tracking_path_debug = navegacion_gps.tracking_path_debug:main',
         ],
     },
 )

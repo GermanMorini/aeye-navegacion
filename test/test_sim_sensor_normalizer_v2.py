@@ -125,3 +125,23 @@ def test_sim_sensor_normalizer_source_declares_yaw_auto_calibration_params() -> 
         'self.declare_parameter("gps_vertical_variance", DEFAULT_GPS_VERTICAL_VARIANCE)'
         in source_contents
     )
+    assert "from rclpy.qos import qos_profile_sensor_data" in source_contents
+    assert "self._on_imu, qos_profile_sensor_data" in source_contents
+    assert "self._on_gps, qos_profile_sensor_data" in source_contents
+    assert "self._on_lidar, qos_profile_sensor_data" in source_contents
+    assert "self._on_odom, qos_profile_sensor_data" in source_contents
+    assert "self._on_gps2, qos_profile_sensor_data" in source_contents
+    assert "self._on_calib_odom,\n                qos_profile_sensor_data" in source_contents
+
+
+def test_sim_drive_telemetry_source_uses_sensor_qos_for_bridge_inputs() -> None:
+    source_path = (
+        Path(__file__).resolve().parents[1]
+        / "navegacion_gps"
+        / "sim_drive_telemetry.py"
+    )
+    source_contents = source_path.read_text(encoding="utf-8")
+
+    assert "from rclpy.qos import qos_profile_sensor_data" in source_contents
+    assert "self._on_joint_states,\n            qos_profile_sensor_data" in source_contents
+    assert "self._on_odom, qos_profile_sensor_data" in source_contents

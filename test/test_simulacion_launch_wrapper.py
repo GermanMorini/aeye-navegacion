@@ -16,6 +16,7 @@ def test_simulacion_launch_uses_requested_defaults() -> None:
     assert "rviz_nav2_full.rviz" in launch_contents
     assert "rviz_ekf_local_tuning.rviz" in launch_contents
     assert "rviz_ekf_global_tuning.rviz" in launch_contents
+    assert "rviz_local_v2.rviz" in launch_contents
     assert "nav2_no_map_params.yaml" in launch_contents
     assert "collision_monitor.yaml" in launch_contents
 
@@ -74,6 +75,15 @@ def test_simulacion_launch_exposes_ekf_global_toggle() -> None:
     assert '"ekf_local": ekf_local' in launch_contents
     assert 'DeclareLaunchArgument("ekf_global", default_value="False")' in launch_contents
     assert '"ekf_global": ekf_global' in launch_contents
+    assert 'DeclareLaunchArgument("enable_navsat_transform", default_value="False")' in launch_contents
+    assert '"enable_navsat_transform": enable_navsat_transform' in launch_contents
+    assert 'DeclareLaunchArgument("use_sim_global_overlay", default_value="False")' in launch_contents
+    assert '"use_sim_global_overlay": use_sim_global_overlay' in launch_contents
+    assert "resolved_nav_start_delay_s = PythonExpression(" in launch_contents
+    assert '"nav_start_delay_s": resolved_nav_start_delay_s' in launch_contents
+    assert "rviz_overlay_global = os.path.join" in launch_contents
+    assert "use_sim_global_overlay" in launch_contents
+    assert "rviz_local_v2.rviz" in launch_contents
 
 
 def test_simulacion_launch_forwards_spawn_yaw_override() -> None:
@@ -98,10 +108,12 @@ def test_simulacion_launch_forwards_datum_setter_toggle() -> None:
 
     assert 'DeclareLaunchArgument("datum_setter", default_value="false")' in launch_contents
     assert '"datum_setter": datum_setter' in launch_contents
-    assert 'DeclareLaunchArgument("gps_horizontal_variance", default_value="9.0")' in launch_contents
-    assert 'DeclareLaunchArgument("gps_vertical_variance", default_value="16.0")' in launch_contents
-    assert '"gps_horizontal_variance": gps_horizontal_variance' in launch_contents
-    assert '"gps_vertical_variance": gps_vertical_variance' in launch_contents
+    assert 'DeclareLaunchArgument("gps_horizontal_variance", default_value="25.0")' in launch_contents
+    assert 'DeclareLaunchArgument("gps_vertical_variance", default_value="36.0")' in launch_contents
+    assert "resolved_gps_horizontal_variance = PythonExpression(" in launch_contents
+    assert "resolved_gps_vertical_variance = PythonExpression(" in launch_contents
+    assert '"gps_horizontal_variance": resolved_gps_horizontal_variance' in launch_contents
+    assert '"gps_vertical_variance": resolved_gps_vertical_variance' in launch_contents
 
 
 def test_simulacion_launch_declares_dual_gps_heading_before_custom_urdf() -> None:
@@ -123,6 +135,8 @@ def test_launch_sim_global_v2_wrapper_spawns_robot_facing_east() -> None:
     assert 'SPAWN_YAW_RAD="${SPAWN_YAW_RAD:-0.0}"' in wrapper_contents
     assert "spawn_yaw_rad:=${SPAWN_YAW_RAD}" in wrapper_contents
     assert 'LAUNCH_WEB_ZONE_SERVER="${LAUNCH_WEB_ZONE_SERVER:-False}"' in wrapper_contents
+    assert 'USE_SIM_GLOBAL_OVERLAY="${USE_SIM_GLOBAL_OVERLAY:-True}"' in wrapper_contents
+    assert "use_sim_global_overlay:=${USE_SIM_GLOBAL_OVERLAY}" in wrapper_contents
     assert 'USE_DUAL_GPS_HEADING="${USE_DUAL_GPS_HEADING:-true}"' in wrapper_contents
     assert 'GZ_HEADLESS="${GZ_HEADLESS:-false}"' in wrapper_contents
     assert "gz_headless:=${GZ_HEADLESS}" in wrapper_contents

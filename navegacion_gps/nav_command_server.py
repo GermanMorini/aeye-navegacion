@@ -65,6 +65,9 @@ class NavCommandServerNode(Node):
         self.declare_parameter("get_state_service", "/nav_command_server/get_state")
         self.declare_parameter("follow_waypoints_action", "follow_waypoints")
         self.declare_parameter("navigate_through_poses_action", "navigate_through_poses")
+        self.declare_parameter("multi_waypoint_action_mode", "follow_waypoints")
+        self.declare_parameter("multi_waypoint_spacing_m", 2.0)
+        self.declare_parameter("skip_near_start_waypoint_radius_m", 1.5)
 
         self.fromll_service = str(self.get_parameter("fromll_service").value)
         self.fromll_service_fallback = str(
@@ -123,6 +126,21 @@ class NavCommandServerNode(Node):
         )
         self.navigate_through_poses_action = str(
             self.get_parameter("navigate_through_poses_action").value
+        )
+        self.multi_waypoint_action_mode = str(
+            self.get_parameter("multi_waypoint_action_mode").value
+        ).strip().lower()
+        if self.multi_waypoint_action_mode not in {"follow_waypoints", "navigate_through_poses"}:
+            self.get_logger().warning(
+                "Invalid multi_waypoint_action_mode "
+                f"'{self.multi_waypoint_action_mode}', falling back to 'follow_waypoints'"
+            )
+            self.multi_waypoint_action_mode = "follow_waypoints"
+        self.multi_waypoint_spacing_m = max(
+            0.0, float(self.get_parameter("multi_waypoint_spacing_m").value)
+        )
+        self.skip_near_start_waypoint_radius_m = max(
+            0.0, float(self.get_parameter("skip_near_start_waypoint_radius_m").value)
         )
 
         self._lock = threading.Lock()
@@ -250,7 +268,10 @@ class NavCommandServerNode(Node):
             f"forward_without_goal={self.forward_cmd_vel_safe_without_goal}, "
             f"cmd_vel_final_topic={self.cmd_vel_final_topic}, "
             f"follow_waypoints_action={self.follow_waypoints_action}, "
-            f"navigate_through_poses_action={self.navigate_through_poses_action})"
+            f"navigate_through_poses_action={self.navigate_through_poses_action}, "
+            f"multi_waypoint_action_mode={self.multi_waypoint_action_mode}, "
+            f"multi_waypoint_spacing_m={self.multi_waypoint_spacing_m:.2f}, "
+            f"skip_near_start_waypoint_radius_m={self.skip_near_start_waypoint_radius_m:.2f})"
         )
         self.get_logger().info(
             "Callback groups configured (services=MutuallyExclusive, clients=Reentrant)"
@@ -825,6 +846,79 @@ class NavCommandServerNode(Node):
             return poses_list
         return poses_list[1:] + [poses_list[0]]
 
+    def _densify_waypoint_poses(self, poses: Sequence[PoseStamped]) -> List[PoseStamped]:
+        poses_list = list(poses)
+        spacing_m = float(getattr(self, "multi_waypoint_spacing_m", 0.0))
+        if spacing_m <= 0.0 or len(poses_list) <= 1:
+            return poses_list
+
+        dense_poses: List[PoseStamped] = []
+        for idx in range(len(poses_list) - 1):
+            start = poses_list[idx]
+            end = poses_list[idx + 1]
+            dx = float(end.pose.position.x - start.pose.position.x)
+            dy = float(end.pose.position.y - start.pose.position.y)
+            dz = float(end.pose.position.z - start.pose.position.z)
+            distance_m = math.hypot(dx, dy)
+            if distance_m <= 1e-6:
+                if not dense_poses:
+                    dense_poses.append(copy.deepcopy(start))
+                continue
+
+            heading_deg = math.degrees(math.atan2(dy, dx))
+            steps = max(1, int(math.ceil(distance_m / spacing_m)))
+            for step_idx in range(steps):
+                t = float(step_idx) / float(steps)
+                pose = copy.deepcopy(start)
+                pose.pose.position.x = float(start.pose.position.x + (dx * t))
+                pose.pose.position.y = float(start.pose.position.y + (dy * t))
+                pose.pose.position.z = float(start.pose.position.z + (dz * t))
+                pose.pose.orientation = self._yaw_to_quaternion(heading_deg)
+                dense_poses.append(pose)
+
+        dense_poses.append(copy.deepcopy(poses_list[-1]))
+        return dense_poses
+
+    def _drop_leading_near_start_waypoints(
+        self, waypoints: Sequence[Tuple[float, float, float]]
+    ) -> List[Tuple[float, float, float]]:
+        waypoints_list = list(waypoints)
+        radius_m = float(getattr(self, "skip_near_start_waypoint_radius_m", 0.0))
+        if radius_m <= 0.0 or len(waypoints_list) <= 1:
+            return waypoints_list
+
+        robot_pose = getattr(self, "_last_robot_pose", None)
+        if not isinstance(robot_pose, dict):
+            return waypoints_list
+        robot_lat = robot_pose.get("lat")
+        robot_lon = robot_pose.get("lon")
+        if robot_lat is None or robot_lon is None:
+            return waypoints_list
+        if not np.isfinite(float(robot_lat)) or not np.isfinite(float(robot_lon)):
+            return waypoints_list
+
+        drop_count = 0
+        for lat, lon, _yaw_deg in waypoints_list[:-1]:
+            distance_m = NavCommandServerNode._distance_between_ll_m(
+                float(robot_lat),
+                float(robot_lon),
+                float(lat),
+                float(lon),
+            )
+            if distance_m > radius_m:
+                break
+            drop_count += 1
+
+        if drop_count <= 0:
+            return waypoints_list
+
+        trimmed = waypoints_list[drop_count:]
+        self.get_logger().info(
+            "Dropped leading near-start waypoints "
+            f"(count={drop_count}, radius_m={radius_m:.2f}, remaining={len(trimmed)})"
+        )
+        return trimmed
+
     def _send_goal_from_pose(self, pose: PoseStamped, reason: str) -> Tuple[bool, str]:
         with self._lock:
             has_goal = self._current_goal_handle is not None
@@ -976,7 +1070,10 @@ class NavCommandServerNode(Node):
         self, poses: Sequence[PoseStamped], loop_enabled: bool, reason: str
     ) -> Tuple[bool, str]:
         poses_list = list(poses)
-        if len(poses_list) > 1:
+        multi_waypoint_action_mode = str(
+            getattr(self, "multi_waypoint_action_mode", "follow_waypoints")
+        ).strip().lower()
+        if len(poses_list) > 1 and multi_waypoint_action_mode == "navigate_through_poses":
             return self._send_navigate_through_poses_goal(
                 poses=poses_list,
                 loop_enabled=loop_enabled,
@@ -991,8 +1088,12 @@ class NavCommandServerNode(Node):
     def send_nav2_goals(
         self, waypoints: Sequence[Tuple[float, float, float]], loop_enabled: bool
     ) -> Tuple[bool, str]:
-        if len(waypoints) == 0:
+        waypoints_list = list(waypoints)
+        if len(waypoints_list) == 0:
             return False, "at least one waypoint is required"
+        waypoints_list = self._drop_leading_near_start_waypoints(waypoints_list)
+        if len(waypoints_list) == 0:
+            return False, "all waypoints were within the near-start skip radius"
 
         with self._lock:
             has_goal = self._current_goal_handle is not None
@@ -1013,11 +1114,20 @@ class NavCommandServerNode(Node):
             self._pending_nav_result_override = None
 
         self.get_logger().info(
-            f"SetNavGoalLL request (waypoints={len(waypoints)}, loop={bool(loop_enabled)})"
+            f"SetNavGoalLL request (waypoints={len(waypoints_list)}, loop={bool(loop_enabled)})"
         )
-        poses, err = self._convert_waypoints_to_poses(waypoints)
+        poses, err = self._convert_waypoints_to_poses(waypoints_list)
         if poses is None:
             return False, err
+        original_pose_count = len(poses)
+        if original_pose_count > 1:
+            poses = self._densify_waypoint_poses(poses)
+            if len(poses) != original_pose_count:
+                self.get_logger().info(
+                    "Densified waypoint route "
+                    f"(original={original_pose_count}, prepared={len(poses)}, "
+                    f"spacing_m={self.multi_waypoint_spacing_m:.2f})"
+                )
         ok, err = self._send_nav_goal_for_poses(
             poses=poses,
             loop_enabled=loop_enabled,
@@ -1037,8 +1147,8 @@ class NavCommandServerNode(Node):
             elif len(waypoints) >= 1:
                 with self._lock:
                     self._active_goal_target_ll = (
-                        float(waypoints[-1][0]),
-                        float(waypoints[-1][1]),
+                        float(waypoints_list[-1][0]),
+                        float(waypoints_list[-1][1]),
                     )
             return ok, err
 

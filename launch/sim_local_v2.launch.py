@@ -25,6 +25,7 @@ def generate_launch_description():
     rviz_config = LaunchConfiguration("rviz_config")
     vx_deadband_mps = LaunchConfiguration("vx_deadband_mps")
     vx_min_effective_mps = LaunchConfiguration("vx_min_effective_mps")
+    use_ackermann_geometry_steering = LaunchConfiguration("use_ackermann_geometry_steering")
     invert_steer_from_cmd_vel = LaunchConfiguration("invert_steer_from_cmd_vel")
     use_cmd_vel_ackermann_bridge = LaunchConfiguration("use_cmd_vel_ackermann_bridge")
     nav2_params_file = LaunchConfiguration("nav2_params_file")
@@ -45,14 +46,37 @@ def generate_launch_description():
     gps_vertical_variance = LaunchConfiguration("gps_vertical_variance")
     ekf_local = LaunchConfiguration("ekf_local")
     ekf_global = LaunchConfiguration("ekf_global")
+    enable_navsat_transform = LaunchConfiguration("enable_navsat_transform")
+    use_sim_global_overlay = LaunchConfiguration("use_sim_global_overlay")
     ukf = LaunchConfiguration("ukf")
     datum_setter = LaunchConfiguration("datum_setter")
     use_dual_gps_heading = LaunchConfiguration("use_dual_gps_heading")
     resolved_map_frame = PythonExpression(
         [
-            "'map' if '",
+            "'odom' if '",
+            use_sim_global_overlay,
+            "'.lower() == 'true' else ('map' if '",
             ekf_global,
-            "'.lower() == 'true' else 'odom'",
+            "'.lower() == 'true' else 'odom')",
+        ]
+    )
+    resolved_multi_waypoint_spacing_m = PythonExpression(
+        [
+            "'4.0' if '",
+            ekf_global,
+            "'.lower() == 'true' else '2.0'",
+        ]
+    )
+    resolved_goal_arrival_radius_m = PythonExpression(
+        [
+            "'0.5' if '",
+            ekf_global,
+            "'.lower() == 'true' else '0.8'",
+        ]
+    )
+    resolved_multi_waypoint_action_mode = PythonExpression(
+        [
+            "'follow_waypoints'",
         ]
     )
 
@@ -66,7 +90,10 @@ def generate_launch_description():
             DeclareLaunchArgument("use_rviz", default_value="True"),
             DeclareLaunchArgument("rviz_config", default_value=default_rviz),
             DeclareLaunchArgument("vx_deadband_mps", default_value="0.01"),
-            DeclareLaunchArgument("vx_min_effective_mps", default_value="0.35"),
+            DeclareLaunchArgument("vx_min_effective_mps", default_value="0.5"),
+            DeclareLaunchArgument(
+                "use_ackermann_geometry_steering", default_value="False"
+            ),
             DeclareLaunchArgument("invert_steer_from_cmd_vel", default_value="True"),
             DeclareLaunchArgument("use_cmd_vel_ackermann_bridge", default_value="False"),
             DeclareLaunchArgument(
@@ -97,10 +124,12 @@ def generate_launch_description():
             DeclareLaunchArgument("twist_covariance_vx", default_value="0.02"),
             DeclareLaunchArgument("twist_covariance_vy", default_value="0.02"),
             DeclareLaunchArgument("twist_covariance_yaw_rate", default_value="0.05"),
-            DeclareLaunchArgument("gps_horizontal_variance", default_value="9.0"),
-            DeclareLaunchArgument("gps_vertical_variance", default_value="16.0"),
+            DeclareLaunchArgument("gps_horizontal_variance", default_value="25.0"),
+            DeclareLaunchArgument("gps_vertical_variance", default_value="36.0"),
             DeclareLaunchArgument("ekf_local", default_value="True"),
             DeclareLaunchArgument("ekf_global", default_value="False"),
+            DeclareLaunchArgument("enable_navsat_transform", default_value="False"),
+            DeclareLaunchArgument("use_sim_global_overlay", default_value="False"),
             DeclareLaunchArgument("ukf", default_value="False"),
             DeclareLaunchArgument("datum_setter", default_value="false"),
             DeclareLaunchArgument("use_dual_gps_heading", default_value="true"),
@@ -176,6 +205,9 @@ def generate_launch_description():
                         "vx_min_effective_mps": ParameterValue(
                             vx_min_effective_mps, value_type=float
                         ),
+                        "use_ackermann_geometry_steering": ParameterValue(
+                            use_ackermann_geometry_steering, value_type=bool
+                        ),
                         "cmd_log_enabled": False,
                         "invert_steer_from_cmd_vel": ParameterValue(
                             invert_steer_from_cmd_vel, value_type=bool
@@ -210,6 +242,9 @@ def generate_launch_description():
                         ),
                         "vx_min_effective_mps": ParameterValue(
                             vx_min_effective_mps, value_type=float
+                        ),
+                        "use_ackermann_geometry_steering": ParameterValue(
+                            use_ackermann_geometry_steering, value_type=bool
                         ),
                         "max_abs_angular_z": 0.4,
                         "wheelbase_m": ParameterValue(wheelbase_m, value_type=float),
@@ -270,7 +305,12 @@ def generate_launch_description():
                         "teleop_cmd_topic": "/cmd_vel_teleop",
                         "brake_publish_count": 5,
                         "brake_publish_interval_s": 0.1,
-                        "goal_arrival_radius_m": 0.8,
+                        "goal_arrival_radius_m": ParameterValue(
+                            resolved_goal_arrival_radius_m, value_type=float
+                        ),
+                        "multi_waypoint_spacing_m": ParameterValue(
+                            resolved_multi_waypoint_spacing_m, value_type=float
+                        ),
                         "manual_cmd_timeout_s": 0.4,
                         "manual_watchdog_hz": 10.0,
                         "nav_telemetry_hz": 5.0,
@@ -280,27 +320,11 @@ def generate_launch_description():
                         "brake_service": "/nav_command_server/brake",
                         "set_manual_mode_service": "/nav_command_server/set_manual_mode",
                         "get_state_service": "/nav_command_server/get_state",
-                    }
+                        "multi_waypoint_action_mode": ParameterValue(
+                            resolved_multi_waypoint_action_mode, value_type=str
+                        ),
+                        }
                 ],
-            ),
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(
-                    os.path.join(gps_wpf_dir, "launch", "localization_v2.launch.py")
-                ),
-                launch_arguments={
-                    "use_sim_time": use_sim_time,
-                    "wheelbase_m": wheelbase_m,
-                    "invert_measured_steer_sign": invert_measured_steer_sign,
-                    "pose_covariance_xy": pose_covariance_xy,
-                    "pose_covariance_yaw": pose_covariance_yaw,
-                    "twist_covariance_vx": twist_covariance_vx,
-                    "twist_covariance_vy": twist_covariance_vy,
-                    "twist_covariance_yaw_rate": twist_covariance_yaw_rate,
-                    "ekf_local": ekf_local,
-                    "ekf_global": ekf_global,
-                    "ukf": ukf,
-                    "use_dual_gps_heading": use_dual_gps_heading,
-                }.items(),
             ),
             Node(
                 package="navegacion_gps",
@@ -326,8 +350,31 @@ def generate_launch_description():
                         "datum_call_retries": 3,
                         "datum_retry_delay_s": 0.15,
                         "auto_set_on_first_fix": True,
+                        "auto_set_fixed_coords": [-31.4858037, -64.2410570],
                     }
                 ],
+            ),
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    os.path.join(gps_wpf_dir, "launch", "localization_v2.launch.py")
+                ),
+                launch_arguments={
+                    "use_sim_time": use_sim_time,
+                    "wheelbase_m": wheelbase_m,
+                    "invert_measured_steer_sign": invert_measured_steer_sign,
+                    "pose_covariance_xy": pose_covariance_xy,
+                    "pose_covariance_yaw": pose_covariance_yaw,
+                    "twist_covariance_vx": twist_covariance_vx,
+                    "twist_covariance_vy": twist_covariance_vy,
+                    "twist_covariance_yaw_rate": twist_covariance_yaw_rate,
+                    "ekf_local": ekf_local,
+                    "ekf_global": ekf_global,
+                    "enable_navsat_transform": enable_navsat_transform,
+                    "use_sim_global_overlay": use_sim_global_overlay,
+                    "ukf": ukf,
+                    "use_dual_gps_heading": use_dual_gps_heading,
+                    "global_start_delay_s": "5.0",
+                }.items(),
             ),
             TimerAction(
                 period=nav_start_delay_s,

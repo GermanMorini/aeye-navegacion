@@ -7,6 +7,7 @@ import rclpy
 from interfaces.msg import DriveTelemetry
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import JointState
 
 
@@ -40,8 +41,15 @@ class SimDriveTelemetryNode(Node):
 
         self._latest_steer_rad: Optional[float] = None
         self._pub = self.create_publisher(DriveTelemetry, drive_telemetry_topic, 10)
-        self.create_subscription(JointState, joint_states_topic, self._on_joint_states, 10)
-        self.create_subscription(Odometry, odom_topic, self._on_odom, 10)
+        self.create_subscription(
+            JointState,
+            joint_states_topic,
+            self._on_joint_states,
+            qos_profile_sensor_data,
+        )
+        self.create_subscription(
+            Odometry, odom_topic, self._on_odom, qos_profile_sensor_data
+        )
 
         self.get_logger().info(
             "sim_drive_telemetry ready "

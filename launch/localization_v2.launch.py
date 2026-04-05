@@ -2,7 +2,7 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, OpaqueFunction, TimerAction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -27,10 +27,21 @@ def _build_localization_nodes(context):
     overlay_params = _resolve_config_file_path(
         gps_wpf_dir, "dual_gps_heading_ekf_overlay.yaml"
     )
+    sim_global_overlay_params = _resolve_config_file_path(
+        gps_wpf_dir, "dual_ekf_navsat_sim_global_overlay.yaml"
+    )
 
     use_sim_time = LaunchConfiguration("use_sim_time").perform(context) == "True"
     ekf_local = LaunchConfiguration("ekf_local").perform(context).lower() == "true"
     ekf_global = LaunchConfiguration("ekf_global").perform(context).lower() == "true"
+    enable_navsat_transform = (
+        LaunchConfiguration("enable_navsat_transform").perform(context).lower()
+        == "true"
+    )
+    use_sim_global_overlay = (
+        LaunchConfiguration("use_sim_global_overlay").perform(context).lower()
+        == "true"
+    )
     use_ukf = LaunchConfiguration("ukf").perform(context).lower() == "true"
     use_dual = (
         LaunchConfiguration("use_dual_gps_heading").perform(context).lower() == "true"
@@ -59,6 +70,9 @@ def _build_localization_nodes(context):
     twist_covariance_yaw_rate = float(
         LaunchConfiguration("twist_covariance_yaw_rate").perform(context)
     )
+    global_start_delay_s = max(
+        0.0, float(LaunchConfiguration("global_start_delay_s").perform(context))
+    )
 
     executable = "ukf_node" if use_ukf else "ekf_node"
 
@@ -67,6 +81,8 @@ def _build_localization_nodes(context):
     ekf_param_files = [base_params]
     if use_dual:
         ekf_param_files.append(overlay_params)
+    if use_sim_time and use_sim_global_overlay:
+        ekf_param_files.append(sim_global_overlay_params)
 
     publish_odom_tf = not ekf_local  # ackermann_odometry publishes TF when EKF is off
 
@@ -110,7 +126,7 @@ def _build_localization_nodes(context):
         )
 
     if ekf_global:
-        nodes.append(
+        global_nodes = [
             Node(
                 package="robot_localization",
                 executable=executable,
@@ -122,7 +138,11 @@ def _build_localization_nodes(context):
                     ("odometry/filtered", "/odometry/global"),
                 ],
             )
-        )
+        ,
+        ]
+        nodes.append(TimerAction(period=global_start_delay_s, actions=global_nodes))
+
+    if ekf_global or enable_navsat_transform:
         nodes.append(
             Node(
                 package="robot_localization",
@@ -131,7 +151,7 @@ def _build_localization_nodes(context):
                 output="screen",
                 parameters=ekf_param_files + [{"use_sim_time": use_sim_time}],
                 remappings=[
-                    ("odometry/filtered", "/odometry/global"),
+                    ("odometry/filtered", "/odometry/local"),
                 ],
             )
         )
@@ -157,8 +177,11 @@ def generate_launch_description():
             DeclareLaunchArgument("twist_covariance_yaw_rate", default_value="0.05"),
             DeclareLaunchArgument("ekf_local", default_value="True"),
             DeclareLaunchArgument("ekf_global", default_value="False"),
+            DeclareLaunchArgument("enable_navsat_transform", default_value="False"),
+            DeclareLaunchArgument("use_sim_global_overlay", default_value="False"),
             DeclareLaunchArgument("ukf", default_value="False"),
             DeclareLaunchArgument("use_dual_gps_heading", default_value="false"),
+            DeclareLaunchArgument("global_start_delay_s", default_value="0.0"),
             OpaqueFunction(function=_build_localization_nodes),
         ]
     )
