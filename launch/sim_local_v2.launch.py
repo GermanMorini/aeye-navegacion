@@ -12,7 +12,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 def generate_launch_description():
     gps_wpf_dir = get_package_share_directory("navegacion_gps")
-    default_rviz = os.path.join(gps_wpf_dir, "config", "rviz_local_v2.rviz")
+    default_rviz = os.path.join(gps_wpf_dir, "config", "rviz_ekf_local_tuning.rviz")
     keepout_mask_yaml = os.path.join(gps_wpf_dir, "config", "keepout_mask.yaml")
 
     use_sim_time = LaunchConfiguration("use_sim_time")
@@ -42,6 +42,9 @@ def generate_launch_description():
     ekf_global = LaunchConfiguration("ekf_global")
     ukf = LaunchConfiguration("ukf")
     datum_setter = LaunchConfiguration("datum_setter")
+    resolved_map_frame = PythonExpression(
+        ["'map' if '", ekf_global, "'.lower() == 'true' else 'odom'"]
+    )
 
     return LaunchDescription(
         [
@@ -62,7 +65,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "collision_monitor_params_file",
-                default_value=os.path.join(gps_wpf_dir, "config", "collision_monitor_v2.yaml"),
+                default_value=os.path.join(gps_wpf_dir, "config", "collision_monitor.yaml"),
             ),
             DeclareLaunchArgument("keepout_mask_yaml", default_value=keepout_mask_yaml),
             DeclareLaunchArgument(
@@ -213,7 +216,7 @@ def generate_launch_description():
                         "fromll_service": "/fromLL",
                         "fromll_service_fallback": "/navsat_transform/fromLL",
                         "fromll_wait_timeout_s": 2.0,
-                        "map_frame": "odom",
+                        "map_frame": resolved_map_frame,
                         "gps_topic": "/gps/fix",
                         "cmd_vel_safe_topic": "/cmd_vel_safe",
                         "cmd_vel_final_topic": "/cmd_vel_final",
@@ -292,7 +295,8 @@ def generate_launch_description():
                             "nav2_params_file": nav2_params_file,
                             "collision_monitor_params_file": collision_monitor_params_file,
                             "keepout_mask_yaml": keepout_mask_yaml_arg,
-                            "keepout_mask_frame": "map",
+                            "map_frame": resolved_map_frame,
+                            "keepout_mask_frame": resolved_map_frame,
                         }.items(),
                     )
                 ],

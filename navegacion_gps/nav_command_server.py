@@ -42,6 +42,7 @@ class NavCommandServerNode(Node):
         self.declare_parameter("fromll_retry_delay_s", 0.15)
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("gps_topic", "/gps/fix")
+        self.declare_parameter("gps_fix_timeout_s", 2.0)
         self.declare_parameter("cmd_vel_safe_topic", "/cmd_vel_safe")
         self.declare_parameter("cmd_vel_final_topic", "/cmd_vel_final")
         self.declare_parameter("forward_cmd_vel_safe_without_goal", False)
@@ -78,6 +79,9 @@ class NavCommandServerNode(Node):
         )
         self.map_frame = str(self.get_parameter("map_frame").value)
         self.gps_topic = str(self.get_parameter("gps_topic").value)
+        self.gps_fix_timeout_s = max(
+            0.1, float(self.get_parameter("gps_fix_timeout_s").value)
+        )
         self.cmd_vel_safe_topic = str(self.get_parameter("cmd_vel_safe_topic").value)
         self.cmd_vel_final_topic = str(self.get_parameter("cmd_vel_final_topic").value)
         self.forward_cmd_vel_safe_without_goal = bool(
@@ -126,6 +130,7 @@ class NavCommandServerNode(Node):
         self._auto_mode = "idle"
         self._collision_stop_active = False
         self._last_robot_pose: Optional[Dict[str, float]] = None
+        self._last_gps_fix_monotonic: Optional[float] = None
         self._last_telemetry_sent: Optional[float] = None
         self._loop_waypoint_poses: List[PoseStamped] = []
         self._loop_original_poses: List[PoseStamped] = []
@@ -223,6 +228,9 @@ class NavCommandServerNode(Node):
         self._manual_watchdog_timer = self.create_timer(
             1.0 / float(self.manual_watchdog_hz), self._manual_watchdog_tick
         )
+        self._telemetry_timer = self.create_timer(
+            1.0 / float(self.nav_telemetry_hz), self._telemetry_timer_tick
+        )
         self.get_logger().info(
             "Nav command server ready "
             f"(set_goal={self.set_goal_service}, cancel={self.cancel_goal_service}, "
@@ -246,6 +254,25 @@ class NavCommandServerNode(Node):
                 return None
             time.sleep(0.01)
         return None
+
+    def _telemetry_timer_tick(self) -> None:
+        self._publish_telemetry(force=False)
+
+    def _gps_pose_payload_locked(
+        self,
+        now_monotonic: Optional[float] = None,
+    ) -> Tuple[Optional[Dict[str, float]], bool, float]:
+        pose = getattr(self, "_last_robot_pose", None)
+        stamp = getattr(self, "_last_gps_fix_monotonic", None)
+        if pose is None or stamp is None:
+            return None, False, float("nan")
+
+        now_value = float(now_monotonic) if now_monotonic is not None else time.monotonic()
+        age_s = max(0.0, now_value - float(stamp))
+        timeout_s = max(0.1, float(getattr(self, "gps_fix_timeout_s", 2.0)))
+        if age_s > timeout_s:
+            return None, False, age_s
+        return dict(pose), True, age_s
 
     def _call_from_ll(self, lat: float, lon: float) -> Optional[Tuple[float, float, float]]:
         for attempt in range(self.fromll_call_retries):
@@ -493,7 +520,9 @@ class NavCommandServerNode(Node):
             goal_active = self._is_navigating
             cmd_vel_safe = self._cmd_vel_safe_payload_locked()
             manual_control = self._manual_control_payload_locked()
-            robot_pose = self._last_robot_pose
+            robot_pose, _robot_pose_available, _gps_age_s = (
+                NavCommandServerNode._gps_pose_payload_locked(self)
+            )
 
         response.ok = True
         response.error = ""
@@ -524,17 +553,26 @@ class NavCommandServerNode(Node):
             goal_active = self._is_navigating
             manual_control = self._manual_control_payload_locked()
             cmd_vel_safe = self._cmd_vel_safe_payload_locked()
-            robot_pose = self._last_robot_pose
+            robot_pose, robot_pose_available, gps_age_s = (
+                NavCommandServerNode._gps_pose_payload_locked(self, now_monotonic=now)
+            )
             nav_result = self._nav_result_payload_locked()
+            auto_mode = str(self._auto_mode)
+            collision_stop_active = bool(self._collision_stop_active)
 
         msg = NavTelemetry()
         msg.goal_active = bool(goal_active)
         msg.manual_enabled = bool(manual_control["enabled"])
+        msg.auto_mode = auto_mode
         msg.manual_linear_x_cmd = float(manual_control["linear_x_cmd"])
         msg.manual_angular_z_cmd = float(manual_control["angular_z_cmd"])
         msg.cmd_vel_available = bool(cmd_vel_safe["available"])
         msg.cmd_vel_linear_x = float(cmd_vel_safe["linear_x"])
         msg.cmd_vel_angular_z = float(cmd_vel_safe["angular_z"])
+        msg.collision_stop_active = bool(collision_stop_active)
+        msg.robot_pose_available = bool(robot_pose_available)
+        msg.gps_fix_available = bool(robot_pose_available)
+        msg.gps_age_s = float(gps_age_s) if np.isfinite(gps_age_s) else float("nan")
         if robot_pose is None:
             msg.robot_lat = float("nan")
             msg.robot_lon = float("nan")
@@ -552,6 +590,7 @@ class NavCommandServerNode(Node):
         pose = {"lat": float(msg.latitude), "lon": float(msg.longitude)}
         with self._lock:
             self._last_robot_pose = pose
+            self._last_gps_fix_monotonic = time.monotonic()
         self._publish_telemetry(force=False)
 
     def _on_cmd_vel_safe(self, msg: Twist) -> None:

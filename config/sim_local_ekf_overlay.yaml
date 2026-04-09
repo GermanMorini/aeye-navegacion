@@ -1,0 +1,15 @@
+ekf_filter_node_odom:
+  ros__parameters:
+    # In sim local, use Gazebo odom pose/yaw as the primary heading reference and
+    # keep the IMU only for yaw rate. Absolute IMU yaw is expressed in the world
+    # frame and can drift from the relative odom frame used by Nav2/RViz.
+    odom1_config: [true, true, false,
+                   false, false, true,
+                   false, false, false,
+                   false, false, false,
+                   false, false, false]
+    imu0_config: [false, false, false,
+                  false, false, false,
+                  false, false, false,
+                  false, false, true,
+                  false, false, false]

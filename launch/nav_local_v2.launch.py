@@ -29,7 +29,7 @@ def generate_launch_description():
     gps_wpf_dir = get_package_share_directory("navegacion_gps")
     default_nav2_params = _resolve_config_file_path(gps_wpf_dir, "nav2_no_map_params.yaml")
     default_collision_monitor_params = _resolve_config_file_path(
-        gps_wpf_dir, "collision_monitor_v2.yaml"
+        gps_wpf_dir, "collision_monitor.yaml"
     )
     bt_xml = _resolve_config_file_path(
         gps_wpf_dir, "navigate_to_pose_w_replanning_and_recovery_no_spin.xml"
@@ -45,6 +45,7 @@ def generate_launch_description():
     collision_monitor_params_file = LaunchConfiguration("collision_monitor_params_file")
     keepout_mask_yaml = LaunchConfiguration("keepout_mask_yaml")
     keepout_mask_frame = LaunchConfiguration("keepout_mask_frame")
+    map_frame = LaunchConfiguration("map_frame")
     configured_nav2_params = ParameterFile(
         RewrittenYaml(
             source_file=nav2_params_file,
@@ -52,6 +53,12 @@ def generate_launch_description():
             param_rewrites={
                 "default_nav_to_pose_bt_xml": bt_xml,
                 "default_nav_through_poses_bt_xml": bt_through_poses_xml,
+                "bt_navigator.ros__parameters.global_frame": map_frame,
+                "bt_navigator.ros__parameters.odom_topic": "/odometry/local",
+                "behavior_server.ros__parameters.global_frame": map_frame,
+                "controller_server.ros__parameters.odom_topic": "/odometry/local",
+                "local_costmap.local_costmap.ros__parameters.global_frame": map_frame,
+                "global_costmap.global_costmap.ros__parameters.global_frame": map_frame,
             },
             convert_types=True,
         ),
@@ -81,6 +88,7 @@ def generate_launch_description():
                 default_value=default_collision_monitor_params,
             ),
             DeclareLaunchArgument("keepout_mask_yaml", default_value=default_keepout_mask),
+            DeclareLaunchArgument("map_frame", default_value="map"),
             DeclareLaunchArgument("keepout_mask_frame", default_value="map"),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(keepout_launch),

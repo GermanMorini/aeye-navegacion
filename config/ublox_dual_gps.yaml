@@ -1,0 +1,33 @@
+# ublox_dual_gps.yaml
+#
+# Configuracion del ZED-F9P adicional usado para heading por moving baseline.
+# Si la geometria real cambia, ajustar yaw_offset_rad en dual_gps_heading_hw.launch.py
+# o el frame_id segun corresponda.
+
+ublox_rover:
+  ros__parameters:
+    device: /dev/ttyUSB1
+    frame_id: base_link
+    uart1:
+      baudrate: 115200
+
+    publish_all: false
+    publish:
+      nav:
+        heading: true
+        pvt: false
+        relposned: false
+      rxm:
+        rtcm: false
+      inf:
+        error: true
+        warning: true
+        notice: false
+        debug: false
+        test: false
+
+    rate: 10.0
+    dynamic_model: portable
+
+    rtcm:
+      rate: 1.0

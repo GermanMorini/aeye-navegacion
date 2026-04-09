@@ -25,6 +25,9 @@ def _resolve_config_file_path(package_share_dir: str, filename: str) -> str:
 def generate_launch_description():
     gps_wpf_dir = get_package_share_directory("navegacion_gps")
     dual_ekf_params_file = _resolve_config_file_path(gps_wpf_dir, "dual_ekf_navsat_params.yaml")
+    sim_local_ekf_overlay_file = _resolve_config_file_path(
+        gps_wpf_dir, "sim_local_ekf_overlay.yaml"
+    )
 
     use_sim_time = LaunchConfiguration("use_sim_time")
     drive_telemetry_topic = LaunchConfiguration("drive_telemetry_topic")
@@ -143,11 +146,11 @@ def generate_launch_description():
                 condition=IfCondition(ekf_local),
                 parameters=[
                     dual_ekf_params_file,
+                    sim_local_ekf_overlay_file,
                     {"use_sim_time": ParameterValue(use_sim_time, value_type=bool)},
                 ],
                 remappings=[
                     ("imu/data", imu_topic),
-                    ("/odom", "/wheel/odometry"),
                     ("odometry/filtered", "/odometry/local"),
                 ],
             ),

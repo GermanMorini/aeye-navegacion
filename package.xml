@@ -20,6 +20,7 @@
   <depend>mapviz_plugins</depend>
   <depend>tile_map</depend>
   <depend>rclpy</depend>
+  <depend>action_msgs</depend>
   <depend>ament_index_python</depend>
   <depend>gazebo_ros</depend>
   <depend>sensor_msgs</depend>
@@ -28,6 +29,7 @@
   <depend>pointcloud_to_laserscan</depend>
   <depend>nav_msgs</depend>
   <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
   <depend>tf2_ros</depend>
   <depend>visualization_msgs</depend>
   <depend>interfaces</depend>

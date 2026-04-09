@@ -4,7 +4,7 @@ import time
 from geometry_msgs.msg import Twist
 from nav2_msgs.msg import CollisionMonitorState
 
-from interfaces.msg import CmdVelFinal
+from interfaces.msg import CmdVelFinal, NavTelemetry
 from navegacion_gps.nav_command_server import NavCommandServerNode
 
 
@@ -132,3 +132,64 @@ def test_set_manual_mode_enables_even_if_cancel_fails() -> None:
     assert node._manual_enabled is True
     assert node._is_navigating is False
     assert node.cancel_calls == 1
+
+
+class _FakeTelemetryPublisher:
+    def __init__(self) -> None:
+        self.messages = []
+
+    def publish(self, msg: NavTelemetry) -> None:
+        self.messages.append(msg)
+
+
+class _FakeTelemetryNode:
+    _manual_control_payload_locked = NavCommandServerNode._manual_control_payload_locked
+    _cmd_vel_safe_payload_locked = NavCommandServerNode._cmd_vel_safe_payload_locked
+    _nav_result_payload_locked = NavCommandServerNode._nav_result_payload_locked
+    _gps_pose_payload_locked = NavCommandServerNode._gps_pose_payload_locked
+    _publish_telemetry = NavCommandServerNode._publish_telemetry
+
+    def __init__(self, *, gps_age_s: float, gps_timeout_s: float) -> None:
+        self._lock = threading.Lock()
+        self.nav_telemetry_hz = 100.0
+        self.gps_fix_timeout_s = float(gps_timeout_s)
+        self._last_telemetry_sent = None
+        self._is_navigating = False
+        self._manual_enabled = False
+        self._last_manual_cmd = CmdVelFinal()
+        self._last_cmd_vel_safe = None
+        self._last_robot_pose = {"lat": -31.0, "lon": -64.0}
+        self._last_gps_fix_monotonic = time.monotonic() - float(gps_age_s)
+        self._auto_mode = "idle"
+        self._collision_stop_active = False
+        self._last_nav_result_status = 0
+        self._last_nav_result_text = "idle"
+        self._nav_result_event_id = 0
+        self._telemetry_pub = _FakeTelemetryPublisher()
+
+
+def test_publish_telemetry_marks_robot_pose_available_for_fresh_gps_fix() -> None:
+    node = _FakeTelemetryNode(gps_age_s=0.2, gps_timeout_s=2.0)
+
+    node._publish_telemetry(force=True)
+
+    assert len(node._telemetry_pub.messages) == 1
+    msg = node._telemetry_pub.messages[0]
+    assert msg.robot_pose_available is True
+    assert msg.gps_fix_available is True
+    assert msg.robot_lat == -31.0
+    assert msg.robot_lon == -64.0
+
+
+def test_publish_telemetry_clears_robot_pose_for_stale_gps_fix() -> None:
+    node = _FakeTelemetryNode(gps_age_s=5.0, gps_timeout_s=2.0)
+
+    node._publish_telemetry(force=True)
+
+    assert len(node._telemetry_pub.messages) == 1
+    msg = node._telemetry_pub.messages[0]
+    assert msg.robot_pose_available is False
+    assert msg.gps_fix_available is False
+    assert msg.gps_age_s >= 5.0
+    assert msg.robot_lat != msg.robot_lat
+    assert msg.robot_lon != msg.robot_lon

@@ -66,7 +66,9 @@ def test_sim_local_v2_launch_forces_keepout_mask_frame_to_map() -> None:
     )
     launch_contents = launch_path.read_text(encoding="utf-8")
 
-    assert '"keepout_mask_frame": "map"' in launch_contents
+    assert 'resolved_map_frame = PythonExpression(' in launch_contents
+    assert '"map_frame": resolved_map_frame' in launch_contents
+    assert '"keepout_mask_frame": resolved_map_frame' in launch_contents
 
 
 def test_nav_local_v2_launch_defaults_keepout_mask_frame_to_map() -> None:
@@ -75,8 +77,23 @@ def test_nav_local_v2_launch_defaults_keepout_mask_frame_to_map() -> None:
     )
     launch_contents = launch_path.read_text(encoding="utf-8")
 
+    assert 'DeclareLaunchArgument("map_frame", default_value="map")' in launch_contents
     assert 'DeclareLaunchArgument("keepout_mask_frame", default_value="map")' in launch_contents
     assert '"keepout_mask_frame": keepout_mask_frame' in launch_contents
+
+
+def test_nav_local_v2_launch_rewrites_nav2_global_frame() -> None:
+    launch_path = (
+        Path(__file__).resolve().parents[1] / "launch" / "nav_local_v2.launch.py"
+    )
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert '"bt_navigator.ros__parameters.global_frame": map_frame' in launch_contents
+    assert '"bt_navigator.ros__parameters.odom_topic": "/odometry/local"' in launch_contents
+    assert '"behavior_server.ros__parameters.global_frame": map_frame' in launch_contents
+    assert '"controller_server.ros__parameters.odom_topic": "/odometry/local"' in launch_contents
+    assert '"local_costmap.local_costmap.ros__parameters.global_frame": map_frame' in launch_contents
+    assert '"global_costmap.global_costmap.ros__parameters.global_frame": map_frame' in launch_contents
 
 
 def test_sim_local_v2_launch_sets_imu_yaw_auto_calibration_defaults() -> None:
@@ -90,3 +107,12 @@ def test_sim_local_v2_launch_sets_imu_yaw_auto_calibration_defaults() -> None:
     assert '"imu_yaw_calib_odom_topic": "/odom_raw"' in launch_contents
     assert '"imu_yaw_calib_speed_threshold_mps": 0.05' in launch_contents
     assert '"imu_yaw_calib_timeout_s": 3.0' in launch_contents
+
+
+def test_sim_local_v2_launch_uses_existing_local_rviz_config() -> None:
+    launch_path = (
+        Path(__file__).resolve().parents[1] / "launch" / "sim_local_v2.launch.py"
+    )
+    launch_contents = launch_path.read_text(encoding="utf-8")
+
+    assert 'rviz_ekf_local_tuning.rviz' in launch_contents
